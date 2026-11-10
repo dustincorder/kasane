@@ -1,8 +1,10 @@
 <div align="center">
 
-# Kanade
+<img src="assets/logo.svg" alt="Kasane Logo" width="128" height="128" />
 
-**An independent music client for Linux and Android, featuring YouTube Music integration, a local audio library, personalized recommendations, and Automix.**
+# Kasane
+
+**カサネ — An open-source music player for Linux and Android, featuring YouTube Music integration, with local playback, personalized recommendations, and Automix planned.**
 
 </div>
 
@@ -10,70 +12,76 @@
 
 ## About
 
-**Kanade** is a modern, lightweight music player built with performance, privacy, and listening experience in mind. It unifies YouTube Music streaming with your local offline library, intelligent queue management, acoustic feature analysis, and a dedicated Automix engine.
+**Kasane** (カサネ) is a modern, lightweight music client built with a focus on performance, clean aesthetics, and respect for user control. It unifies YouTube Music streaming with your upcoming local audio library, persistent offline metadata, and an acoustic feature analysis engine.
 
-Designed as an alternative to bloated web wrappers and generic streaming clients, Kanade provides a native, responsive interface without unnecessary background overhead or intrusive elements.
-
----
-
-## Key Features
-
-### Core Playback
-- **YouTube Music Streaming** — Fast search, artist catalog browsing, and playback from YouTube Music.
-- **Local Audio Library** — Scan and play local music files with offline metadata parsing and instant playback.
-- **Persistent Storage** — Local SQLite database for listening history, favorites, and playlists without remote telemetry.
-- **Original Dark Interface** — Focused, clean UI engineered for desktop and touch screens alike.
-
-### In Active Development
-- **Acoustic Feature Analysis** — Native DSP feature extraction (BPM, key estimation, energy curves, loudness) without cloud dependency.
-- **Automix Engine** — Harmonic and phrase-aware transitions between tracks, going beyond basic crossfades.
-- **Personalized Recommendations** — Context-aware track suggestions based on listening history and preference profiles.
-- **Seto Assistant** — An integrated, lightweight music companion to explore and organize your library.
-- **Cross-Device Sync** — Local-first library and listening state synchronization across devices.
-- **Last.fm Integration** — Scrobbling and track status updates.
+Designed from the ground up to replace heavy web wrappers and cluttered commercial interfaces, Kasane provides responsive native interfaces for desktop and touch devices without telemetry, intrusive ads, or unnecessary background overhead.
 
 ---
 
-## Platforms
+## Features
 
-| Platform | Status | Audio Pipeline |
-|---|---|---|
-| **Linux** | In development | Native desktop audio |
-| **Android** | In development | Native Media3 session & background playback |
+### Implemented & Ready
+- **YouTube Music Streaming** — Fast InnerTube-powered music search and direct stream playback.
+- **Persistent Data Store** — Local SQLite storage for listening history and favorites with deduplication.
+- **Native Android Audio Service** — Full background playback via AndroidX Media3 and ExoPlayer with MediaSession integration.
+- **Custom Minimalist Dark Interface** — Slate/onyx design calibrated for OLED displays and high typographic contrast.
+
+### Planned & In Development
+- **Local Audio Library** — Offline audio file indexing, tag extraction, and unified local/cloud playlists.
+- **Offline Stream Caching** — Automatic caching of streamed tracks for seamless offline playback.
+- **Automix Engine** — Phrase-aware, harmonic mixing and BPM-matched transitions beyond simple crossfading.
+- **Personalized Recommendations** — On-device preference profiling without sending listening habits to third parties.
+- **Synchronized Lyrics** — Live lyrics display and translation support.
 
 ---
 
-## Technology
+## Supported Platforms
 
-Kanade is built with a modular, local-first architecture:
+| Platform | Architecture | Audio Pipeline | Status |
+|---|---|---|---|
+| **Android** | Kotlin, Jetpack Compose, Room | AndroidX Media3 / ExoPlayer | In active development |
+| **Linux** | Rust, Tauri 2, Svelte 5, SQLite | Native desktop audio pipeline | In active development |
 
-- **Rust** — Core domain logic, playback pipeline, audio analysis, and database management.
-- **Tauri 2** — Lightweight cross-platform native application shell.
-- **Svelte 5 & TypeScript** — Reactive, modern user interface.
-- **SQLite** — Local metadata, favorites, history, and cache storage.
+---
+
+## Technology Stack
+
+Kasane is engineered as a local-first application using platform-appropriate native technologies:
+
+- **Android Client**:
+  - **Language & UI**: 100% Kotlin with Jetpack Compose declarative UI.
+  - **Audio Engine**: AndroidX Media3 (`MediaSessionService` + `ExoPlayer`).
+  - **Local Persistence**: Room SQLite.
+  - **Networking**: OkHttpClient with optimized InnerTube client profiles.
+
+- **Linux Client**:
+  - **Core & Audio**: Rust workspace (`vibe-audio`, `vibe-core`, `vibe-db`, `vibe-providers`).
+  - **Shell & IPC**: Tauri 2.
+  - **Interface**: Svelte 5 (Runes), TypeScript, and Tailwind CSS.
+  - **Database**: `rusqlite`.
 
 ---
 
 ## Roadmap
 
-Kanade follows an incremental development roadmap:
+Development follows a focused, iterative path:
 
-1. **Foundations** — Rust workspace core, unified provider abstractions, and responsive interface.
-2. **Audio Pipeline** — Gapless playback, system media integration (MPRIS on Linux, Media3 on Android), and local file scanning.
-3. **Automix & DSP Engine** — Live beat grid alignment, harmonic key matching, and transition curve planning.
-4. **Music Intelligence** — Offline preference profiling and recommendation provider hooks.
-5. **Ecosystem & Polish** — Device synchronization and Last.fm scrobbling.
+1. **Foundations & Core Streaming** *(Current)* — Stable YouTube Music playback, clean native UI, responsive search, and persistent history.
+2. **Offline & Local Library** — Device audio scanning, stream caching, and unified playback queues.
+3. **Now Playing Experience** — Full-screen player sheet, gesture controls, and synchronized lyrics.
+4. **DSP & Automix** — On-device beat tracking, harmonic key analysis, and smooth phrase transitions.
+5. **Intelligent Curation** — Local recommendation models and smart playlist generation.
 
 ---
 
 ## Downloads
 
-> Kanade is under active development. Public builds are not available yet.
+> Kasane is under active development. Official release binaries are not yet published.
 
-Release packages will be published on the [GitHub Releases](https://github.com/dustincorder/kanade/releases) page once ready.
+Pre-built packages (`.apk` for Android, native packages for Linux) will be published under [GitHub Releases](https://github.com/dustincorder/kasane/releases) once the first milestone is complete.
 
 ---
 
 ## Open Source
 
-Kanade is an open-source project. Licensing details will be officially announced as development approaches its first public milestone.
+Kasane is an open-source project. Licensing and contribution guidelines will be formalized as development nears its initial release.
