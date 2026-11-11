@@ -23,7 +23,7 @@ fun ProfileScreen(state: AccountState, onSignOut: () -> Unit, onRetry: () -> Uni
     var showSignIn by remember { mutableStateOf(false) }
     val context = LocalContext.current
     if (showSignIn) AlertDialog(onDismissRequest = { showSignIn = false; onCancel() },
-        title = { Text("YouTube Music sign-in") }, text = { Text(SignInAvailability.reason) },
+        title = { Text("Account access is not available yet") }, text = { Text(SignInAvailability.reason) },
         confirmButton = { TextButton(onClick = { showSignIn = false; onCancel() }) { Text("Continue as guest") } })
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -47,7 +47,7 @@ fun ProfileScreen(state: AccountState, onSignOut: () -> Unit, onRetry: () -> Uni
             else -> Unit
         }
         if (account == null) {
-            Button(onClick = { showSignIn = true }, enabled = state != AccountState.Checking) { Text("Sign in options", color = Gray950) }
+            Button(onClick = { showSignIn = true }, enabled = state != AccountState.Checking) { Text("Why can't I sign in?", color = Gray950) }
         } else {
             OutlinedButton(onClick = onSignOut) { Text("Sign out", color = AccentRose) }
         }

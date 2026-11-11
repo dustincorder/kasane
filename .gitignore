@@ -35,6 +35,12 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.key
+secrets.properties
 
 # Temporary and logs
 *.log
@@ -43,3 +49,4 @@ brain/
 
 # Codex local state
 .codex/
+.impeccable/

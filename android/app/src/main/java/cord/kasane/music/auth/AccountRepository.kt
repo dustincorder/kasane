@@ -66,5 +66,5 @@ class AccountRepository(private val store: SessionStore,
 }
 
 object SignInAvailability {
-    const val reason = "Account sign-in is not available in this build. YouTube Music uses a web session that cannot be obtained from a normal Google ID token. A compatible, verified browser authorization flow is still required. You can search, browse and listen as a guest."
+    const val reason = "Kasane cannot sign in to a YouTube Music account yet. Google's supported Android sign-in returns OAuth tokens, but the current YouTube Music catalog provider requires a separate web session that Google does not expose through that flow. Kasane does not read browser cookies or collect Google credentials. Search, browsing, local favorites, history, and guest playback remain available."
 }
