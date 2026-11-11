@@ -1,0 +1,15 @@
+[package]
+name = "vibe-audio"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+vibe-core = { path = "../vibe-core" }
+rodio.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+symphonia = { version = "0.5", features = ["all"] }

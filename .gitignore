@@ -1,0 +1,45 @@
+# Rust
+/target
+
+# Node / Frontend
+node_modules
+dist
+dist-ssr
+*.local
+.npm
+
+# Tauri
+src-tauri/target
+src-tauri/gen
+
+# Android
+.gradle/
+.kotlin/
+build/
+*.apk
+*.aab
+local.properties
+
+# OS & Editors
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Temporary and logs
+*.log
+scratch/
+brain/
+
+# Codex local state
+.codex/

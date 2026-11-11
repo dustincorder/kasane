@@ -1,0 +1,322 @@
+{
+  "songs": {
+    "musicResponsiveListItemRenderer": {
+      "flexColumns": [
+        {
+          "musicResponsiveListItemFlexColumnRenderer": {
+            "text": {
+              "runs": [
+                {
+                  "text": "Let Down",
+                  "navigationEndpoint": {
+                    "clickTrackingParams": "COMCEOFnGAAiEwiX5-yUjYCYAxVhgvQHHUoOOtWaAQMQ9CTKAQTHNupI",
+                    "watchEndpoint": {
+                      "videoId": "ZVgHPSyEIqk",
+                      "watchEndpointMusicSupportedConfigs": {
+                        "watchEndpointMusicConfig": {
+                          "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+          }
+        },
+        {
+          "musicResponsiveListItemFlexColumnRenderer": {
+            "text": {
+              "runs": [
+                {
+                  "text": "Radiohead",
+                  "navigationEndpoint": {
+                    "clickTrackingParams": "COMCEOFnGAAiEwiX5-yUjYCYAxVhgvQHHUoOOtXKAQTHNupI",
+                    "browseEndpoint": {
+                      "browseId": "UCr_iyUANcn9OX_yy9piYoLw",
+                      "browseEndpointContextSupportedConfigs": {
+                        "browseEndpointContextMusicConfig": {
+                          "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "text": " • "
+                },
+                {
+                  "text": "OK Computer OKNOTOK 1997 2017",
+                  "navigationEndpoint": {
+                    "clickTrackingParams": "COMCEOFnGAAiEwiX5-yUjYCYAxVhgvQHHUoOOtXKAQTHNupI",
+                    "browseEndpoint": {
+                      "browseId": "MPREb_b9Yfli6Cg79",
+                      "browseEndpointContextSupportedConfigs": {
+                        "browseEndpointContextMusicConfig": {
+                          "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "text": " • "
+                },
+                {
+                  "text": "5:00"
+                }
+              ],
+              "accessibility": {
+                "accessibilityData": {
+                  "label": "Radiohead • OK Computer OKNOTOK 1997 2017 • 5 minutes"
+                }
+              }
+            },
+            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+          }
+        },
+        {
+          "musicResponsiveListItemFlexColumnRenderer": {
+            "text": {
+              "runs": [
+                {
+                  "text": "226M plays"
+                }
+              ],
+              "accessibility": {
+                "accessibilityData": {
+                  "label": "226 million plays"
+                }
+              }
+            },
+            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+          }
+        }
+      ],
+      "playlistItemData": {
+        "videoId": "ZVgHPSyEIqk"
+      },
+      "thumbnail": {
+        "musicThumbnailRenderer": {
+          "thumbnail": {
+            "thumbnails": [
+              {
+                "url": "https://yt3.googleusercontent.com/gdMTA2cTkNFr6COYNygeVpgIpxR2yNg5MjaX02OQqmsU6NlymcR2mqWR0UZe2HaBYVSTHU8lIQamafQC=w60-h60-l90-rj",
+                "width": 60,
+                "height": 60
+              },
+              {
+                "url": "https://yt3.googleusercontent.com/gdMTA2cTkNFr6COYNygeVpgIpxR2yNg5MjaX02OQqmsU6NlymcR2mqWR0UZe2HaBYVSTHU8lIQamafQC=w120-h120-l90-rj",
+                "width": 120,
+                "height": 120
+              }
+            ]
+          },
+          "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+          "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT",
+          "trackingParams": "CPQCEIS_AiITCJfn7JSNgJgDFWGC9AcdSg461Q=="
+        }
+      }
+    }
+  },
+  "home": {
+    "musicResponsiveListItemRenderer": {
+      "flexColumns": [
+        {
+          "musicResponsiveListItemFlexColumnRenderer": {
+            "text": {
+              "runs": [
+                {
+                  "text": "Beat It",
+                  "navigationEndpoint": {
+                    "clickTrackingParams": "CNAFEMn0AhgAIhMI0_OVlY2AmAMVmOB7AB1HxAlamgEDQPkFygEEN5EGWA==",
+                    "watchEndpoint": {
+                      "videoId": "kOn-HdEg6AQ",
+                      "playlistId": "RDAMVMkOn-HdEg6AQ",
+                      "params": "wAEB",
+                      "loggingContext": {
+                        "vssLoggingContext": {
+                          "serializedContextData": "GhFSREFNVk1rT24tSGRFZzZBUQ%3D%3D"
+                        }
+                      },
+                      "watchEndpointMusicSupportedConfigs": {
+                        "watchEndpointMusicConfig": {
+                          "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+          }
+        },
+        {
+          "musicResponsiveListItemFlexColumnRenderer": {
+            "text": {
+              "runs": [
+                {
+                  "text": "Michael Jackson",
+                  "navigationEndpoint": {
+                    "clickTrackingParams": "CNAFEMn0AhgAIhMI0_OVlY2AmAMVmOB7AB1HxAlaygEEN5EGWA==",
+                    "browseEndpoint": {
+                      "browseId": "UCoIOOL7QKuBhQHVKL8y7BEQ",
+                      "browseEndpointContextSupportedConfigs": {
+                        "browseEndpointContextMusicConfig": {
+                          "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "text": " • "
+                },
+                {
+                  "text": "2.2B plays"
+                }
+              ],
+              "accessibility": {
+                "accessibilityData": {
+                  "label": "Michael Jackson • 2.2 billion plays"
+                }
+              }
+            },
+            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_HIGH"
+          }
+        },
+        {
+          "musicResponsiveListItemFlexColumnRenderer": {
+            "text": {
+              "runs": [
+                {
+                  "text": "Thriller",
+                  "navigationEndpoint": {
+                    "clickTrackingParams": "CNAFEMn0AhgAIhMI0_OVlY2AmAMVmOB7AB1HxAlaygEEN5EGWA==",
+                    "browseEndpoint": {
+                      "browseId": "MPREb_dqWTncCjkSp",
+                      "params": "ggMEgAL5BQ%3D%3D",
+                      "browseEndpointContextSupportedConfigs": {
+                        "browseEndpointContextMusicConfig": {
+                          "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "displayPriority": "MUSIC_RESPONSIVE_LIST_ITEM_COLUMN_DISPLAY_PRIORITY_MEDIUM"
+          }
+        }
+      ],
+      "playlistItemData": {
+        "videoId": "kOn-HdEg6AQ"
+      },
+      "thumbnail": {
+        "musicThumbnailRenderer": {
+          "thumbnail": {
+            "thumbnails": [
+              {
+                "url": "https://yt3.googleusercontent.com/URvHCfI2iyGAlAwqqBFeaFhU9DeKk_iuX40OIIIj8Zp0wIT3BVsJ2JRMwLLbUB9EZS7t7oDlMrI2S3OvGA=w60-h60-l90-rj",
+                "width": 60,
+                "height": 60
+              },
+              {
+                "url": "https://yt3.googleusercontent.com/URvHCfI2iyGAlAwqqBFeaFhU9DeKk_iuX40OIIIj8Zp0wIT3BVsJ2JRMwLLbUB9EZS7t7oDlMrI2S3OvGA=w120-h120-l90-rj",
+                "width": 120,
+                "height": 120
+              }
+            ]
+          },
+          "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+          "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FIT",
+          "trackingParams": "COoFEIS_AiITCNPzlZWNgJgDFZjgewAdR8QJWg=="
+        }
+      }
+    }
+  },
+  "playlist": {
+    "musicTwoRowItemRenderer": {
+      "title": {
+        "runs": [
+          {
+            "text": "Ukrainian Autumn",
+            "navigationEndpoint": {
+              "clickTrackingParams": "CLYBEKCzAhgAIhMI0_OVlY2AmAMVmOB7AB1HxAlaygEEN5EGWA==",
+              "browseEndpoint": {
+                "browseId": "VLRDCLAK5uy_l4KEyuxwu2yBeugeQ0DRUY9xDYHLmJGm8",
+                "params": "ggMEgALjBA%3D%3D",
+                "browseEndpointContextSupportedConfigs": {
+                  "browseEndpointContextMusicConfig": {
+                    "pageType": "MUSIC_PAGE_TYPE_PLAYLIST"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "subtitle": {
+        "runs": [
+          {
+            "text": "Jerry Heil"
+          },
+          {
+            "text": ", "
+          },
+          {
+            "text": "Шугар"
+          },
+          {
+            "text": ", "
+          },
+          {
+            "text": "Amaya Roma"
+          },
+          {
+            "text": ", "
+          },
+          {
+            "text": "DIANAMusic"
+          }
+        ]
+      },
+      "navigationEndpoint": {
+        "clickTrackingParams": "CLYBEKCzAhgAIhMI0_OVlY2AmAMVmOB7AB1HxAlaygEEN5EGWA==",
+        "browseEndpoint": {
+          "browseId": "VLRDCLAK5uy_l4KEyuxwu2yBeugeQ0DRUY9xDYHLmJGm8",
+          "params": "ggMEgALjBA%3D%3D",
+          "browseEndpointContextSupportedConfigs": {
+            "browseEndpointContextMusicConfig": {
+              "pageType": "MUSIC_PAGE_TYPE_PLAYLIST"
+            }
+          }
+        }
+      },
+      "thumbnailRenderer": {
+        "musicThumbnailRenderer": {
+          "thumbnail": {
+            "thumbnails": [
+              {
+                "url": "https://yt3.googleusercontent.com/PEQdKG0zFYQvGeBs-NuIlB1KAcZPflbzj_p3DXNtGUnlQbDzj2qi82kom-IPe06nZG_3I9DnwNXbakYo=w226-h226-l90-rj",
+                "width": 226,
+                "height": 226
+              },
+              {
+                "url": "https://yt3.googleusercontent.com/PEQdKG0zFYQvGeBs-NuIlB1KAcZPflbzj_p3DXNtGUnlQbDzj2qi82kom-IPe06nZG_3I9DnwNXbakYo=w544-h544-l90-rj",
+                "width": 544,
+                "height": 544
+              }
+            ]
+          },
+          "thumbnailCrop": "MUSIC_THUMBNAIL_CROP_UNSPECIFIED",
+          "thumbnailScale": "MUSIC_THUMBNAIL_SCALE_ASPECT_FILL",
+          "trackingParams": "CMcBEIS_AiITCNPzlZWNgJgDFZjgewAdR8QJWg=="
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "vibeplayer"
+version = "0.1.0-alpha"
+description = "Kasane music player for Linux"
+authors = ["VibePlayer Contributors"]
+edition = "2021"
+
+[lib]
+name = "vibeplayer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+vibe-core = { path = "../crates/vibe-core" }
+vibe-audio = { path = "../crates/vibe-audio" }
+vibe-providers = { path = "../crates/vibe-providers" }
+vibe-db = { path = "../crates/vibe-db" }
+tauri = { version = "2.2", features = [] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

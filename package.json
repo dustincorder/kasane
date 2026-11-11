@@ -1,0 +1,29 @@
+{
+  "name": "vibeplayer",
+  "private": true,
+  "version": "0.1.0-alpha",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tauri-apps/cli": "^2.2.0",
+    "autoprefixer": "^10.4.20",
+    "impeccable": "^4.8.2",
+    "postcss": "^8.4.49",
+    "svelte": "^5.2.0",
+    "svelte-check": "^4.1.0",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.2.0",
+    "lucide-svelte": "^0.460.0"
+  }
+}

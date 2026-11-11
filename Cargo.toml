@@ -1,0 +1,28 @@
+[workspace]
+members = [
+    "crates/vibe-core",
+    "crates/vibe-audio",
+    "crates/vibe-providers",
+    "crates/vibe-db",
+    "src-tauri",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0-alpha"
+edition = "2021"
+authors = ["VibePlayer Contributors"]
+
+[workspace.dependencies]
+tokio = { version = "1.40", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+rodio = { version = "0.19", default-features = false, features = ["symphonia-all"] }
+tauri = { version = "2.2", features = [] }
+tauri-build = { version = "2.0" }
