@@ -1,5 +1,7 @@
 package cord.kasane.music.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
@@ -28,6 +30,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -41,6 +44,7 @@ import cord.kasane.music.auth.AccountSession
 import cord.kasane.music.auth.AccountChannel
 import cord.kasane.music.auth.AccountState
 import cord.kasane.music.auth.CapturedWebSession
+import cord.kasane.music.data.LocalDataExporter
 import cord.kasane.music.model.FavoriteEntity
 import cord.kasane.music.model.HistoryEntity
 import cord.kasane.music.model.Track
@@ -56,6 +60,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.widget.Toast
 
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
@@ -66,6 +73,22 @@ fun KasaneApp(app: KasaneApplication) {
     ) {
         val playbackState by app.playbackManager.uiState.collectAsState()
         val scope = rememberCoroutineScope()
+        val context = LocalContext.current
+        val exportLocalData = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            if (uri != null) scope.launch {
+                val result = runCatching {
+                    withContext(Dispatchers.IO) {
+                        val favoritesSnapshot = app.database.trackDao().getFavoritesForExport()
+                        val historySnapshot = app.database.trackDao().getHistoryForExport()
+                        val json = LocalDataExporter.encode(favoritesSnapshot, historySnapshot)
+                        context.contentResolver.openOutputStream(uri, "w")?.bufferedWriter()?.use { it.write(json) }
+                            ?: error("Could not open the selected file.")
+                    }
+                }
+                val message = if (result.isSuccess) "Kasane local data exported." else "Could not export local data."
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
+        }
         val focusManager = LocalFocusManager.current
         var showLoginDialog by remember { mutableStateOf(false) }
         var loginChannels by remember { mutableStateOf<List<AccountChannel>?>(null) }
@@ -151,7 +174,7 @@ fun KasaneApp(app: KasaneApplication) {
                         app.accountRepository.cancelSignIn()
                         showLoginDialog = false
                         clearYtMusicWebSession()
-                    })
+                    }, onExportLocalData = { exportLocalData.launch("kasane-local-data.json") })
             }
         }
         if (showLoginDialog) {

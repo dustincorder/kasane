@@ -2,9 +2,36 @@
 
 ## Reference availability
 
-The task's `YOUTUBE_MUSIC_APK_PATH` was left empty. No original YouTube Music APK was supplied, so its menus and submenus have **not** been inspected. The currently open device app is not treated as the original APK reference, and no claims below describe uninspected screens.
+APK supplied: `com.google.android.apps.youtube.music` version `9.45.51` (`94551230`), base split extracted from the supplied APKMirror `.apkm` archive. Package/version were verified with Android build tools. The APK was not installed or modified. Static inspection used the manifest, resource names and decompiled class/resource metadata; no credentials, cookies, or private account data were sought.
 
-This map records Kasane's current native implementation and the inspection work still needed once a reference APK is available. It is not a feature parity claim.
+Static component names include `MusicActivity`, `MusicPickerActivity`, `AudioPreviewPlayerActivity`, `SettingsCompatActivity`, `MusicPlayerView`, `PlayerPanel`, `SearchToolbarView`, `queue_page`, `account_switcher_fragment`, `PlaybackSettingsFragment`, `RecommendationsSettingsFragment`, and `OfflineSettingsFragmentCompat`. These names establish component/resource presence only; they do not verify which components are reachable in the normal user flow.
+
+The phone's currently active media session belongs to a different YouTube Music client, so it was not used to navigate the supplied APK. As a result, the map below distinguishes static evidence from screens/actions that remain **uninspected**. Resource and class names demonstrate that a feature exists in the package; they do not establish its exact visible layout or interaction behavior. This is not a feature parity claim.
+
+## Original APK — static feature map
+
+| Area / path | Purpose and user actions indicated by static APK inspection | Kasane analogue | Missing evidence / priority |
+|---|---|---|---|
+| Home → music shelves | Home/YouTube Music activities and shelf-related resource families exist. Exact shelf order, recommendation labels, refresh behavior, and navigation were not inspected. | Home shelves and Listen Again | High: perform UI inspection from an idle session; do not infer the exact recommendation system from resource names. |
+| Search → suggestions/results | Search toolbar/input, suggestions, result, no-results, voice-search, and clear-search resources exist. | Typed catalog Search | High: inspect history, suggestion selection, category filters, voice affordance and result menus. |
+| Library → songs/albums/artists/playlists | Library/music, saved, album, playlist, history and downloads resource names exist. | Unified local + account Library | High: inspect filter/sort behavior, collection actions and signed-out states. |
+| Now Playing → transport/actions | Player-page, artist-link, save-to-library and playback accessibility strings/resources exist. | Shared Media3 Now Playing | High: inspect player action arrangement, lyrics/description availability, and track context menu. |
+| Queue → current/up-next | `queue_page`, `queue_page_header`, playlist-panel and queue action resources exist. | Shared Media3 queue | High: exact reorder/remove/add-next gestures remain uninspected. |
+| Shuffle / repeat / autoplay | Accessibility strings and shuffle/repeat/autoplay resources exist, including off/on/one states. | Media3 shuffle/repeat; radio handoff | High: inspect mode cycling and autoplay controls. |
+| Radio | Radio-named resource families and provider-related strings are present. | InnerTube watch-next radio extraction | High: radio creation flow, source context and continuation UX uninspected. |
+| Artist / album / playlist | Artist link, album, playlist, editable playlist, add-to-playlist dialog, playlist metadata/settings resources exist. | Catalog detail pages; account collection provider | Medium: inspect actions, edit permissions, pagination and empty states. |
+| Profile / account switcher | Account header, selected account/channel, switcher loading/error/add-account resources exist. | Profile and YTM web-session sign-in/channel selection | Medium: exact channel-switch flow and account management not UI-inspected. |
+| Settings / offline | Offline storage, auto-download, network preference, notification, settings and downloaded-song resources exist. | Limited Kasane settings; offline media intentionally absent | Medium: inspect playback quality, network, privacy/history and Premium gates. No offline download behavior was tested. |
+| Dialogs / empty / errors | Search no-results, account-switcher errors/loading, playlist edit/add dialogs, offline education resources exist. | Kasane has native loading/error/empty states in selected screens | Medium: catalog exact dialogs and state copy remain uninspected. |
+
+### Static evidence versus UI inspection
+
+- **Confirmed statically:** package/version, manifest component/resource names, account-switcher and playlist-editor resource families, queue/player resource families, search suggestion and no-results resource families, offline/download and settings resource families.
+- **Confirmed in real UI:** none of this supplied original APK was installed or navigated in this session.
+- **Not inspected:** Home/search/library/player screens, nested menus, gestures, queue editing, artist/album/playlist details, Radio, profile switching, settings values, empty/error copy and Premium/region/account-gated states.
+- **Inferences:** feature purpose in the table is inferred from identifiers such as `playlist_edit_metadata` or `autoplay_toggle`, not from observed behavior.
+
+Static inspection found declared media playback and offline-related service families and permissions. This is package structure evidence only; it does not verify that every feature is enabled for this account, region, or subscription.
 
 ## Kasane implementation map
 

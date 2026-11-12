@@ -6,9 +6,7 @@
 
 ## 1. Подтверждённый статус и ключевые достижения
 
-- **Гостевое воспроизведение работает стабильно на физическом устройстве (Pixel 6 Pro)**:
-  - Подтверждено реальным воспроизведением трека *Sabrina Carpenter — Espresso* без необходимости авторизации в Google аккаунте.
-  - Поиск, домашний каталог (Quick Picks / Shelves) и загрузка обложек треков через Coil функционируют в реальном времени.
+- **Гостевое воспроизведение ранее подтверждалось на Pixel 6 Pro** для *Sabrina Carpenter — Espresso*. Последующая диагностика в ноябре 2026 выявила воспроизводимый риск HTTP 403 после начального диапазона для текущего профиля; стабильное воспроизведение полного трека сейчас не подтверждено. Поиск, Home/Quick Picks и обложки ранее проверялись на устройстве.
 
 ---
 
@@ -69,3 +67,22 @@ cd android
 ./gradlew assembleDebug
 ```
 Все 16 тест-сьютов (включая `GuestPlayerResolverTest`, `YouTubeDataSource` / `AudioRangeTest`, `QueuePolicyTest`) проходят успешно.
+
+## 6. Профили InnerTube — независимая гостевая проверка, 2026-11-12
+
+Проверка выполнена с Linux-хоста, без Google/YTM credentials и без сохранения streaming URL. Вызовы были ограничены контрольными публичными ID Espresso (`kIft-LUHHVA`), Let Down (`ZVgHPSyEIqk`), Beat It (`kOn-HdEg6AQ`) и Never Gonna Give You Up (`dQw4w9WgXcQ`). HTTP 200 у player endpoint сам по себе не считался playable result.
+
+| Профиль | Наблюдение | Проверка потока |
+|---|---|---|
+| `ANDROID_VR` 1.65.10 | На Espresso ответил `LOGIN_REQUIRED`, playable formats отсутствовали. | URL для CDN проверки не выдан. |
+| `ANDROID` 21.26.364 | Для всех четырёх контрольных ответ `OK` с audio format metadata; audio formats не содержали прямых HTTPS URL или `signatureCipher`. Ответ содержал `serverAbrStreamingUrl` — протокол SABR/UMP здесь не реализован Kasane. | Нет обычного URL для byte-range теста. |
+| `IOS` 21.26.4 | `OK` и audio metadata; для Never Gonna Give You Up также вернулся HLS manifest. Остальным трём из этой четвёрки HLS не вернулся. | У Never Gonna manifest и media playlist ответили 200; 38 последовательных сегментов (213.04 с, 5,016,592 байта) были прочитаны в памяти, включая сегмент около 60 с. Все сегменты — HTTP 200. Ничего не сохранялось на диск, cookies не передавались. |
+| `WEB_MUSIC` / `WEB_REMIX` | Для каждого из четырёх гостевых запросов `UNPLAYABLE`, аудио- и HLS-форматов нет. | Не проверялся. |
+| `WEB`, `MWEB`, `WEB_SAFARI`, `TV`, `TV_SIMPLY`, `WEB_EMBEDDED` | Для Espresso гостевой ответ не содержал применимого direct/HLS аудио; статусы были `UNPLAYABLE`, `LOGIN_REQUIRED` или `ERROR` в зависимости от профиля. | Не проверялся, когда пригодного URL не было. |
+| `ANDROID_MUSIC` | Отсутствует в текущем поддерживаемом списке yt-dlp; не был выдуман/запрошен как будто это текущий профиль. | Не применимо. |
+
+Актуальный yt-dlp сообщает, что `ANDROID_VR` версии 1.65.10 получает GVS PoToken enforcement для HTTPS/DASH и что с 2026-08-17 observed 403 распространился на все форматы. Для `ANDROID` HTTPS/DASH также требует GVS PoToken, но в этих ответах сервер вернул SABR metadata без прямых URL. `WEB_MUSIC` требует GVS PoToken для HTTPS/DASH (с documented Premium exception), HLS policy отличается. См. [текущую матрицу yt-dlp](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/youtube/_base.py) и [PO Token guide](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide).
+
+InnerTubeX предлагает SABR/UMP, direct/HLS selection, cipher handling и token-provider contracts, но README указывает GPL-3.0. Kasane не добавлял его как зависимость и не копировал реализацию; текущий repository license не выбран. Документация проекта также называет несколько client IDs probes, а не подтверждёнными playback fallbacks. См. [InnerTubeX README и лицензию](https://github.com/MetrolistGroup/innertubex).
+
+Это подтверждает HLS транспорт в независимой гостевой HTTP-проверке для одной композиции, но **не подтверждает Media3 end-to-end playback**. Кандидат не интегрирован: здесь нет эмулятора, на котором можно проверить выбор HLS/direct для разных треков и проверить Media3 queue/seek/background. User Pixel после инцидента не использовался. Подписанная YTM-сессия не читалась и не передавалась.

@@ -16,7 +16,14 @@ import cord.kasane.music.ui.components.TrackArtwork
 import cord.kasane.music.ui.theme.*
 
 @Composable
-fun ProfileScreen(state: AccountState, onSignIn: () -> Unit, onSignOut: () -> Unit, onRetry: () -> Unit, onCancel: () -> Unit) {
+fun ProfileScreen(
+    state: AccountState,
+    onSignIn: () -> Unit,
+    onSignOut: () -> Unit,
+    onRetry: () -> Unit,
+    onCancel: () -> Unit,
+    onExportLocalData: () -> Unit = {},
+) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("Profile", style = KasaneTypography.titleLarge, color = White)
@@ -54,6 +61,10 @@ fun ProfileScreen(state: AccountState, onSignIn: () -> Unit, onSignOut: () -> Un
         HorizontalDivider(color = Gray800)
         Text("Library sources", style = KasaneTypography.titleMedium)
         Text("Favorites and listening history belong to this device. Signing out does not remove them. YouTube Music collections stay separate from this local library.", color = Gray400)
+        OutlinedButton(onClick = onExportLocalData, modifier = Modifier.fillMaxWidth()) {
+            Text("Export local data", color = AccentRose)
+        }
+        Text("Exports this device's favorites and listening history as JSON. Account cookies and session keys are never included.", color = Gray400)
         HorizontalDivider(color = Gray800)
         Text("About Kasane", style = KasaneTypography.titleMedium)
         Text("Kasane ${cord.kasane.music.BuildConfig.VERSION_NAME} · Android\nOnline music with Media3. Local files and offline downloads are not available.", color = Gray400)

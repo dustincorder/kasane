@@ -21,8 +21,20 @@ android {
         else "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Instrumentation is debug-only and isolated from the user's release package/data.
+    testBuildType = "debug"
+
     testOptions {
         unitTests.isReturnDefaultValues = true
+        managedDevices {
+            devices {
+                create<com.android.build.api.dsl.ManagedVirtualDevice>("kasaneApi35") {
+                    device = "Pixel 6"
+                    apiLevel = 35
+                    systemImageSource = "aosp"
+                }
+            }
+        }
     }
 
     buildFeatures {
@@ -68,6 +80,7 @@ android {
 
     buildTypes {
         getByName("debug") {
+            applicationIdSuffix = ".dev"
             isDebuggable = true
             isMinifyEnabled = false
         }
@@ -75,6 +88,18 @@ android {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
         }
+    }
+}
+
+// Gradle's connected-test runner installs its target and test APKs and may
+// uninstall both during cleanup, even when setup fails. Never use it here:
+// instrumentation runs on the disposable managed emulator below instead.
+gradle.taskGraph.whenReady {
+    if (allTasks.any { task ->
+            task.name.startsWith("connected") &&
+                (task.name.endsWith("AndroidTest") || task.name == "connectedCheck")
+        }) {
+        throw GradleException("Connected Android instrumentation is blocked for Kasane. Use kasaneApi35DebugAndroidTest on the disposable managed emulator.")
     }
 }
 

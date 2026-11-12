@@ -59,6 +59,9 @@ interface TrackDao {
     @Query("SELECT t.* FROM tracks t INNER JOIN favorites f ON t.id = f.trackId ORDER BY f.addedAt DESC")
     fun getFavorites(): Flow<List<Track>>
 
+    @Query("SELECT t.* FROM tracks t INNER JOIN favorites f ON t.id = f.trackId ORDER BY f.addedAt DESC")
+    suspend fun getFavoritesForExport(): List<Track>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun addFavorite(favorite: FavoriteEntity)
 
@@ -83,6 +86,9 @@ interface TrackDao {
         LIMIT :limit
     """)
     fun getRecentHistory(limit: Int = 50): Flow<List<HistoryEntity>>
+
+    @Query("SELECT * FROM history ORDER BY playedAt DESC, id DESC")
+    suspend fun getHistoryForExport(): List<HistoryEntity>
 }
 
 @Database(
