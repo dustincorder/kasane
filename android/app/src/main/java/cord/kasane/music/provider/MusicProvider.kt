@@ -31,6 +31,10 @@ class YouTubeMusicProvider(
     override suspend fun search(query: String, limit: Int): List<Track> =
         catalog.search(query, cord.kasane.music.model.CatalogKind.SONG).tracks.take(limit)
 
+    val hlsResolver = HlsPlayerResolver(client) { videoId ->
+        accountSession()?.let { account -> catalog.request("player", JSONObject().put("videoId", videoId), account,
+            clientVersion = "1.20260707.12.00") }
+    }
     val playerResolver = GuestPlayerResolver(client, diagnostic = playerDiagnostic)
 
     override suspend fun resolveStreamUrl(trackId: String): String? = playerResolver.resolve(trackId).url

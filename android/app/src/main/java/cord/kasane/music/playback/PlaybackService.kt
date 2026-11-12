@@ -33,14 +33,31 @@ class PlaybackService : MediaSessionService() {
         val sources = androidx.media3.datasource.DataSource.Factory {
             YouTubeDataSource(DefaultDataSource.Factory(this).createDataSource(), app.ytProvider.playerResolver)
         }
-        player = ExoPlayer.Builder(this)
-            // Briefly recover from transient socket/network changes, then surface the error.
-            // This bounds retries (including Wi-Fi/LTE handoffs) without adding a parallel retry loop.
-            .setMediaSourceFactory(DefaultMediaSourceFactory(sources)
-                .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(2)))
+        val progressive = DefaultMediaSourceFactory(sources).setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy())
+        val network = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(15000).setReadTimeoutMs(15000)
+        val factory = object : androidx.media3.exoplayer.source.MediaSource.Factory {
+            override fun setDrmSessionManagerProvider(provider: androidx.media3.exoplayer.drm.DrmSessionManagerProvider) = this
+            override fun setLoadErrorHandlingPolicy(policy: androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy) = this
+            override fun getSupportedTypes() = intArrayOf(C.CONTENT_TYPE_HLS, C.CONTENT_TYPE_OTHER)
+            override fun createMediaSource(item: MediaItem): androidx.media3.exoplayer.source.MediaSource =
+                if (item.localConfiguration?.uri?.scheme == "kasane")
+                    TransportMediaSource(item, { id ->
+                        val stream = app.ytProvider.hlsResolver.resolve(id)
+                        if (stream === cord.kasane.music.provider.ProgressiveStream) {
+                            app.ytProvider.playerResolver.resolve(id) // Validate an actual progressive format before selecting its source.
+                        }
+                        stream
+                    }, progressive, network)
+                else DefaultMediaSourceFactory(DefaultDataSource.Factory(this@PlaybackService))
+                    .setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy()).createMediaSource(item)
+        }
+        player = ExoPlayer.Builder(this).setMediaSourceFactory(factory)
             .setAudioAttributes(AudioAttributes.Builder().setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                 .setUsage(C.USAGE_MEDIA).build(), true)
             .setHandleAudioBecomingNoisy(true).build()
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).build()
         player.addListener(object : Player.Listener {
             private fun recordHistory() {
                 if (!player.isPlaying || historyRecordedForWindow) return

@@ -16,7 +16,9 @@ android {
         targetSdk = 35
         versionCode = 2
         versionName = "0.1.1-alpha"
-        testInstrumentationRunner = if (providers.gradleProperty("kasanePlaybackProbe").orNull == "true")
+        testInstrumentationRunner = if (providers.gradleProperty("kasaneHlsProbe").orNull == "true")
+            "cord.kasane.music.HlsPlaybackInstrumentation"
+        else if (providers.gradleProperty("kasanePlaybackProbe").orNull == "true")
             "cord.kasane.music.GuestPlaybackInstrumentation"
         else "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -125,6 +127,7 @@ dependencies {
     // Media3
     val media3Version = "1.5.1"
     implementation("androidx.media3:media3-exoplayer:$media3Version")
+    implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     implementation("androidx.media3:media3-session:$media3Version")
     implementation("androidx.media3:media3-common:$media3Version")
 

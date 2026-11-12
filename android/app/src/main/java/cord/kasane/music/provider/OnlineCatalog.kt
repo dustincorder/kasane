@@ -31,10 +31,10 @@ class OnlineCatalog(
         val isLocalMock = BuildConfig.DEBUG && !apiBaseUrl.isHttps && apiBaseUrl.host in setOf("localhost", "127.0.0.1", "::1")
         require(isProductionOrigin || isLocalMock) { "InnerTube credentials may only target YouTube Music." }
     }
-    suspend fun request(endpoint: String, payload: JSONObject, account: AccountSession? = null): JSONObject {
+    suspend fun request(endpoint: String, payload: JSONObject, account: AccountSession? = null, clientVersion: String = "1.20240101.01.00"): JSONObject {
         require(endpoint.matches(Regex("[a-zA-Z_/]+")))
         val context = JSONObject().put("client", JSONObject().put("clientName", "WEB_REMIX")
-            .put("clientVersion", "1.20240101.01.00").put("hl", "en").put("gl", "US"))
+            .put("clientVersion", clientVersion).put("hl", "en").put("gl", "US"))
         account?.delegatedSessionId?.takeIf(String::isNotBlank)?.let {
             context.put("user", JSONObject().put("onBehalfOfUser", it))
         }
@@ -47,7 +47,7 @@ class OnlineCatalog(
         }
         val builder = Request.Builder().url(url.build())
             .header("Origin", origin).header("Referer", "$origin/")
-            .header("X-Youtube-Client-Name", "67").header("X-Youtube-Client-Version", "1.20240101.01.00")
+            .header("X-Youtube-Client-Name", "67").header("X-Youtube-Client-Version", clientVersion)
             .header("User-Agent", "Mozilla/5.0")
             .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
         if (account != null) {
