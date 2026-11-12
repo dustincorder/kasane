@@ -100,6 +100,30 @@ class GuestPlayerResolverTest {
         assertEquals(2, opens)
         assertEquals(2, requests.size)
     }
+    @Test fun refreshCallbackRunsOnlyAfterFirstCdnRefusal() = runTest {
+        val requests = mutableListOf<Request>()
+        var opens = 0
+        var refreshes = 0
+        val result = resolver(listOf(ok(), ok("https://audio.example.test/refreshed")), requests).open(
+            id,
+            operation = { stream -> if (opens++ == 0) throw AudioHttpException(403); stream.url },
+            onRefresh = { refreshes++ },
+        )
+        assertEquals("https://audio.example.test/refreshed", result)
+        assertEquals(1, refreshes)
+        assertEquals(2, opens)
+    }
+    @Test fun readFailureCanForceARefreshAtCurrentResourceOffsetAndKeepItag() = runTest {
+        val requests = mutableListOf<Request>()
+        val resolver = resolver(listOf(ok(), ok("https://audio.example.test/refreshed")), requests)
+        val first = resolver.resolve(id)
+        var refreshes = 0
+        val refreshed = resolver.open(id, forceRefresh = true, requiredItag = first.itag,
+            onRefresh = { refreshes++ }, operation = { it })
+        assertEquals(first.itag, refreshed.itag)
+        assertEquals(1, refreshes)
+        assertEquals(2, requests.size)
+    }
     @Test fun repeatedCdnRefusalIsNotHiddenOrLooped() = runTest {
         val requests = mutableListOf<Request>()
         var opens = 0

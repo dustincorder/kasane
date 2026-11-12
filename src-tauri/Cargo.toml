@@ -1,6 +1,6 @@
 [package]
 name = "vibeplayer"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 description = "Kasane music player for Linux"
 authors = ["VibePlayer Contributors"]
 edition = "2021"

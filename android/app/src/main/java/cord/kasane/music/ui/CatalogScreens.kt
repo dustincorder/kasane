@@ -23,10 +23,18 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import cord.kasane.music.model.*
 import cord.kasane.music.provider.OnlineCatalog
+import cord.kasane.music.data.CachedCatalogRepository
+import cord.kasane.music.data.CatalogCache
 import cord.kasane.music.ui.components.*
 import cord.kasane.music.ui.theme.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.security.MessageDigest
+
+private object MessageDigestCompat {
+    fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+}
 
 @Composable
 fun CatalogShelfRow(shelf: CatalogShelf, onOpen: (CatalogItem) -> Unit) {
@@ -48,7 +56,8 @@ fun CatalogShelfRow(shelf: CatalogShelf, onOpen: (CatalogItem) -> Unit) {
 
 @Composable
 fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
-    currentTrackId: String?, favoriteIds: Set<String>, onFavorite: (Track) -> Unit, onQueue: (Track) -> Unit, onPlayNext: ((Track) -> Unit)? = null) {
+    currentTrackId: String?, favoriteIds: Set<String>, onFavorite: (Track) -> Unit, onQueue: (Track) -> Unit, onPlayNext: ((Track) -> Unit)? = null,
+    cachedCatalog: CachedCatalogRepository? = null, cacheScope: String = "guest") {
     var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf(CatalogKind.SONG) }
     var revision by remember { mutableIntStateOf(0) }
@@ -61,18 +70,26 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
     val scope = rememberCoroutineScope()
     var loadingMore by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
+    var handledRevision by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { requester.requestFocus() }
-    LaunchedEffect(query, category, revision) {
+    LaunchedEffect(query, category, revision, cachedCatalog, cacheScope) {
         generation++
-        items = emptyList(); continuation = null; error = null; loading = query.isNotBlank()
+        continuation = null; error = null; loading = false
         if (query.isBlank()) return@LaunchedEffect
+        val cacheKey = "search:${category.name}:${MessageDigestCompat.sha256(query.trim().lowercase())}"
+        val saved = cachedCatalog?.cached(cacheScope, cacheKey)
+        items = saved?.page?.shelves?.flatMap { it.items }.orEmpty()
+        continuation = saved?.page?.continuation
+        val isStale = saved == null || System.currentTimeMillis() - saved.updatedAt >= CachedCatalogRepository.SEARCH_TTL_MS
+        if (!isStale && revision == handledRevision) return@LaunchedEffect
+        loading = true
         try {
             kotlinx.coroutines.delay(400)
-            val page = catalog.search(query, category)
+            val page = cachedCatalog?.search(cacheScope, query, category, force = revision != handledRevision) ?: catalog.search(query, category)
             items = page.shelves.flatMap { it.items }; continuation = page.continuation
         } catch (e: CancellationException) { throw e
         } catch (e: Exception) { error = e.message ?: "Search unavailable. Try again."
-        } finally { loading = false }
+        } finally { loading = false; handledRevision = revision }
     }
     Column(Modifier.fillMaxSize().background(Gray950)) {
         OutlinedTextField(query, { query = it }, singleLine = true,
@@ -108,10 +125,15 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
                     loadingMore = true
                     scope.launch {
                         try {
-                            val next = catalog.search(query, category, token)
+                            val next = cachedCatalog?.search(cacheScope, query, category, token) ?: catalog.search(query, category, token)
                             if (expected == generation) {
-                                items = (items + next.shelves.flatMap { it.items }).distinctBy { it.kind to it.id }
-                                continuation = next.continuation?.takeUnless { it == token }
+                                if (cachedCatalog != null) {
+                                    items = next.shelves.flatMap { it.items }
+                                    continuation = next.continuation?.takeUnless { it == token }
+                                } else {
+                                    items = (items + next.shelves.flatMap { it.items }).distinctBy { it.kind to it.id }
+                                    continuation = next.continuation?.takeUnless { it == token }
+                                }
                             }
                         } catch (e: CancellationException) { throw e
                         } catch (e: Exception) { if (expected == generation) error = e.message
@@ -137,19 +159,27 @@ private fun CatalogResult(item: CatalogItem, onClick: () -> Unit) {
 
 @Composable
 fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () -> Unit,
-    onOpen: (CatalogItem) -> Unit, onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit) {
+    onOpen: (CatalogItem) -> Unit, onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
+    cachedCatalog: CachedCatalogRepository? = null, cacheScope: String = "guest") {
     var page by remember(item.id) { mutableStateOf<CatalogPage?>(null) }
     var revision by remember(item.id) { mutableIntStateOf(0) }
     var loading by remember(item.id) { mutableStateOf(true) }
     var error by remember(item.id) { mutableStateOf<String?>(null) }
     var loadingMore by remember(item.id) { mutableStateOf(false) }
+    var handledRevision by remember(item.id) { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(item.id, revision) {
-        loading = true; error = null
-        try { page = catalog.browse(item.id) }
+    LaunchedEffect(item.id, revision, cachedCatalog, cacheScope) {
+        error = null
+        val saved = cachedCatalog?.cached(cacheScope, "browse:${item.id}")
+        page = saved?.page
+        val force = revision != handledRevision
+        val stale = saved == null || System.currentTimeMillis() - saved.updatedAt >= CachedCatalogRepository.LIBRARY_TTL_MS
+        if (!stale && !force) { loading = false; return@LaunchedEffect }
+        loading = saved == null
+        try { page = if (cachedCatalog != null) cachedCatalog.browse(cacheScope, item.id, force = force) else catalog.browse(item.id) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.message ?: "This page is unavailable." }
-        finally { loading = false }
+        finally { loading = false; handledRevision = revision }
     }
     CatalogDetailContent(item, page, loading, error, loadingMore, onBack, { revision++ }, onOpen, onPlay, onQueue) {
         val current = page ?: return@CatalogDetailContent
@@ -157,11 +187,11 @@ fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () ->
         loadingMore = true; error = null
         scope.launch {
             try {
-                val next = catalog.browse(item.id, token)
-                val merged = (current.shelves + next.shelves).groupBy { it.title }.map { (title, shelves) ->
-                    CatalogShelf(title, shelves.flatMap { it.items }.distinctBy { it.kind to it.id })
-                }
-                page = current.copy(shelves = merged, continuation = next.continuation?.takeUnless { it == token })
+                val next = cachedCatalog?.browse(cacheScope, item.id, token) ?: catalog.browse(item.id, token)
+                page = if (cachedCatalog != null) next else current.copy(
+                    shelves = (current.shelves + next.shelves).groupBy { it.title }.map { (title, shelves) ->
+                        CatalogShelf(title, shelves.flatMap { it.items }.distinctBy { it.kind to it.id })
+                    }, continuation = next.continuation?.takeUnless { it == token })
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) { error = e.message ?: "Could not load more tracks."
             } finally { loadingMore = false }
@@ -178,7 +208,7 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = White) }
             Text(item.kind.label, style = KasaneTypography.titleMedium)
         }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
+        LazyColumn(state = rememberLazyListState(), modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
                 Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     TrackArtwork(page?.artwork ?: item.artwork, Modifier.widthIn(max = 240.dp).fillMaxWidth().aspectRatio(1f))

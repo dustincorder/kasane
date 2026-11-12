@@ -4724,7 +4724,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vibe-audio"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -4738,7 +4738,7 @@ dependencies = [
 
 [[package]]
 name = "vibe-core"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "async-trait",
  "serde",
@@ -4749,7 +4749,7 @@ dependencies = [
 
 [[package]]
 name = "vibe-db"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "rusqlite",
  "serde",
@@ -4762,7 +4762,7 @@ dependencies = [
 
 [[package]]
 name = "vibe-providers"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -4776,7 +4776,7 @@ dependencies = [
 
 [[package]]
 name = "vibeplayer"
-version = "0.1.0-alpha"
+version = "0.1.1-alpha"
 dependencies = [
  "serde",
  "serde_json",

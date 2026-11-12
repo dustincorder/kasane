@@ -85,10 +85,18 @@ class GuestPlayerResolver(
         } }
 
     /** One CDN refresh only, preserving the format when reopening part of a resource. */
-    suspend fun <T> open(videoId: String, operation: (ResolvedAudioStream) -> T): T {
-        val first = resolve(videoId)
+    suspend fun <T> open(
+        videoId: String,
+        forceRefresh: Boolean = false,
+        requiredItag: Int? = null,
+        onRefresh: (() -> Unit)? = null,
+        operation: (ResolvedAudioStream) -> T,
+    ): T {
+        if (forceRefresh) onRefresh?.invoke()
+        val first = resolve(videoId, forceRefresh = forceRefresh, requiredItag = requiredItag)
         return try { operation(first) } catch (e: AudioHttpException) {
             if (e.code != 403 && e.code != 410) throw e
+            onRefresh?.invoke()
             val refreshed = resolve(videoId, forceRefresh = true, requiredItag = first.itag)
             operation(refreshed)
         }

@@ -2,7 +2,7 @@
 
 - **Status**: First Working Vertical Slice Complete
 - **Date**: 2026-11-10
-- **Version**: 0.1.0
+- **Version**: 0.1.1-alpha
 
 ## What Works Right Now
 

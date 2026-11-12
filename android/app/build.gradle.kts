@@ -14,8 +14,8 @@ android {
         applicationId = "cord.kasane.music"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-alpha"
+        versionCode = 2
+        versionName = "0.1.1-alpha"
         testInstrumentationRunner = if (providers.gradleProperty("kasanePlaybackProbe").orNull == "true")
             "cord.kasane.music.GuestPlaybackInstrumentation"
         else "androidx.test.runner.AndroidJUnitRunner"

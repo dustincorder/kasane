@@ -1,6 +1,6 @@
 package cord.kasane.music.ui
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,6 +24,7 @@ import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
@@ -36,6 +37,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import cord.kasane.music.KasaneApplication
+import cord.kasane.music.auth.AccountSession
+import cord.kasane.music.auth.AccountChannel
+import cord.kasane.music.auth.AccountState
+import cord.kasane.music.auth.CapturedWebSession
 import cord.kasane.music.model.FavoriteEntity
 import cord.kasane.music.model.HistoryEntity
 import cord.kasane.music.model.Track
@@ -62,6 +67,18 @@ fun KasaneApp(app: KasaneApplication) {
         val playbackState by app.playbackManager.uiState.collectAsState()
         val scope = rememberCoroutineScope()
         val focusManager = LocalFocusManager.current
+        var showLoginDialog by remember { mutableStateOf(false) }
+        var loginChannels by remember { mutableStateOf<List<AccountChannel>?>(null) }
+        var capturedLogin by remember { mutableStateOf<CapturedWebSession?>(null) }
+        var loginError by remember { mutableStateOf<String?>(null) }
+        var checkingLoginChannels by remember { mutableStateOf(false) }
+        val startWebSessionLogin: () -> Unit = {
+            loginChannels = null
+            capturedLogin = null
+            loginError = null
+            app.accountRepository.beginSignIn()
+            showLoginDialog = true
+        }
 
         var selectedTab by rememberSaveable { mutableStateOf(0) } // Home / Search / Library
         val nowPlayingSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -69,9 +86,10 @@ fun KasaneApp(app: KasaneApplication) {
 
         val screenState = rememberSaveableStateHolder()
         var libraryHistory by rememberSaveable { mutableStateOf(false) }
+        var libraryOnline by rememberSaveable { mutableStateOf(false) }
+        var libraryFilter by rememberSaveable { mutableStateOf("All") }
         var detailStack by remember { mutableStateOf<List<CatalogItem>>(emptyList()) }
         var homeShelves by remember { mutableStateOf<List<CatalogShelf>>(emptyList()) }
-        var showAccountLibrary by remember { mutableStateOf(false) }
         var showSettings by remember { mutableStateOf(false) }
         val favorites by app.database.trackDao().getFavorites().collectAsState(initial = emptyList())
         val history by app.database.trackDao().getRecentHistory().collectAsState(initial = emptyList())
@@ -80,44 +98,141 @@ fun KasaneApp(app: KasaneApplication) {
         // Home feed recommendations from YouTube Music
         var homeRecommendations by remember { mutableStateOf<List<Track>>(emptyList()) }
         var isHomeLoading by remember { mutableStateOf(false) }
+        var isHomeRefreshing by remember { mutableStateOf(false) }
 
         var homeError by remember { mutableStateOf<String?>(null) }
         var homeRevision by remember { mutableIntStateOf(0) }
+        var handledHomeRevision by remember { mutableIntStateOf(0) }
         val accountState by app.accountRepository.state.collectAsState()
-        LaunchedEffect(accountState) { homeShelves = emptyList(); homeRecommendations = emptyList() }
-        LaunchedEffect(homeRevision, accountState) {
-            isHomeLoading = true
+        val catalogScope = remember(accountState, app.accountRepository.session()) {
+            cord.kasane.music.data.CatalogCache.accountScope(
+                app.accountRepository.session(), (accountState as? AccountState.SignedIn)?.identity)
+        }
+        LaunchedEffect(accountState) {
+            if (accountState is AccountState.SignedIn) libraryOnline = true
+        }
+        var activeHomeScope by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(homeRevision, accountState, catalogScope) {
+            if (activeHomeScope != catalogScope) {
+                activeHomeScope = catalogScope
+                homeShelves = emptyList()
+                homeRecommendations = emptyList()
+            }
+            val saved = app.catalogCache.read(catalogScope, cord.kasane.music.data.CachedCatalogRepository.HOME_KEY)
+            if (saved != null) {
+                homeShelves = saved.page.shelves
+                homeRecommendations = saved.page.tracks
+            }
+            val isStale = saved == null || System.currentTimeMillis() - saved.updatedAt >= cord.kasane.music.data.CachedCatalogRepository.HOME_TTL_MS
+            val shouldRefresh = homeRevision != handledHomeRevision || isStale
+            if (!shouldRefresh) { isHomeLoading = false; homeError = null; return@LaunchedEffect }
+            isHomeLoading = saved == null
+            isHomeRefreshing = saved != null
             homeError = null
             try {
-                val homePage = app.ytProvider.catalog.home()
+                val homePage = app.cachedCatalog.home(
+                    catalogScope,
+                    app.accountRepository.session(),
+                    force = homeRevision != handledHomeRevision,
+                ) ?: return@LaunchedEffect
                 homeShelves = homePage.shelves
                 homeRecommendations = homePage.tracks
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
                 homeError = "Recommendations unavailable. Check your connection and try again."
-            } finally { isHomeLoading = false }
+            } finally { isHomeLoading = false; isHomeRefreshing = false; handledHomeRevision = homeRevision }
         }
         if (showSettings) {
             ModalBottomSheet(onDismissRequest = { showSettings = false }, containerColor = Gray950,
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-                ProfileScreen(accountState, { scope.launch { app.accountRepository.signOut() } },
-                    { scope.launch { app.accountRepository.restore() } }, { app.accountRepository.cancelSignIn() })
+                ProfileScreen(accountState, startWebSessionLogin,
+                    { scope.launch { app.accountRepository.signOut(); clearYtMusicWebSession() } },
+                    { scope.launch { app.accountRepository.restore() } }, {
+                        app.accountRepository.cancelSignIn()
+                        showLoginDialog = false
+                        clearYtMusicWebSession()
+                    })
             }
+        }
+        if (showLoginDialog) {
+            YtMusicLoginDialog(
+                channels = loginChannels,
+                isCheckingChannels = checkingLoginChannels,
+                errorMessage = loginError,
+                onCapture = { captured ->
+                    capturedLogin = captured
+                    loginChannels = null
+                    loginError = null
+                    checkingLoginChannels = true
+                    scope.launch {
+                        try {
+                            val provisional = AccountSession(captured.cookie, captured.authUser,
+                                captured.pageId, captured.dataSyncId?.substringBefore("||"),
+                                captured.visitorData, captured.dataSyncId)
+                            val channels = app.ytProvider.catalog.accountChannels(provisional)
+                            if (channels.isEmpty()) loginError = "YouTube Music did not return a channel list. No account session was saved."
+                            else loginChannels = channels
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { loginError = e.message ?: "Could not read YouTube channels. Check the connection and retry." }
+                        finally { checkingLoginChannels = false }
+                    }
+                },
+                onConfirmChannel = { channel ->
+                    val captured = capturedLogin ?: return@YtMusicLoginDialog
+                    val session = AccountSession(captured.cookie, captured.authUser,
+                        channel.pageId ?: captured.pageId,
+                        channel.dataSyncId?.substringBefore("||") ?: captured.dataSyncId?.substringBefore("||"),
+                        captured.visitorData, channel.dataSyncId ?: captured.dataSyncId)
+                    checkingLoginChannels = true
+                    loginError = null
+                    scope.launch {
+                        app.accountRepository.accept(session)
+                        val verified = app.accountRepository.state.value is AccountState.SignedIn
+                        if (verified) {
+                            showLoginDialog = false
+                            loginChannels = null
+                            capturedLogin = null
+                            clearYtMusicWebSession()
+                        } else {
+                            loginError = (app.accountRepository.state.value as? AccountState.Unavailable)?.message
+                                ?: "The selected YouTube channel could not be verified. Try another channel."
+                        }
+                        checkingLoginChannels = false
+                    }
+                },
+                onRetryChannels = {
+                    val captured = capturedLogin
+                    if (captured != null) {
+                        checkingLoginChannels = true; loginError = null
+                        scope.launch {
+                            try {
+                                val provisional = AccountSession(captured.cookie, captured.authUser, captured.pageId,
+                                    captured.dataSyncId?.substringBefore("||"), captured.visitorData, captured.dataSyncId)
+                                val channels = app.ytProvider.catalog.accountChannels(provisional)
+                                if (channels.isEmpty()) loginError = "YouTube Music did not return a channel list."
+                                else loginChannels = channels
+                            } catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { loginError = e.message ?: "Could not read YouTube channels." }
+                            finally { checkingLoginChannels = false }
+                        }
+                    }
+                },
+                onDismiss = {
+                    showLoginDialog = false
+                    loginChannels = null
+                    capturedLogin = null
+                    app.accountRepository.cancelSignIn()
+                    clearYtMusicWebSession()
+                },
+            )
         }
 
-        // Android Predictive / System Back navigation handler
-        if (showAccountLibrary) {
-            ModalBottomSheet(onDismissRequest = { showAccountLibrary = false }, containerColor = Gray950,
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-                AccountLibraryScreen(accountState, app.ytProvider.catalog,
-                    { showAccountLibrary = false; showSettings = true },
-                    { entry -> showAccountLibrary = false; entry.track()?.let { app.playbackManager.playTrack(it) }
-                        ?: run { detailStack = detailStack + entry } },
-                    { app.playbackManager.addToQueue(it) },
-                    { scope.launch { app.accountRepository.expire() } })
-            }
-        }
-        BackHandler(enabled = isNowPlayingOpen || detailStack.isNotEmpty() || selectedTab != 0) {
+        var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
+        // AndroidX supplies predictive progress and dispatches the same path for completed legacy Back.
+        PredictiveBackHandler(enabled = isNowPlayingOpen || detailStack.isNotEmpty() || selectedTab != 0) { progress ->
+            try {
+                progress.collect { event -> predictiveBackProgress = event.progress }
+                predictiveBackProgress = 0f
             val navigation = navigationAfterBack(selectedTab, isNowPlayingOpen, detailStack.size)
             when {
                 isNowPlayingOpen -> {
@@ -130,6 +245,10 @@ fun KasaneApp(app: KasaneApplication) {
                     focusManager.clearFocus()
                     selectedTab = navigation.selectedTab
                 }
+            }
+            } catch (cancelled: CancellationException) {
+                predictiveBackProgress = 0f
+                throw cancelled
             }
         }
 
@@ -162,6 +281,9 @@ fun KasaneApp(app: KasaneApplication) {
         }
 
         Scaffold(
+            modifier = Modifier.graphicsLayer {
+                translationX = size.width * predictiveBackProgress * 0.08f
+            },
             containerColor = Gray950,
             contentWindowInsets = WindowInsets.safeDrawing,
             snackbarHost = {
@@ -267,14 +389,15 @@ fun KasaneApp(app: KasaneApplication) {
                         ?: run { detailStack = detailStack + entry }
                 }
                 if (detailStack.isNotEmpty()) {
-                    key(detailStack.last().id) {
-                        CatalogDetailScreen(detailStack.last(), app.ytProvider.catalog,
+                    val detail = detailStack.last()
+                    screenState.SaveableStateProvider("detail:${detail.kind}:${detail.id}") {
+                        CatalogDetailScreen(detail, app.ytProvider.catalog,
                             { detailStack = detailStack.dropLast(1) }, openCatalog,
                             { tracks, shuffle -> app.playbackManager.playTracks(tracks, shuffle) },
-                            { app.playbackManager.addToQueue(it) })
+                            { app.playbackManager.addToQueue(it) }, app.cachedCatalog, catalogScope)
                     }
                 } else screenState.SaveableStateProvider(selectedTab) {
-                when (if (selectedTab == 2 && libraryHistory) 3 else selectedTab) {
+                when (selectedTab) {
                     0 -> HomeScreen(
                         currentTrack = playbackState.currentTrack,
                         isPlaying = playbackState.isPlaying,
@@ -287,6 +410,8 @@ fun KasaneApp(app: KasaneApplication) {
                         onOpenSearch = { selectedTab = 1 },
                         onOpenSettings = { showSettings = true },
                         catalogShelves = homeShelves,
+                        isRefreshing = isHomeRefreshing,
+                        onRefresh = { homeRevision++ },
                         onCatalogOpen = openCatalog,
                         homeError = homeError,
                         onRetryHome = { homeRevision++ },
@@ -309,73 +434,52 @@ fun KasaneApp(app: KasaneApplication) {
                             app.database.trackDao().insertTrack(track)
                             if (track.id in favoriteIds) app.database.trackDao().removeFavorite(track.id)
                             else app.database.trackDao().addFavorite(FavoriteEntity(track.id))
-                        } }, { app.playbackManager.addToQueue(it) }, { app.playbackManager.playNextInQueue(it) })
+                        } }, { app.playbackManager.addToQueue(it) }, { app.playbackManager.playNextInQueue(it) },
+                        cachedCatalog = app.cachedCatalog, cacheScope = catalogScope)
                     2 -> LibraryScreen(
-                        onOpenAccount = { showAccountLibrary = true },
+                        accountState = accountState,
+                        accountProvider = app.accountLibraryProvider,
+                        filter = libraryFilter,
+                        onFilter = { libraryFilter = it; libraryOnline = it in setOf("Playlists", "Albums", "Artists"); if (it != "Songs") libraryHistory = false },
                         showingHistory = libraryHistory,
                         onSelectHistory = { libraryHistory = it },
-                        favoritesContent = { FavoritesScreen(
-                        favorites = favorites,
-                        currentTrackId = playbackState.currentTrack?.id,
-                        isPlaying = playbackState.isPlaying,
-                        isLoading = playbackState.isLoading,
-                        onTrackClick = { app.playbackManager.playTrack(it) },
+                        onSignIn = startWebSessionLogin,
+                        onExpired = { scope.launch { app.accountRepository.expire() } },
+                        cachedCatalog = app.cachedCatalog,
+                        session = app.accountRepository.session(),
+                        favoritesCount = favorites.size,
+                        historyCount = history.size,
+                        onCatalogOpen = { entry -> entry.track()?.let { app.playbackManager.playTrack(it) }
+                            ?: run { detailStack = detailStack + entry } },
                         onAddToQueue = { app.playbackManager.addToQueue(it) },
-                        onRemoveFavorite = { track ->
-                            scope.launch { app.database.trackDao().removeFavorite(track.id) }
-                        }
-                    ) },
-                        historyContent = {}
-                    )
-                    3 -> LibraryScreen(
-                        onOpenAccount = { showAccountLibrary = true },
-                        showingHistory = libraryHistory,
-                        onSelectHistory = { libraryHistory = it },
-                        favoritesContent = {},
+                        favoritesContent = { FavoritesScreen(
+                            favorites = favorites,
+                            currentTrackId = playbackState.currentTrack?.id,
+                            isPlaying = playbackState.isPlaying,
+                            isLoading = playbackState.isLoading,
+                            onTrackClick = { app.playbackManager.playTrack(it) },
+                            onAddToQueue = { app.playbackManager.addToQueue(it) },
+                            onRemoveFavorite = { track -> scope.launch { app.database.trackDao().removeFavorite(track.id) } }
+                        ) },
                         historyContent = { HistoryScreen(
-                        history = history,
-                        currentTrackId = playbackState.currentTrack?.id,
-                        isPlaying = playbackState.isPlaying,
-                        isLoading = playbackState.isLoading,
-                        favoriteIds = favoriteIds,
-                        onHistoryItemClick = { item ->
-                            val track = Track(
-                                id = item.trackId,
-                                title = item.title,
-                                artist = item.artist,
-                                album = item.album,
-                                thumbnailUri = item.thumbnailUri
-                            )
-                            app.playbackManager.playTrack(track)
-                        },
-                        onAddToQueue = { item ->
-                            val track = Track(
-                                id = item.trackId,
-                                title = item.title,
-                                artist = item.artist,
-                                album = item.album,
-                                thumbnailUri = item.thumbnailUri
-                            )
-                            app.playbackManager.addToQueue(track)
-                        },
-                        onToggleFavorite = { item ->
-                            scope.launch {
-                                val track = Track(
-                                    id = item.trackId,
-                                    title = item.title,
-                                    artist = item.artist,
-                                    album = item.album,
-                                    thumbnailUri = item.thumbnailUri
-                                )
+                            history = history,
+                            currentTrackId = playbackState.currentTrack?.id,
+                            isPlaying = playbackState.isPlaying,
+                            isLoading = playbackState.isLoading,
+                            favoriteIds = favoriteIds,
+                            onHistoryItemClick = { item -> app.playbackManager.playTrack(Track(
+                                id = item.trackId, title = item.title, artist = item.artist, album = item.album,
+                                thumbnailUri = item.thumbnailUri)) },
+                            onAddToQueue = { item -> app.playbackManager.addToQueue(Track(
+                                id = item.trackId, title = item.title, artist = item.artist, album = item.album,
+                                thumbnailUri = item.thumbnailUri)) },
+                            onToggleFavorite = { item -> scope.launch {
+                                val track = Track(item.trackId, item.title, item.artist, item.album, thumbnailUri = item.thumbnailUri)
                                 app.database.trackDao().insertTrack(track)
-                                if (favoriteIds.contains(track.id)) {
-                                    app.database.trackDao().removeFavorite(track.id)
-                                } else {
-                                    app.database.trackDao().addFavorite(FavoriteEntity(track.id))
-                                }
-                            }
-                        }
-                    ) }
+                                if (track.id in favoriteIds) app.database.trackDao().removeFavorite(track.id)
+                                else app.database.trackDao().addFavorite(FavoriteEntity(track.id))
+                            } }
+                        ) }
                     )
                 }
                 }
@@ -385,6 +489,7 @@ fun KasaneApp(app: KasaneApplication) {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun HomeScreen(
     currentTrack: Track?,
     isPlaying: Boolean,
@@ -402,11 +507,18 @@ fun HomeScreen(
     homeError: String? = null,
     onRetryHome: () -> Unit = {},
     catalogShelves: List<CatalogShelf> = emptyList(),
-    onCatalogOpen: (CatalogItem) -> Unit = {}
+    onCatalogOpen: (CatalogItem) -> Unit = {},
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {}
 ) {
     val listenAgain = remember(recentHistory) { HomeFeedPolicy.latestHistory(recentHistory) }
     val uniqueRecommendations = remember(recommendations) { HomeFeedPolicy.uniqueTracks(recommendations) }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = onRefresh,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+    LazyColumn(state = androidx.compose.foundation.lazy.rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(cord.kasane.music.R.mipmap.ic_launcher), null, modifier = Modifier.size(32.dp))
@@ -456,6 +568,7 @@ fun HomeScreen(
             }
         }
     }
+    }
 }
 
 @Composable
@@ -467,17 +580,76 @@ private fun SectionTitle(title: String, subtitle: String) {
 }
 
 @Composable
-fun LibraryScreen(showingHistory: Boolean, onSelectHistory: (Boolean) -> Unit,
-    favoritesContent: @Composable () -> Unit, historyContent: @Composable () -> Unit, onOpenAccount: (() -> Unit)? = null) {
+fun LibraryScreen(
+    accountState: AccountState,
+    accountProvider: cord.kasane.music.provider.AccountLibraryProvider,
+    filter: String,
+    onFilter: (String) -> Unit,
+    showingHistory: Boolean,
+    onSelectHistory: (Boolean) -> Unit,
+    onSignIn: () -> Unit,
+    onExpired: () -> Unit,
+    onCatalogOpen: (CatalogItem) -> Unit,
+    onAddToQueue: (Track) -> Unit,
+    favoritesContent: @Composable () -> Unit,
+    historyContent: @Composable () -> Unit,
+    cachedCatalog: cord.kasane.music.data.CachedCatalogRepository? = null,
+    session: AccountSession? = null,
+    favoritesCount: Int = 0,
+    historyCount: Int = 0,
+) {
     Column(Modifier.fillMaxSize()) {
-        Text("Your library", style = KasaneTypography.titleLarge, modifier = Modifier.padding(20.dp))
-        if (onOpenAccount != null) TextButton(onClick = onOpenAccount, modifier = Modifier.padding(horizontal = 12.dp)) { Text("YouTube Music account library") }
-        Text("On this device · favorites and listening history", color = Gray400, modifier = Modifier.padding(horizontal = 20.dp))
-        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            cord.kasane.music.ui.components.KasaneChoiceChip("Favorites", !showingHistory, { onSelectHistory(false) })
-            cord.kasane.music.ui.components.KasaneChoiceChip("History", showingHistory, { onSelectHistory(true) })
+        Text("Your library", color = White, style = KasaneTypography.titleLarge, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 12.dp))
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(listOf("All", "Playlists", "Songs", "Albums", "Artists")) { item ->
+                cord.kasane.music.ui.components.KasaneChoiceChip(item, filter == item, { onFilter(item) })
+            }
         }
-        Box(Modifier.weight(1f)) { if (showingHistory) historyContent() else favoritesContent() }
+        when (filter) {
+            "Songs" -> {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (showingHistory) "Recently played" else "Favorites", color = White, style = KasaneTypography.titleMedium, modifier = Modifier.weight(1f))
+                    Text("On this device", color = Gray400, style = KasaneTypography.labelMedium)
+                }
+                Box(Modifier.weight(1f)) { if (showingHistory) historyContent() else favoritesContent() }
+            }
+            "Playlists", "Albums", "Artists" -> AccountLibraryScreen(
+                accountState, accountProvider, onSignIn, onCatalogOpen, onAddToQueue, onExpired,
+                modifier = Modifier.weight(1f).fillMaxWidth(), cachedCatalog = cachedCatalog, session = session,
+                selected = when (filter) {
+                    "Albums" -> cord.kasane.music.provider.AccountCollection.ALBUMS
+                    "Artists" -> cord.kasane.music.provider.AccountCollection.ARTISTS
+                    else -> cord.kasane.music.provider.AccountCollection.PLAYLISTS
+                }
+            )
+            else -> {
+                Column(Modifier.weight(1f).fillMaxWidth()) {
+                    LibraryCollectionRow("Favorites", "$favoritesCount songs · On this device", Icons.Default.Favorite) {
+                        onFilter("Songs"); onSelectHistory(false)
+                    }
+                    LibraryCollectionRow("History", "$historyCount played · On this device", Icons.Default.History) {
+                        onFilter("Songs"); onSelectHistory(true)
+                    }
+                    Text("YouTube Music", color = Gray400, style = KasaneTypography.labelMedium,
+                        modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 6.dp))
+                    AccountLibraryScreen(accountState, accountProvider, onSignIn, onCatalogOpen, onAddToQueue, onExpired,
+                        modifier = Modifier.weight(1f).fillMaxWidth(), cachedCatalog = cachedCatalog, session = session,
+                        selected = cord.kasane.music.provider.AccountCollection.PLAYLISTS)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryCollectionRow(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = AccentRose, modifier = Modifier.size(34.dp))
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(title, color = White, style = KasaneTypography.bodyLarge)
+            Text(subtitle, color = Gray400, style = KasaneTypography.bodySmall)
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = Gray400)
     }
 }
 
@@ -709,7 +881,51 @@ fun SearchScreenPreview() {
 fun LibraryScreenPreview() {
     MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
         Surface(color = Gray950) {
-            LibraryScreen(false, {}, { FavoritesScreen(emptyList(), null, false, false, {}, {}, {}) }, {}, onOpenAccount = {})
+            val provider = remember { object : cord.kasane.music.provider.AccountLibraryProvider {
+                override suspend fun collection(collection: cord.kasane.music.provider.AccountCollection, continuation: String?) = cord.kasane.music.model.CatalogPage("", "", null, emptyList())
+                override suspend fun playlist(playlistId: String, continuation: String?) = cord.kasane.music.model.CatalogPage("", "", null, emptyList())
+                override suspend fun setLiked(videoId: String, liked: Boolean) = Unit
+            } }
+            LibraryScreen(accountState = AccountState.Guest, accountProvider = provider, filter = "All", onFilter = {},
+                showingHistory = false, onSelectHistory = {}, onSignIn = {}, onExpired = {}, onCatalogOpen = {}, onAddToQueue = {},
+                favoritesContent = { FavoritesScreen(emptyList(), null, false, false, {}, {}, {}) }, historyContent = {})
+        }
+    }
+}
+
+@Preview(name = "Library · YouTube Music", showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+fun LibraryOnlinePreview() {
+    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+        Surface(color = Gray950) {
+            val provider = remember { object : cord.kasane.music.provider.AccountLibraryProvider {
+                override suspend fun collection(collection: cord.kasane.music.provider.AccountCollection, continuation: String?) =
+                    when (collection) {
+                        cord.kasane.music.provider.AccountCollection.PLAYLISTS -> cord.kasane.music.model.CatalogPage(
+                            "Playlists", "", null, listOf(cord.kasane.music.model.CatalogShelf("Playlists", listOf(
+                                CatalogItem("PLpreview", cord.kasane.music.model.CatalogKind.PLAYLIST, "Late night drive", "Kasane Preview")
+                            )))
+                        )
+                        cord.kasane.music.provider.AccountCollection.ALBUMS -> cord.kasane.music.model.CatalogPage("Albums", "", null, emptyList())
+                        cord.kasane.music.provider.AccountCollection.ARTISTS -> cord.kasane.music.model.CatalogPage("Artists", "", null, emptyList())
+                    }
+                override suspend fun playlist(playlistId: String, continuation: String?) = cord.kasane.music.model.CatalogPage("", "", null, emptyList())
+                override suspend fun setLiked(videoId: String, liked: Boolean) = Unit
+            } }
+            LibraryScreen(
+                accountState = AccountState.SignedIn(cord.kasane.music.auth.AccountIdentity("Preview Listener", null, "UCpreview")),
+                accountProvider = provider,
+                filter = "Playlists",
+                onFilter = {},
+                showingHistory = false,
+                onSelectHistory = {},
+                onSignIn = {},
+                onExpired = {},
+                onCatalogOpen = {},
+                onAddToQueue = {},
+                favoritesContent = {},
+                historyContent = {},
+            )
         }
     }
 }

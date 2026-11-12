@@ -21,13 +21,13 @@ class YouTubeMusicProvider(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build(),
-    private val playerDiagnostic: (String) -> Unit = {}
+    private val playerDiagnostic: (String) -> Unit = {},
+    accountSession: () -> cord.kasane.music.auth.AccountSession? = { null },
 ) : MusicProvider {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    val catalog = OnlineCatalog(client) { accountSession?.invoke() }
-    var accountSession: (() -> cord.kasane.music.auth.AccountSession?)? = null
+    val catalog = OnlineCatalog(client, accountSession)
     override suspend fun search(query: String, limit: Int): List<Track> =
         catalog.search(query, cord.kasane.music.model.CatalogKind.SONG).tracks.take(limit)
 

@@ -24,16 +24,16 @@
    - Второй запрос возвращает статус `OK` с валидными `adaptiveFormats`.
    - **Безопасность**: Данные `visitorData` являются временными и анонимными; токены аккаунтов, cookies и секреты не логируются и не сохраняются на диск.
 
-### 2.2. Решение проблемы HTTP 403 / 410 на CDN (`AudioRange.kt`, `YouTubeDataSource.kt`)
-1. **Симптом**: При запросе медиаданных с CDN серверов Google возвращался код ошибки `403 Forbidden` или `410 Gone`.
-2. **Первопричина**:
-   - Аудио-CDN YouTube блокирует безлимитные HTTP Range-запросы (например, `Range: bytes=0-`).
-   - Истекает срок действия временного URL стрима (параметр `expire`).
-3. **Реализация**:
-   - **Bounded Range Chunks**: Запросы квантуются по 512 КБ (`CHUNK_BYTES = 512 * 1024L`).
-   - Диапазон байт передаётся непосредственно в query-параметре URL: `?range=START-END`. Заголовок `Range` удаляется из запроса, предотвращая двойное смещение.
-   - **Автоматический Refresh при 403/410**: Метод `resolver.open(id)` при перехвате `AudioHttpException(403 | 410)` выполняет единичный принудительный запрос нового URL стрима с сохранением того же `itag` и возобновляет чтение с текущей позиции.
-   - **Совместимость с Media3**: `YouTubeDataSource` интегрирован в `ExoPlayer` через кастомный `DataSource.Factory`. В очереди плеера используются стабильные URI `kasane://track/<videoId>`.
+### 2.2. Диагностика HTTP 403 на CDN (`AudioRange.kt`, `YouTubeDataSource.kt`)
+
+Ранее документация приписывала обрыв истечению URL и размеру диапазона, но live-проверка этого не подтвердила. При проверке в ноябре 2026 первый диапазон публичного трека вернул `200`, следующий — `403`; принудительное получение свежего URL с тем же `ANDROID_VR` и itag также вернуло `403`. На том же URL диапазон 512 KiB со смещением `524288` получил `403`, а несколько меньших диапазонов прошли, но дальнейшее уменьшение чанка не устранило отказ. Значит, размер чанка и истечение URL не установлены как причина.
+
+Независимый разбор этого текущего симптома сообщает, что Google Video Server ограничивает `ANDROID_VR` примерно первым 60–76 секундами без GVS Proof-of-Origin token; простая замена/обновление URL не помогает. См. [yt-dlp issue #17348](https://github.com/yt-dlp/yt-dlp/issues/17348) и [диагностику GVS 403 с ANDROID_VR](https://github.com/anxdpanic/plugin.video.youtube/issues/1481). Это внешние инженерные наблюдения, а не гарантия API. Получать или подделывать attestation/PO token Kasane не будет.
+
+В `YouTubeDataSource` сохранено ограниченное повторное разрешение потока при CDN 403/410 во время `read()`: чтение возобновляется с текущего абсолютного byte offset и требует прежний itag. Повторы ограничены и сбрасываются только после успешного продвижения данных. Это покрывает истёкшие URL, но **не решает наблюдаемый отказ `ANDROID_VR` на GVS**. Полное воспроизведение гостевого стрима остаётся заблокировано внешним ограничением клиента; нужно перейти на совместимый легитимный player profile/поток либо официально доступный способ выдачи необходимых credentials, если он появится.
+
+- Запросы продолжают использовать bounded query ranges и стабильные `kasane://track/<videoId>` URI Media3.
+- Текущая live-проверка наблюдала cutoff, но не выполняла длительное воспроизведение через Media3 на Pixel после этой диагностики.
 
 ---
 
@@ -41,24 +41,24 @@
 
 | Модуль | Статус | Примечания |
 |---|---|---|
-| **Гостевое воспроизведение** | Готово, проверено на устройстве | Работает через `GuestPlayerResolver` + `YouTubeDataSource`. |
+| **Гостевое воспроизведение** | Ограничено / upstream blocker | Старт аудио проходит, но CDN может вернуть 403 примерно после начального участка для `ANDROID_VR`; full-track playback не подтвержден. |
 | **Каталог и поиск** | Готово, проверено | Типизированные песни, альбомы, артисты, плейлисты. |
 | **Очередь Media3** | Готово | Единая очередь в `PlaybackService`, дедупликация через `QueuePolicy`. |
-| **Google/YTM Login** | Заблокировано неподдерживаемым способом получения сессии | Android Keystore, проверка и сохранение сессии — только заготовки; в приложении нет процесса входа. Официальный Google OAuth не выдаёт web-session cookies, которые требует текущий InnerTube account provider. Profile объясняет ограничение; Kasane не перехватывает cookies браузера и не принимает пароль. |
-| **Библиотека аккаунта** | Заблокировано отсутствием логина | В гостевом режиме запросы отклоняются; локальная база Room работает независимо. |
+| **Google/YTM Login** | Web-session login implemented; real account not yet verified | User completes Google sign-in inside a short-lived, origin-restricted WebView. Session is accepted only after the user confirms a channel and authenticated `account_menu` succeeds. Google refusal is shown without bypass. |
+| **Библиотека аккаунта** | InnerTube collections wired; real account not yet verified | Liked Songs, playlists, saved albums and subscriptions use authenticated InnerTube browse IDs. Local Favorites and History remain independent. |
 | **Офлайн / Скачивание** | Не начато (Non-goal на данном этапе) | Воспроизведение работает исключительно в online-режиме через CDN стримы. |
 
 ---
 
-## 4. Авторизация аккаунта: исследование и блокер
+## 4. Авторизация аккаунта: Web session
 
-- Google поддерживает авторизацию нативных приложений через внешний браузер и OAuth scopes для YouTube Data API. Это даёт доступ только к документированным YouTube API ресурсам и не создаёт SAPISID cookie или другую InnerTube web session.
-- Текущий `OnlineCatalog` подписывает account-запросы через `SAPISID`/`__Secure-3PAPISID`, `authUser` и, для некоторых действий, `delegatedSessionId`. Обычный Google ID/access token нельзя безопасно преобразовать в эти данные.
-- Актуальные Metrolist и BitChord получают InnerTube session из cookie jar встроенного WebView. Limusic описывает in-app web login/cookie-paste и использует webview для части InnerTube-поведения. Это неподдерживаемые web-session integrations; Kasane не переносит их код и не внедряет cookie capture. Google OAuth policy запрещает направлять OAuth authorization в embedded user-agent, который контролирует приложение.
-- Источники исследования: [Metrolist LoginScreen](https://github.com/MetrolistGroup/Metrolist/blob/main/app/src/main/kotlin/com/metrolist/music/ui/screens/LoginScreen.kt), [BitChord YtMusicLoginScreen](https://github.com/kushagrasinghx/BitChord/blob/main/app/src/main/java/com/music/bitchord/auth/YtMusicLoginScreen.kt), [Limusic README](https://github.com/SimoHypers/limusic), [Google OAuth 2.0 Policies](https://developers.google.com/identity/protocols/oauth2/policies), [YouTube Data API authorization](https://developers.google.com/youtube/v3/guides/authentication).
-- Код этих проектов в Kasane не копировался; лицензии не использовались как основание для переноса реализации.
-- Поэтому реальный вход в аккаунт и облачная библиотека остаются заблокированы. Нужен поддерживаемый Google API с нужными YouTube Music данными либо официальный безопасный механизм получения именно такой сессии. До этого Profile явно показывает ограничение, а локальные избранное/история и гостевое воспроизведение остаются доступны.
-- Проверки проекта не включают реальную авторизацию Google или доступ к персональной библиотеке.
+- Profile opens a temporary WebView on Google’s real sign-in flow, with JavaScript enabled only for the site and no JavaScript bridge. Navigation is HTTPS-only and exact-host allowlisted; file/content access, mixed content, popups, geolocation, media permissions, and TLS error overrides are denied.
+- After YouTube Music is ready, the user explicitly requests session checking. Kasane reads a small allowlist of auth cookies only from `https://music.youtube.com`, plus `VISITOR_DATA`, `DATASYNC_ID`, and `SESSION_INDEX` from a fixed `ytcfg` probe. Credentials are never logged or sent to another host.
+- `account/accounts_list` returns channel options; multiple channels require an explicit selection. The session is encrypted using Android Keystore AES-GCM in `noBackupFilesDir` and is saved only after `account/account_menu` identifies the selected channel.
+- Logout removes the encrypted Kasane session and the app WebView cookie/storage state. It does not call Google logout and does not clear Chrome or other apps.
+- Guest catalog requests do not inherit account cookies. Guest streaming, local Favorites, and History remain unchanged.
+- Sources studied (no code copied): [Metrolist LoginScreen](https://github.com/MetrolistGroup/Metrolist/blob/main/app/src/main/kotlin/com/metrolist/music/ui/screens/LoginScreen.kt), [BitChord YtMusicLoginScreen](https://github.com/kushagrasinghx/BitChord/blob/main/app/src/main/java/com/music/bitchord/auth/YtMusicLoginScreen.kt).
+- The implementation has not yet been tested with a real Google account or a live authenticated response. Google may reject embedded sign-in; Kasane shows that refusal and does not bypass it. Account library and personalized Home therefore remain pending user verification.
 
 ## 5. Верификация и диагностика
 

@@ -1,4 +1,4 @@
-# Kasane — v0.1.0-alpha
+# Kasane — v0.1.1-alpha
 
 <p align="center"><img src="assets/logo.svg" alt="Kasane" width="128" height="128"></p>
 
@@ -10,11 +10,11 @@ Kasane is a music player for Android and Linux. This is an early source-only alp
 |---|---|
 | Android | Active development |
 | Linux | Active development |
-| YouTube Music guest streaming | Implemented on Android |
+| YouTube Music guest streaming | Starts on Android; full-track reliability has an upstream GVS 403 limitation under investigation |
 | Search and catalog | Implemented on Android |
 | Local favorites and listening history | Implemented |
-| Google login | Not yet available |
-| YouTube Music account library | Not yet available |
+| Google login | Android Web-session login implemented and user-confirmed |
+| YouTube Music account library | Partial authenticated browse support on Android |
 | Local audio playback | Planned |
 | Offline downloads | Planned |
 | Automix | Planned |
