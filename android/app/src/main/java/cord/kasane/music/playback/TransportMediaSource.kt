@@ -16,7 +16,6 @@ import java.io.IOException
 class TransportMediaSource(
     private val item: MediaItem,
     private val resolve: suspend (String) -> PlaybackStream,
-    private val progressive: MediaSource.Factory,
     private val network: DataSource.Factory,
 ) : CompositeMediaSource<Unit>() {
     private var child: MediaSource? = null
@@ -30,8 +29,7 @@ class TransportMediaSource(
         val current = ++generation
         job = CoroutineScope(Dispatchers.IO).launch {
             val result = try { resolve(item.mediaId) } catch (e: CancellationException) { throw e
-            } catch (e: StreamUnavailableException) { UnavailableStream(e.message ?: "This track is unavailable.")
-            } catch (_: Exception) { UnavailableStream("Could not resolve audio. Check your connection and retry.") }
+            } catch (e: Exception) { playbackFailure(e) }
             handler.post {
                 if (current != generation) return@post
                 when (result) {
@@ -40,10 +38,32 @@ class TransportMediaSource(
                         child = androidx.media3.exoplayer.hls.HlsMediaSource.Factory(network)
                             .setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy()).createMediaSource(resolved)
                     }
-                    is ProgressiveStream -> child = progressive.createMediaSource(item)
-                    is UnavailableStream -> failure = IOException(result.reason)
+                    is ProgressiveStream -> child = ProgressiveMediaSource.Factory(network)
+                        .setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy()).createMediaSource(
+                            item.buildUpon().setUri(result.audio.url).setMimeType(result.audio.mimeType.substringBefore(';').trim()).build())
+                    is UnavailableStream -> failure = TransportUnavailableException(result.reason)
                 }
-                child?.let { prepareChildSource(Unit, it) }
+                val profile = if (result is HlsStream) result.clientProfile else if (result is ProgressiveStream) result.clientProfile else "none"
+                val transport = if (result is HlsStream) "HLS" else if (result is ProgressiveStream) "PROGRESSIVE" else "UNAVAILABLE"
+                android.util.Log.i("KasanePlayback", "videoId=${item.mediaId} client=$profile transport=$transport reason=${if (result is UnavailableStream) result.code else "selected"} mime=${if (result is HlsStream) MimeTypes.APPLICATION_M3U8 else if (result is ProgressiveStream) result.audio.mimeType else "unknown"}")
+                child?.let { source ->
+                    var loadIndex = 0
+                    val failures = mutableMapOf<Long, Int>()
+                    source.addEventListener(handler, object : MediaSourceEventListener {
+                        override fun onLoadCompleted(windowIndex: Int, mediaPeriodId: MediaSource.MediaPeriodId?, info: LoadEventInfo, data: MediaLoadData) {
+                            loadIndex++
+                            val recoveredAttempts = failures.remove(info.loadTaskId) ?: 0
+                            android.util.Log.i("KasanePlayback", "videoId=${item.mediaId} client=$profile transport=$transport load=$loadIndex http=2xx recoveryAttempts=$recoveredAttempts dataType=${data.dataType} segmentStartMs=${data.mediaStartTimeMs} offset=${info.dataSpec.position + info.bytesLoaded} bytes=${info.bytesLoaded} durationMs=${info.loadDurationMs}")
+                        }
+                        override fun onLoadError(windowIndex: Int, mediaPeriodId: MediaSource.MediaPeriodId?, info: LoadEventInfo, data: MediaLoadData, error: IOException, wasCanceled: Boolean) {
+                            val attempt = (failures[info.loadTaskId] ?: 0) + 1
+                            failures[info.loadTaskId] = attempt
+                            val http = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+                            android.util.Log.w("KasanePlayback", "videoId=${item.mediaId} client=$profile transport=$transport load=$loadIndex task=${info.loadTaskId} attempt=$attempt recoveryAttempts=${attempt - 1} segmentStartMs=${data.mediaStartTimeMs} offset=${info.dataSpec.position + info.bytesLoaded} bytes=${info.bytesLoaded} http=${http?.responseCode ?: -1} error=${error.javaClass.simpleName} canceled=$wasCanceled")
+                        }
+                    })
+                    prepareChildSource(Unit, source)
+                }
             }
         }
     }
@@ -70,8 +90,7 @@ class TransportMediaSource(
 class BoundedStreamLoadPolicy : DefaultLoadErrorHandlingPolicy(2) {
     override fun getRetryDelayMsFor(info: androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo): Long {
         val error = info.exception
-        if (error is HttpDataSource.InvalidResponseCodeException && error.responseCode in listOf(401, 403, 404, 410)) return C.TIME_UNSET
-        if (info.errorCount > 2) return C.TIME_UNSET
+        if (!PlaybackRetryPolicy.canRetry((error as? HttpDataSource.InvalidResponseCodeException)?.responseCode, info.errorCount)) return C.TIME_UNSET
         return super.getRetryDelayMsFor(info)
     }
 }

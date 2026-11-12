@@ -25,4 +25,4 @@ The script refuses a fresh install, split/unresolvable base package, mismatched 
 
 ## Exporting local data
 
-Profile → **Export local data** uses Android's document picker and writes JSON containing device Favorites and listening History. The export schema also has preferences and local-playlist fields for future persistence; in the current app those are empty because those settings/playlists are not yet stored. Account cookies, tokens, encrypted session files, and Media3 stream URLs are excluded by the export model.
+Profile → **Export local data** uses Android's document picker and writes JSON containing device Favorites and listening History. The export schema also has preferences and local-playlist fields for future persistence; the Autoplay setting is now explicitly exported; local playlists remain empty because that feature is not implemented. Account cookies, tokens, encrypted session files, and Media3 stream URLs are excluded by the export model.

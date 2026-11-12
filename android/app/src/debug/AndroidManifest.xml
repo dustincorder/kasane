@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Loopback HTTP fixture server, only in isolated debug builds. -->
-    <application android:networkSecurityConfig="@xml/fixture_network_security" />
+    <application android:networkSecurityConfig="@xml/fixture_network_security">
+        <activity android:name="cord.kasane.music.playback.PlaybackProbeActivity" android:exported="false" />
+    </application>
 </manifest>

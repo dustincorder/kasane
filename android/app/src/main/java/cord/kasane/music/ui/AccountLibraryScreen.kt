@@ -74,6 +74,10 @@ fun AccountLibraryScreen(state: AccountState, provider: AccountLibraryProvider, 
         catch (e: Exception) { error = e.message ?: "Could not load your account library." }
         finally { loading = false; handledRevision = revision; onRefreshState?.invoke(false) }
     }
+    val cloudLikes = cord.kasane.music.ui.components.LocalCloudLikes.current
+    LaunchedEffect(page, selectedPlaylistId, cloudLikes) {
+        if (selectedPlaylistId == "VLLM") cloudLikes?.seedLiked(page?.tracks.orEmpty().map { it.id })
+    }
     androidx.compose.material3.pulltorefresh.PullToRefreshBox(isRefreshing = loading && page != null, onRefresh = { revision++ }, modifier = modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
         if (state !is AccountState.SignedIn) {

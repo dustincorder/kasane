@@ -10,7 +10,7 @@ Kasane is a music player for Android and Linux. This is an early source-only alp
 |---|---|
 | Android | Active development |
 | Linux | Active development |
-| YouTube Music guest streaming | Starts on Android; full-track reliability has an upstream GVS 403 limitation under investigation |
+| YouTube Music guest streaming | One full public IOS HLS track verified in Media3; SABR-only content remains unsupported, with no automatic ANDROID_VR fallback |
 | Search and catalog | Implemented on Android |
 | Local favorites and listening history | Implemented |
 | Google login | Android Web-session login implemented and user-confirmed |
@@ -18,6 +18,8 @@ Kasane is a music player for Android and Linux. This is an early source-only alp
 | Local audio playback | Planned |
 | Offline downloads | Planned |
 | Automix | Planned |
+
+Current playback/radio evidence and account-verification limits are recorded in [Android core reliability](docs/android-core-reliability.md).
 
 The Android client uses Kotlin, Jetpack Compose, Room, Media3, and ExoPlayer. The Linux client uses Rust, Tauri 2, Svelte, and SQLite. The clients do not yet share a unified library or playback queue.
 

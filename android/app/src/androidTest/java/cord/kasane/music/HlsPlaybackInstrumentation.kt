@@ -17,8 +17,13 @@ import kotlin.concurrent.thread
 /** Synthetic tone only, disposable emulator only. No account/network/production package access. */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class HlsPlaybackInstrumentation : Instrumentation() {
+    private var radioOnly = false
     private var liveOnly = false
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); liveOnly = arguments?.getString("live") == "true"; start() }
+    private var liveVideoId = "dQw4w9WgXcQ"
+    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); liveOnly = arguments?.getString("live") == "true"
+        radioOnly = arguments?.getString("radio") == "true"
+        arguments?.getString("videoId")?.let { require(it.matches(Regex("[A-Za-z0-9_-]{11}"))); liveVideoId = it }
+        start() }
     private fun <T> main(block: () -> T): T {
         var value: T? = null; var error: Throwable? = null
         runOnMainSync { try { value = block() } catch (e: Throwable) { error = e } }
@@ -35,34 +40,75 @@ class HlsPlaybackInstrumentation : Instrumentation() {
     }
     private fun runPublicHls() {
         var player: ExoPlayer? = null
+        var activity: Activity? = null
         try {
+            activity = startActivitySync(android.content.Intent(targetContext, cord.kasane.music.playback.PlaybackProbeActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
             val stream = kotlinx.coroutines.runBlocking {
                 cord.kasane.music.provider.HlsPlayerResolver(okhttp3.OkHttpClient.Builder()
-                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS).readTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build()).resolve("dQw4w9WgXcQ")
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS).readTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build()).resolve(liveVideoId)
             }
             if (stream !is HlsStream) {
-                finish(Activity.RESULT_CANCELED, Bundle().apply { putString("stream", "PUBLIC HLS unavailable for dQw4w9WgXcQ; no playable manifest supplied.\n") })
+                finish(Activity.RESULT_CANCELED, Bundle().apply { putString("stream", "PUBLIC HLS unavailable for $liveVideoId; no playable manifest supplied.\n") })
                 return
             }
             player = main {
                 val network = DefaultHttpDataSource.Factory()
                 ExoPlayer.Builder(targetContext).build().apply {
                     volume = 0f
-                    setMediaSource(TransportMediaSource(MediaItem.Builder().setMediaId("dQw4w9WgXcQ")
-                        .setUri("kasane://track/dQw4w9WgXcQ").build(), { stream }, DefaultMediaSourceFactory(network), network))
+                    trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).build()
+                    setMediaSource(TransportMediaSource(MediaItem.Builder().setMediaId(liveVideoId)
+                        .setUri("kasane://track/$liveVideoId").build(), { stream }, network))
                     prepare(); play()
                 }
             }
             val p = player!!
+            waitFor("public audio decode", 40000) { p.isPlaying || p.playerError != null }
+            main { check(p.playerError == null) }
+            sendStatus(0, Bundle().apply { putString("stream", "PUBLIC HLS Media3 started: $liveVideoId\n") })
             waitFor("public full playback", 280000) { p.playbackState == Player.STATE_ENDED || p.playerError != null }
-            main { check(p.playerError == null); check(p.currentPosition > 200000); check(p.playbackState == Player.STATE_ENDED) }
-            finish(Activity.RESULT_OK, Bundle().apply { putString("stream", "PUBLIC HLS full Media3 playback passed: dQw4w9WgXcQ, IOS, position=${main { p.currentPosition }}ms\n") })
+            main { check(p.playerError == null); check(p.duration > 60000 && p.currentPosition >= p.duration - 300); check(p.playbackState == Player.STATE_ENDED) }
+            finish(Activity.RESULT_OK, Bundle().apply { putString("stream", "PUBLIC HLS full Media3 playback passed: $liveVideoId, IOS, position=${main { p.currentPosition }}ms\n") })
         } catch (e: Throwable) {
             finish(Activity.RESULT_CANCELED, Bundle().apply { putString("stream", "PUBLIC HLS failed: ${e.javaClass.simpleName}${if (e is java.io.IOException) ": ${e.message}" else ""}\n") })
-        } finally { main { player?.release() } }
+        } finally { main { player?.release(); activity?.finish() } }
+    }
+    private fun runRadioPrefetch() {
+        var controller: androidx.media3.session.MediaController? = null
+        var activity: Activity? = null
+        try {
+            activity = startActivitySync(android.content.Intent(targetContext, cord.kasane.music.playback.PlaybackProbeActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            val future = main {
+                androidx.media3.session.MediaController.Builder(targetContext, androidx.media3.session.SessionToken(targetContext,
+                    android.content.ComponentName(targetContext, cord.kasane.music.playback.PlaybackService::class.java))).buildAsync()
+            }
+            controller = future.get(30, java.util.concurrent.TimeUnit.SECONDS)
+            val p = controller!!
+            main {
+                p.volume = 0f
+                p.setMediaItems(listOf(cord.kasane.music.playback.PlaybackService.trackToMediaItem(
+                    cord.kasane.music.model.Track("dQw4w9WgXcQ", "Never Gonna Give You Up", "Rick Astley"), radioMode = "single")))
+                p.addMediaItem(cord.kasane.music.playback.PlaybackService.trackToMediaItem(
+                    cord.kasane.music.model.Track("wzpAehzNCU8", "Brand New Day", "BLits Games")))
+                p.prepare(); p.play()
+            }
+            waitFor("radio prefetch before track end", 45000) { p.mediaItemCount > 2 }
+            main {
+                val ids = (0 until p.mediaItemCount).map { p.getMediaItemAt(it).mediaId }
+                check(ids.first() == "dQw4w9WgXcQ")
+                check(ids[1] == "wzpAehzNCU8")
+                check(ids.size == ids.distinct().size)
+                check(p.currentPosition < 45000)
+            }
+            finish(Activity.RESULT_OK, Bundle().apply { putString("stream", "RADIO PREFETCH PASSED: queue=${main { p.mediaItemCount }} manual-preserved=true deduplicated=true before-end=true\n") })
+        } catch (e: Throwable) {
+            finish(Activity.RESULT_CANCELED, Bundle().apply { putString("stream", "RADIO PREFETCH FAILED: ${e.javaClass.simpleName}\n") })
+        } finally { main { controller?.stop(); controller?.clearMediaItems(); controller?.release(); activity?.finish() } }
     }
     override fun onStart() {
         check(android.os.Build.HARDWARE in setOf("ranchu", "goldfish")) { "Disposable emulator required" }
+        if (radioOnly) { runRadioPrefetch(); return }
         if (liveOnly) { runPublicHls(); return }
         val server = ServerSocket(0, 16, java.net.InetAddress.getByName("127.0.0.1"))
         val requests = Collections.synchronizedList(mutableListOf<String>())
@@ -91,13 +137,12 @@ class HlsPlaybackInstrumentation : Instrumentation() {
             check(android.os.Build.HARDWARE in setOf("ranchu", "goldfish")) { "Disposable emulator required" }
             player = main {
                 val network = DefaultHttpDataSource.Factory()
-                val progressive = DefaultMediaSourceFactory(network)
                 ExoPlayer.Builder(targetContext).setMediaSourceFactory(
                     DefaultMediaSourceFactory(network).setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy())).build().apply {
                     volume = 0f
                     setMediaSource(TransportMediaSource(
                         MediaItem.Builder().setMediaId("fixture-1").setUri("kasane://track/fixture-1").build(),
-                        { HlsStream("http://127.0.0.1:${server.localPort}/manifest") }, progressive, network))
+                        { HlsStream("http://127.0.0.1:${server.localPort}/manifest") }, network))
                     prepare(); play()
                 }
             }

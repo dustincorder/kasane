@@ -67,6 +67,32 @@ import android.widget.Toast
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 fun KasaneApp(app: KasaneApplication) {
+    val account by app.accountRepository.state.collectAsState()
+    val session = app.accountRepository.session().takeIf { account is AccountState.SignedIn }
+    val cloud = remember(session) { session?.let { captured -> cord.kasane.music.provider.CloudLikes(
+        read = { id -> app.ytProvider.catalog.likeState(captured, id) },
+        write = { id, liked -> app.ytProvider.catalog.setLikedFor(captured, id, liked) },
+        writeDislike = { id, disliked -> app.ytProvider.catalog.setDislikedFor(captured, id, disliked) }) } }
+    LaunchedEffect(cloud, session) {
+        if (cloud != null && session != null) {
+            val scopeKey = cord.kasane.music.data.CatalogCache.accountScope(session, (account as? AccountState.SignedIn)?.identity)
+            try {
+                app.cachedCatalog.cached(scopeKey, "playlist:VLLM")?.page?.tracks?.let { tracks -> cloud.seedLiked(tracks.map { it.id }) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (_: Exception) { /* Optional hints must not prevent fresh per-track status loading. */ }
+        }
+    }
+    DisposableEffect(cloud) { onDispose { cloud?.close() } }
+    val context = LocalContext.current
+    LaunchedEffect(cloud) { cloud?.errors?.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
+    CompositionLocalProvider(cord.kasane.music.ui.components.LocalCloudLikes provides cloud,
+        cord.kasane.music.ui.components.LocalTrackActions provides cord.kasane.music.ui.components.TrackActions(
+            app.playbackManager::playTrack, app.playbackManager::playNextInQueue, app.playbackManager::addToQueue, app.playbackManager::startRadio)) { KasaneContent(app) }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
+@Composable
+private fun KasaneContent(app: KasaneApplication) {
     MaterialTheme(
         colorScheme = KasaneDarkColorScheme,
         typography = KasaneTypography
@@ -80,7 +106,8 @@ fun KasaneApp(app: KasaneApplication) {
                     withContext(Dispatchers.IO) {
                         val favoritesSnapshot = app.database.trackDao().getFavoritesForExport()
                         val historySnapshot = app.database.trackDao().getHistoryForExport()
-                        val json = LocalDataExporter.encode(favoritesSnapshot, historySnapshot)
+                        val json = LocalDataExporter.encode(favoritesSnapshot, historySnapshot,
+                            preferences = mapOf("autoplay" to context.getSharedPreferences("playback", android.content.Context.MODE_PRIVATE).getBoolean("autoplay", true).toString()))
                         context.contentResolver.openOutputStream(uri, "w")?.bufferedWriter()?.use { it.write(json) }
                             ?: error("Could not open the selected file.")
                     }
@@ -275,6 +302,12 @@ fun KasaneApp(app: KasaneApplication) {
             }
         }
 
+        val openCatalog: (CatalogItem) -> Unit = { entry ->
+            entry.track()?.let { app.playbackManager.playTrack(it) }
+                ?: run { isNowPlayingOpen = false; detailStack = detailStack + entry }
+        }
+        CompositionLocalProvider(cord.kasane.music.ui.components.LocalTrackNavigation provides
+            cord.kasane.music.ui.components.TrackNavigation(app.ytProvider.catalog.trackLinks, openCatalog)) {
         // Fullscreen Now Playing Sheet
         if (isNowPlayingOpen && playbackState.currentTrack != null) {
             val currentTrack = playbackState.currentTrack!!
@@ -407,10 +440,6 @@ fun KasaneApp(app: KasaneApplication) {
                     .padding(innerPadding)
                     .background(Gray950)
             ) {
-                val openCatalog: (CatalogItem) -> Unit = { entry ->
-                    entry.track()?.let { app.playbackManager.playTrack(it) }
-                        ?: run { detailStack = detailStack + entry }
-                }
                 if (detailStack.isNotEmpty()) {
                     val detail = detailStack.last()
                     screenState.SaveableStateProvider("detail:${detail.kind}:${detail.id}") {
@@ -509,6 +538,7 @@ fun KasaneApp(app: KasaneApplication) {
             }
         }
     }
+    }
 }
 
 @Composable
@@ -569,11 +599,9 @@ fun HomeScreen(
                 uniqueRecommendations.isEmpty() -> Text("No recommendations yet. Find something you love in Search.", color = Gray400, modifier = Modifier.padding(20.dp))
                 else -> LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(uniqueRecommendations, key = { it.id }) { track ->
-                        Column(Modifier.width(156.dp).clip(RoundedCornerShape(14.dp)).clickable { onTrackClick(track) }) {
-                            cord.kasane.music.ui.components.TrackArtwork(track.thumbnailUri, Modifier.size(156.dp))
-                            Text(track.title, color = White, maxLines = 2, overflow = TextOverflow.Ellipsis, style = KasaneTypography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
-                            Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Gray400, style = KasaneTypography.bodyMedium)
-                        }
+                        cord.kasane.music.ui.components.TrackCard(track, 156.dp, onClick = { onTrackClick(track) },
+                            modifier = Modifier.clip(RoundedCornerShape(14.dp)),
+                            onLocalFavorite = { onToggleFavorite(track) }, localFavorite = track.id in favoriteIds)
                     }
                 }
             }
@@ -797,7 +825,8 @@ fun FavoritesScreen(
                         onClick = { onTrackClick(track) },
                         onAddToQueue = { onAddToQueue(track) },
                         onToggleFavorite = { onRemoveFavorite(track) },
-                        isFavorite = true
+                        isFavorite = true,
+                        useCloudFavorite = false
                     )
                     HorizontalDivider(
                         color = Gray800,

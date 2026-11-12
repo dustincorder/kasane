@@ -96,17 +96,14 @@ fun NowPlayingSheet(
                     )
                 }
 
-                IconButton(
-                    onClick = onToggleFavorite,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = "Favorite",
-                        tint = if (isFavorite) AccentRose else Gray400,
-                        modifier = Modifier.size(24.dp)
-                    )
+                TrackLikeButton(track, isFavorite, onToggleFavorite, refreshOnEnter = true)
+                var menuOpen by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "Track options") }
+                    TrackContextMenu(track, menuOpen, { menuOpen = false },
+                        onPlay = { if (!uiState.isPlaying) onTogglePlay() }, onLocalFavorite = onToggleFavorite, localFavorite = isFavorite)
                 }
+
             }
 
             Spacer(modifier = Modifier.height(16.dp))

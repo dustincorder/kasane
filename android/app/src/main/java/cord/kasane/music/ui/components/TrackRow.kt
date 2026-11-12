@@ -2,6 +2,7 @@ package cord.kasane.music.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,6 +33,7 @@ fun formatDuration(seconds: Double): String {
     return "%d:%02d".format(mins, secs)
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun TrackRow(
     track: Track,
@@ -42,14 +44,15 @@ fun TrackRow(
     onAddToQueue: (() -> Unit)? = null,
     onToggleFavorite: (() -> Unit)? = null,
     isFavorite: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    useCloudFavorite: Boolean = true
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = { menuExpanded = true })
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -131,12 +134,8 @@ fun TrackRow(
             }
         }
 
-        if (onToggleFavorite != null) {
-            IconButton(onClick = onToggleFavorite) {
-                Icon(if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    if (isFavorite) "Remove favorite" else "Add favorite",
-                    tint = if (isFavorite) AccentRose else Gray400)
-            }
+        if (onToggleFavorite != null || LocalCloudLikes.current != null) {
+            TrackLikeButton(track, isFavorite, onToggleFavorite ?: {}, useCloud = useCloudFavorite)
         }
 
         // Context menu trigger (minimum 48x48 dp touch target)
@@ -153,51 +152,9 @@ fun TrackRow(
                 )
             }
 
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false },
-                modifier = Modifier.background(Gray900)
-            ) {
-                if (onPlayNext != null) {
-                    DropdownMenuItem(text = { Text("Play next", color = Gray200) },
-                        onClick = { menuExpanded = false; onPlayNext() })
-                }
-                if (onAddToQueue != null) {
-                    DropdownMenuItem(
-                        text = { Text("Add to Queue", style = KasaneTypography.bodyMedium, color = Gray200) },
-                        leadingIcon = {
-                            Icon(Icons.Default.PlaylistAdd, contentDescription = null, tint = Gray400, modifier = Modifier.size(18.dp))
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onAddToQueue()
-                        }
-                    )
-                }
-                if (onToggleFavorite != null) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                if (isFavorite) "Remove from Favorites" else "Add to Favorites",
-                                style = KasaneTypography.bodyMedium,
-                                color = Gray200
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = null,
-                                tint = if (isFavorite) AccentRose else Gray400,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onToggleFavorite()
-                        }
-                    )
-                }
-            }
+            TrackContextMenu(track, menuExpanded, { menuExpanded = false }, onClick,
+                onPlayNext, onAddToQueue, onToggleFavorite, isFavorite)
+
         }
     }
 }

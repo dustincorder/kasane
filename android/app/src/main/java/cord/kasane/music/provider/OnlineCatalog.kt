@@ -24,6 +24,8 @@ class OnlineCatalog(
     private val session: () -> AccountSession? = { null },
     private val apiBaseUrl: okhttp3.HttpUrl = "https://music.youtube.com/".toHttpUrl(),
 ) : AccountLibraryProvider, cord.kasane.music.data.CatalogRemote {
+    private val mutableTrackLinks = kotlinx.coroutines.flow.MutableStateFlow<Map<String, TrackLinks>>(emptyMap())
+    val trackLinks: kotlinx.coroutines.flow.StateFlow<Map<String, TrackLinks>> = mutableTrackLinks
     private val origin = "https://music.youtube.com"
 
     init {
@@ -78,6 +80,7 @@ class OnlineCatalog(
                     try {
                         response.use {
                             if (it.code == 401 && account != null) throw SessionExpiredException()
+                            if (it.code == 403 && endpoint == "player") throw PlayerHttpException(403)
                             if (it.code == 403) throw IOException("YouTube Music refused this request. Check account permissions or regional availability.")
                             if (it.code in 300..399) throw IOException("YouTube Music redirected the account request. Sign in again and retry.")
                             if (!it.isSuccessful) throw IOException("YouTube Music request failed (${it.code}). Try again.")
@@ -89,7 +92,13 @@ class OnlineCatalog(
                             if (result.has("error")) throw IOException("YouTube Music could not complete this request.")
                             if (account != null && CatalogParser.objects(result, "mainAppWebResponseContext")
                                     .any { it.optBoolean("loggedOut", false) }) throw SessionExpiredException()
-                            if (continuation.isActive) continuation.resume(result)
+                            if (continuation.isActive) {
+                                val links = TrackLinksParser.parse(result)
+                                if (links.isNotEmpty()) synchronized(mutableTrackLinks) {
+                                    mutableTrackLinks.value = (mutableTrackLinks.value + links).entries.toList().takeLast(1000).associate { entry -> entry.key to entry.value }
+                                }
+                                continuation.resume(result)
+                            }
                         }
                     } catch (e: Exception) {
                         val safe = if (e is IOException) e else IOException("YouTube Music returned an unreadable response.")
@@ -116,15 +125,23 @@ class OnlineCatalog(
         val response = request("browse", JSONObject().put("browseId", "FEmusic_home"), account)
         return withContext(Dispatchers.Default) { CatalogParser.page(response) }
     }
-    suspend fun radio(videoId: String): List<Track> {
-        val response = request("next", JSONObject().put("videoId", videoId).put("playlistId", "RDAMVM$videoId"))
-        // Watch-next uses playlistPanelVideoRenderer, not browse rows.
-        return CatalogParser.objects(response, "playlistPanelVideoRenderer").mapNotNull {
-            val id = it.optString("videoId")
-            if (id.isBlank()) null else Track(id, CatalogParser.text(it.optJSONObject("title")),
-                CatalogParser.text(it.optJSONObject("longBylineText")),
-                thumbnailUri = ThumbnailParser.bestUrl(it.optJSONObject("thumbnail")))
-        }.distinctBy { it.id }
+    data class RadioPage(val tracks: List<Track>, val continuation: String?)
+    suspend fun radio(videoId: String): List<Track> = radioPage(videoId).tracks
+    suspend fun radioPage(videoId: String, continuation: String? = null): RadioPage {
+        val body = if (continuation != null) JSONObject().put("continuation", continuation)
+            else JSONObject().put("videoId", videoId).put("playlistId", "RDAMVM$videoId")
+        val response = request("next", body, session())
+        return withContext(Dispatchers.Default) {
+            val tracks = CatalogParser.objects(response, "playlistPanelVideoRenderer").mapNotNull {
+                val id = it.optString("videoId")
+                if (id.isBlank()) null else Track(id, CatalogParser.text(it.optJSONObject("title")),
+                    CatalogParser.text(it.optJSONObject("longBylineText")),
+                    thumbnailUri = ThumbnailParser.bestUrl(it.optJSONObject("thumbnail")))
+            }.distinctBy { it.id }
+            val token = CatalogParser.objects(response, "nextRadioContinuationData").firstOrNull()
+                ?.optString("continuation")?.takeIf { it.isNotBlank() } ?: CatalogParser.continuation(response)
+            RadioPage(tracks, token)
+        }
     }
 
     suspend fun identity(account: AccountSession): AccountIdentity {
@@ -184,10 +201,22 @@ class OnlineCatalog(
         return withContext(Dispatchers.Default) { CatalogParser.page(response) }
     }
 
-    override suspend fun setLiked(videoId: String, liked: Boolean) {
+    suspend fun likeState(account: AccountSession, videoId: String): CloudLikeState {
+        val response = request("next", JSONObject().put("videoId", videoId), account)
+        return withContext(Dispatchers.Default) { CloudLikeParser.parse(response, videoId) }
+    }
+
+    override suspend fun setLiked(videoId: String, liked: Boolean) = setLikedFor(session() ?: throw SessionExpiredException(), videoId, liked)
+
+    suspend fun setLikedFor(account: AccountSession, videoId: String, liked: Boolean) =
+        setRating(account, videoId, if (liked) "like/like" else "like/removelike")
+
+    suspend fun setDislikedFor(account: AccountSession, videoId: String, disliked: Boolean) =
+        setRating(account, videoId, if (disliked) "like/dislike" else "like/removelike")
+
+    private suspend fun setRating(account: AccountSession, videoId: String, endpoint: String) {
         require(videoId.isNotBlank())
-        val account = session() ?: throw SessionExpiredException()
-        val response = request(if (liked) "like/like" else "like/removelike",
+        val response = request(endpoint,
             JSONObject().put("target", JSONObject().put("videoId", videoId)), account)
         val status = response.optString("status")
         if (status.isNotBlank() && status != "STATUS_SUCCEEDED")

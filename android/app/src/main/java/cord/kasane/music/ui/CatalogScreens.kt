@@ -43,7 +43,9 @@ fun CatalogShelfRow(shelf: CatalogShelf, onOpen: (CatalogItem) -> Unit) {
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp))
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(HomeFeedPolicy.uniqueShelfItems(shelf.items), key = { "${it.kind}:${it.id}" }) { item ->
-                Column(Modifier.width(148.dp).clickable { onOpen(item) }) {
+                val track = item.track()
+                if (track != null) TrackCard(track, 148.dp, onClick = { onOpen(item) })
+                else Column(Modifier.width(148.dp).clickable { onOpen(item) }) {
                     TrackArtwork(item.artwork, Modifier.size(148.dp))
                     Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis, color = White,
                         style = KasaneTypography.bodyLarge, modifier = Modifier.padding(top = 8.dp))

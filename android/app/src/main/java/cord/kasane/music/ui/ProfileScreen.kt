@@ -59,12 +59,25 @@ fun ProfileScreen(
             OutlinedButton(onClick = onSignOut) { Text("Sign out", color = AccentRose) }
         }
         HorizontalDivider(color = Gray800)
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val preferences = remember(context) { context.getSharedPreferences("playback", android.content.Context.MODE_PRIVATE) }
+        var autoplay by remember { mutableStateOf(preferences.getBoolean("autoplay", true)) }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Autoplay", style = KasaneTypography.titleMedium)
+                Text("Build radio for single songs and continue after collections.", color = Gray400)
+            }
+            Switch(checked = autoplay, onCheckedChange = {
+                autoplay = it; preferences.edit().putBoolean("autoplay", it).apply()
+            })
+        }
+        HorizontalDivider(color = Gray800)
         Text("Library sources", style = KasaneTypography.titleMedium)
         Text("Favorites and listening history belong to this device. Signing out does not remove them. YouTube Music collections stay separate from this local library.", color = Gray400)
         OutlinedButton(onClick = onExportLocalData, modifier = Modifier.fillMaxWidth()) {
             Text("Export local data", color = AccentRose)
         }
-        Text("Exports this device's favorites and listening history as JSON. Account cookies and session keys are never included.", color = Gray400)
+        Text("Exports local favorites, listening history and playback settings as JSON. Account cookies and session keys are never included.", color = Gray400)
         HorizontalDivider(color = Gray800)
         Text("About Kasane", style = KasaneTypography.titleMedium)
         Text("Kasane ${cord.kasane.music.BuildConfig.VERSION_NAME} · Android\nOnline music with Media3. Local files and offline downloads are not available.", color = Gray400)

@@ -31,7 +31,7 @@ class YouTubeMusicProvider(
     override suspend fun search(query: String, limit: Int): List<Track> =
         catalog.search(query, cord.kasane.music.model.CatalogKind.SONG).tracks.take(limit)
 
-    val hlsResolver = HlsPlayerResolver(client) { videoId ->
+    val hlsResolver = HlsPlayerResolver(client, diagnostic = { android.util.Log.i("KasanePlayback", it) }) { videoId ->
         accountSession()?.let { account -> catalog.request("player", JSONObject().put("videoId", videoId), account,
             clientVersion = "1.20260707.12.00") }
     }

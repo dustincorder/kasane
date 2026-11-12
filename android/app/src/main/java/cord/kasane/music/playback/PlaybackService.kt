@@ -25,15 +25,111 @@ class PlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var historyRecordedForWindow = false
     private var radioJob: Job? = null
+    private var radioSeed: String? = null
+    private var radioForced = false
+    private var radioCollectionId: String? = null
+    private var radioContinuation: String? = null
+    private var radioGeneration = 0
+    private val requestedRadioPages = mutableSetOf<String>()
+    private val radioFailures = mutableMapOf<String, Int>()
+    private val autoplayListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { preferences, key ->
+        if (key == "autoplay" && ::player.isInitialized) {
+            if (!preferences.getBoolean("autoplay", true) && !radioForced) {
+                radioJob?.cancel(); radioGeneration++
+                requestedRadioPages.remove(radioContinuation ?: "initial:$radioSeed")
+                radioFailures.remove(radioContinuation ?: "initial:$radioSeed")
+            } else fillRadio()
+        }
+    }
+
+    private fun nearQueueEnd(): Boolean {
+        var index = player.currentMediaItemIndex
+        var remaining = 0
+        val timeline = player.currentTimeline
+        while (!timeline.isEmpty && index != C.INDEX_UNSET && remaining <= 4) {
+            remaining++
+            index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+        }
+        return remaining <= 4
+    }
+    private fun configureRadio(item: MediaItem?) {
+        if (item == null || item.mediaMetadata.extras?.getBoolean("isLocal") == true) {
+            radioJob?.cancel(); radioGeneration++; radioSeed = null; radioCollectionId = null
+            radioContinuation = null; requestedRadioPages.clear(); radioFailures.clear(); return
+        }
+        val extras = item.mediaMetadata.extras
+        val mode = extras?.getString("radioMode")
+        if (mode in setOf("single", "forced")) {
+            val forced = mode == "forced"
+            if (radioSeed == item.mediaId && radioCollectionId == null && radioForced == forced) return
+            radioJob?.cancel(); radioGeneration++
+            radioSeed = item.mediaId; radioForced = forced; radioCollectionId = null
+            radioContinuation = null; requestedRadioPages.clear(); radioFailures.clear()
+            // Drop only the previous radio's future entries. Explicit manual/collection items stay.
+            val future = mutableSetOf<Int>()
+            val timeline = player.currentTimeline
+            var index = player.currentMediaItemIndex
+            while (!timeline.isEmpty && index != C.INDEX_UNSET) {
+                index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+                if (index == C.INDEX_UNSET || !future.add(index)) break
+            }
+            future.sortedDescending().forEach { i ->
+                if (player.getMediaItemAt(i).mediaMetadata.extras?.getString("radioMode") == "radio") player.removeMediaItem(i)
+            }
+        } else if (mode == "collection") {
+            val contextId = extras.getString("collectionContext") ?: item.mediaId
+            if (contextId == radioCollectionId) return
+            radioJob?.cancel(); radioGeneration++; radioForced = false; radioCollectionId = contextId
+            radioSeed = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+                .lastOrNull { it.mediaMetadata.extras?.getString("collectionContext") == contextId }?.mediaId ?: item.mediaId
+            radioContinuation = null; requestedRadioPages.clear(); radioFailures.clear()
+        }
+    }
+    private fun fillRadio() {
+        val seed = radioSeed ?: return
+        if (radioJob?.isActive == true || player.mediaItemCount >= QueuePolicy.LIMIT ||
+            !QueuePolicy.shouldPrefetchRadio(nearQueueEnd(), requestedRadioPages.isEmpty(), radioCollectionId != null,
+                player.repeatMode != Player.REPEAT_MODE_OFF,
+                getSharedPreferences("playback", MODE_PRIVATE).getBoolean("autoplay", true), radioForced)) return
+        val token = radioContinuation
+        val key = token ?: "initial:$seed"
+        if ((radioFailures[key] ?: 0) >= 2 || !requestedRadioPages.add(key)) return
+        val generation = radioGeneration
+        radioJob = scope.launch {
+            try {
+                val app = application as KasaneApplication
+                val page = app.ytProvider.catalog.radioPage(seed, token)
+                if (generation != radioGeneration || radioSeed != seed) return@launch
+                if (player.repeatMode != Player.REPEAT_MODE_OFF || (!radioForced && !getSharedPreferences("playback", MODE_PRIVATE).getBoolean("autoplay", true))) {
+                    requestedRadioPages.remove(key); return@launch
+                }
+                radioFailures.remove(key)
+                radioContinuation = page.continuation
+                val existing = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toSet()
+                val next = QueuePolicy.radioAppend(existing, page.tracks, QueuePolicy.LIMIT - player.mediaItemCount)
+                player.addMediaItems(next.map { trackToMediaItem(it, radioMode = "radio") })
+                android.util.Log.i("KasanePlayback", "videoId=$seed event=radio_page added=${next.size} continuation=${page.continuation != null}")
+                if (player.playbackState == Player.STATE_ENDED && player.hasNextMediaItem() && player.playWhenReady) {
+                    player.seekToNextMediaItem(); player.prepare(); player.play()
+                }
+            } catch (e: CancellationException) { throw e
+            } catch (_: Exception) {
+                if (generation != radioGeneration) return@launch
+                val attempts = (radioFailures[key] ?: 0) + 1
+                radioFailures[key] = attempts; requestedRadioPages.remove(key)
+                android.util.Log.w("KasanePlayback", "videoId=$seed event=radio_failed attempt=$attempts")
+                if (attempts < 2) scope.launch {
+                    delay(1500)
+                    if (generation == radioGeneration && radioSeed == seed) fillRadio()
+                }
+            }
+        }
+    }
     override fun onCreate() {
         super.onCreate()
         val app = application as KasaneApplication
         // Media3 resolves the next item on its loader thread, including hardware/session skips.
         // The timeline retains stable media IDs; expiring CDN URLs never become the queue identity.
-        val sources = androidx.media3.datasource.DataSource.Factory {
-            YouTubeDataSource(DefaultDataSource.Factory(this).createDataSource(), app.ytProvider.playerResolver)
-        }
-        val progressive = DefaultMediaSourceFactory(sources).setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy())
         val network = androidx.media3.datasource.DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(15000).setReadTimeoutMs(15000)
         val factory = object : androidx.media3.exoplayer.source.MediaSource.Factory {
@@ -42,13 +138,7 @@ class PlaybackService : MediaSessionService() {
             override fun getSupportedTypes() = intArrayOf(C.CONTENT_TYPE_HLS, C.CONTENT_TYPE_OTHER)
             override fun createMediaSource(item: MediaItem): androidx.media3.exoplayer.source.MediaSource =
                 if (item.localConfiguration?.uri?.scheme == "kasane")
-                    TransportMediaSource(item, { id ->
-                        val stream = app.ytProvider.hlsResolver.resolve(id)
-                        if (stream === cord.kasane.music.provider.ProgressiveStream) {
-                            app.ytProvider.playerResolver.resolve(id) // Validate an actual progressive format before selecting its source.
-                        }
-                        stream
-                    }, progressive, network)
+                    TransportMediaSource(item, app.ytProvider.hlsResolver::resolve, network)
                 else DefaultMediaSourceFactory(DefaultDataSource.Factory(this@PlaybackService))
                     .setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy()).createMediaSource(item)
         }
@@ -58,6 +148,7 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true).build()
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).build()
+        getSharedPreferences("playback", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(autoplayListener)
         player.addListener(object : Player.Listener {
             private fun recordHistory() {
                 if (!player.isPlaying || historyRecordedForWindow) return
@@ -72,27 +163,33 @@ class PlaybackService : MediaSessionService() {
                     } catch (_: Exception) { /* A storage error must never stop playback. */ }
                 }
             }
+            override fun onTracksChanged(tracks: Tracks) {
+                tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEach { group ->
+                    for (index in 0 until group.length) if (group.isTrackSelected(index)) {
+                        val format = group.getTrackFormat(index)
+                        android.util.Log.i("KasanePlayback", "videoId=${player.currentMediaItem?.mediaId} event=audio_format mime=${format.sampleMimeType} codecs=${format.codecs} positionMs=${player.currentPosition}")
+                    }
+                }
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                val http = generateSequence<Throwable>(error) { it.cause }
+                    .filterIsInstance<androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+                android.util.Log.w("KasanePlayback", "videoId=${player.currentMediaItem?.mediaId} event=playback_error positionMs=${player.currentPosition} media3Code=${error.errorCode} http=${http?.responseCode ?: -1}")
+            }
             override fun onIsPlayingChanged(isPlaying: Boolean) { recordHistory() }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                radioJob?.cancel()
+                configureRadio(mediaItem)
                 historyRecordedForWindow = false
                 recordHistory()
+                fillRadio()
             }
+            override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                configureRadio(player.currentMediaItem); fillRadio()
+            }
+            override fun onRepeatModeChanged(repeatMode: Int) { if (repeatMode == Player.REPEAT_MODE_OFF) fillRadio() }
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { fillRadio() }
             override fun onPlaybackStateChanged(state: Int) {
-                if (state != Player.STATE_ENDED || !player.playWhenReady || player.hasNextMediaItem() ||
-                    player.repeatMode != Player.REPEAT_MODE_OFF || radioJob?.isActive == true) return
-                val seed = player.currentMediaItem?.mediaId ?: return
-                radioJob = scope.launch {
-                    try {
-                        val existing = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toSet()
-                        val next = app.ytProvider.catalog.radio(seed).filter { it.id !in existing }.take(25)
-                        if (player.currentMediaItem?.mediaId != seed || !player.playWhenReady || player.playbackState != Player.STATE_ENDED || next.isEmpty()) return@launch
-                        if (player.mediaItemCount + next.size > QueuePolicy.LIMIT) return@launch
-                        player.addMediaItems(next.map { trackToMediaItem(it) })
-                        player.seekToNextMediaItem(); player.prepare(); player.play()
-                    } catch (e: CancellationException) { throw e
-                    } catch (_: Exception) { /* Radio is optional. The explicit queue remains playable. */ }
-                }
+                if (state == Player.STATE_READY || state == Player.STATE_ENDED) fillRadio()
             }
         })
         mediaSession = MediaSession.Builder(this, player)
@@ -105,14 +202,15 @@ class PlaybackService : MediaSessionService() {
         if (!player.playWhenReady || player.mediaItemCount == 0 || player.playbackState == Player.STATE_ENDED) stopSelf()
     }
     override fun onDestroy() {
+        getSharedPreferences("playback", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(autoplayListener)
         scope.cancel()
         mediaSession?.let { it.player.release(); it.release() }
         mediaSession = null
         super.onDestroy()
     }
     companion object {
-        fun trackToMediaItem(track: Track, streamUrl: String? = track.streamUri): MediaItem {
-            val extras = Bundle().apply { putDouble("durationSeconds", track.durationSeconds); putBoolean("isLocal", track.isLocal) }
+        fun trackToMediaItem(track: Track, streamUrl: String? = track.streamUri, radioMode: String? = null, collectionContext: String? = null): MediaItem {
+            val extras = Bundle().apply { putDouble("durationSeconds", track.durationSeconds); putBoolean("isLocal", track.isLocal); radioMode?.let { putString("radioMode", it) }; collectionContext?.let { putString("collectionContext", it) } }
             return MediaItem.Builder().setMediaId(track.id)
                 .setUri(if (!track.isLocal && track.sourceProvider == "youtube") "kasane://track/${Uri.encode(track.id)}"
                     else streamUrl ?: "kasane://track/${Uri.encode(track.id)}")
