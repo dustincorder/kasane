@@ -103,6 +103,37 @@ class SabrSessionTest {
             }
         }
     }
+    @Test fun controlOnlyResponseIsFollowedOnceWithoutLeakingOpaqueContext() {
+        MockWebServer().use { server ->
+            val secret = "fixture-private-context"
+            val control = part(57, SabrWire.number(1, 9) + SabrWire.text(3, secret) + SabrWire.number(4, 1)) +
+                part(35, SabrWire.number(4, 1))
+            server.enqueueBytes(control)
+            server.enqueueBytes(frame(1, true))
+            val logs = mutableListOf<String>()
+            SabrSession(config("WEB"), OkHttpClient(), diagnostic = logs::add, testEndpoint = server.url("/sabr").toString()).use { session ->
+                session.initialize()
+                assertEquals(2, server.requestCount)
+                server.takeRequest()
+                val next = SabrWire.decode(server.takeRequest().body.readByteArray())
+                assertEquals(9L, next.message(19).message(5).number(1))
+                assertEquals(secret, next.message(19).message(5).text(2))
+                assertTrue(logs.any { it.contains("event=ump") })
+                assertFalse(logs.any { it.contains(secret) || it.contains("https://") })
+            }
+        }
+    }
+    @Test fun repeatedControlOnlyResponsesCannotLoopForever() {
+        MockWebServer().use { server ->
+            repeat(2) { server.enqueueBytes(part(35, SabrWire.number(4, 1))) }
+            SabrSession(config(), OkHttpClient(), testEndpoint = server.url("/sabr").toString()).use { session ->
+                try { session.initialize(); fail("No media is not playback") }
+                catch (error: SabrException) { assertEquals("MISSING_SEGMENT", error.code) }
+                assertEquals(2, server.requestCount)
+            }
+        }
+    }
+
     @Test fun unsafeRedirectAndMismatchedVideoAreRejected() {
         for(body in listOf(part(43,SabrWire.text(1,"https://googlevideo.com.attacker.test/videoplayback")),
             part(20,SabrWire.text(2,"different01")+SabrWire.number(3,140)))) {

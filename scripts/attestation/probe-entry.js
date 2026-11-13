@@ -1,3 +1,4 @@
+import {JsAnalyzer, JsExtractor, JsMatchers, Utils} from './youtube-player.js';
 import {BotGuardClient} from './bgutils/dist/core/BotGuardClient.js';
 import {parseChallengeData} from './bgutils/dist/core/ChallengeFetcher.js';
 import {WebPoMinter} from './bgutils/dist/core/WebPoMinter.js';
@@ -28,3 +29,16 @@ Object.defineProperty(globalThis,'KasaneAttest',{value:Object.freeze({challenge,
  mint:async(binding)=>{try{state={stage:'minting'};const token=await minter.mintAsWebsafeString(binding);state={stage:'ready',token};}catch(e){state={stage:'failed',code:e.name}}},
  headers:()=>{const h=getHeaders();delete h['user-agent'];return JSON.stringify(h)},
  status:()=>JSON.stringify(state)})});
+
+// Uses the licensed library's extractor and processor; no guessed transform.
+Object.defineProperty(globalThis,'KasanePlayer',{value:Object.freeze({prepare:(source,n)=>{
+ try {
+  if(location.origin!=='https://appassets.androidplatform.net'||typeof source!=='string'||source.length>4000000||!/^[-_a-zA-Z0-9]{1,4096}$/.test(n))throw new Error('INPUT');
+  const analyzer=new JsAnalyzer(source,{extractions:[{friendlyName:'nsigFunction',match:JsMatchers.nsigMatcher}]});
+  const extracted=new JsExtractor(analyzer).buildScript({disallowSideEffectInitializers:true});
+  if(!extracted.exported.includes('nsigFunction'))throw new Error('PLAYER_UNSUPPORTED');
+  const result=new Function(extracted.output+'\n'+Utils.getNsigProcessorFn(n))();
+  if(typeof result?.n!=='string'||!/^[-_a-zA-Z0-9]{1,4096}$/.test(result.n)||result.n===n||result.n.startsWith('enhanced_except_'))throw new Error('PLAYER_RESULT');
+  return JSON.stringify({n:result.n});
+ }catch(error){return JSON.stringify({error:'PLAYER_PREPARATION_FAILED'});}
+}})});

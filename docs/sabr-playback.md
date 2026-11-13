@@ -171,3 +171,36 @@ The [YouTube.js player](https://github.com/LuanRT/YouTube.js/blob/main/src/core/
 prepares SABR URLs using its player logic, separately from placing proof in the
 request body. No player code was copied and no parameter/signature was fabricated.
 Signed-in WEB_REMIX is still unverified pending the user's manual emulator login.
+
+### Prepared WEB URL control (isolated emulator)
+
+The opt-in test now uses YouTube.js 18.3.0 (MIT) to extract the transform from the
+actual official player script advertised by the same web context. This dependency
+fills a missing web-URL preparation capability; it is not a new music provider.
+The archive SHA-256 is pinned. Only its prebundled browser module and license are
+unpacked into temporary/ignored build output; no npm dependencies are installed
+into the project. The generated bundle is androidTest-only, never a release asset.
+The WebView uses the honest application origin, blocks network access, and gets
+only a bounded official `/s/player/.../base.js` source and a validated `n` value.
+No cipher values, signed URLs or proof are logged or persisted.
+
+For anonymous `JALbemLw3G4`, the current run produced:
+
+1. WEB `player`: `OK`; the actual player-JS `n` transformation succeeded.
+2. GVS POST 0: HTTP 200; UMP parts 57 (context update), 67 (notice id 1),
+   35 (next-request policy); no media or protection status.
+3. GVS POST 1, after following that explicit policy and returning the context:
+   HTTP 200; notice id 1 and next-request policy again, without media.
+4. Stopped with `MISSING_SEGMENT`; this is **not** successful playback, EOF, or
+   proof of accepted attestation. The meaning of notice id 1 is not established.
+
+The prior first-request HTTP 403 no longer reproduces in this prepared-URL
+control, but no audio was delivered. This does not prove that all earlier 403s
+were caused by `n`. Production WEB URL/proof preparation remains unconfigured;
+no partial path is advertised as working guest or signed-in playback.
+
+The SABR reader now follows one explicit media-less next-request policy, retaining
+its opaque context, then stops on another empty response. Existing terminal
+attestation and HTTP failures do not retry. Two new mock tests verify context
+forwarding, non-disclosure in diagnostics, and the two-request bound.
+JVM total: 193 tests, 184 passed and nine opt-in live tests skipped.

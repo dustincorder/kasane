@@ -223,6 +223,9 @@ class SabrSession(
             var redirected: String? = null
             var added = 0
             var backoffMs = 250L
+            var controlPolicy = false
+            val partCounts = linkedMapOf<Int, Int>()
+            var otherParts = 0
             val call = http.newCall(request); activeCall = call
             try {
                 if (closed) { call.cancel(); throw IOException("SABR session was closed.") }
@@ -234,6 +237,7 @@ class SabrSession(
                     }
                     val input = response.body?.byteStream() ?: throw IOException("Empty SABR response.")
                     SabrWire.readParts(input) { type, bytes ->
+                        if (type in partCounts || partCounts.size < 16) partCounts[type] = (partCounts[type] ?: 0) + 1 else otherParts++
                         when (type) {
                             12 -> throw SabrException("ENCRYPTED", "Encrypted SABR media is not supported.")
                             20 -> {
@@ -276,6 +280,7 @@ class SabrSession(
                                 }
                             }
                             35 -> {
+                                controlPolicy = true
                                 val policy = SabrWire.decode(bytes)
                                 targetReadaheadMs = policy.number(1, 15000).coerceIn(5000, 120000)
                                 backoffMs = policy.number(4, 250).coerceIn(250, 2000)
@@ -303,6 +308,7 @@ class SabrSession(
                                 SabrWire.requireSafe(contexts.size < 32 && value.size <= 64 * 1024)
                                 if (p.number(5) != 2L || key !in contexts) contexts[key] = value to (p.number(4) == 1L)
                             }
+                            67 -> diagnostic("videoId=${config.videoId} client=${config.profile} transport=SABR event=server_notice id=${SabrWire.decode(bytes).number(1, -1)}")
                             58 -> {
                                 protection = SabrWire.decode(bytes).number(1)
                                 diagnostic("videoId=${config.videoId} client=${config.profile} transport=SABR event=protection status=$protection")
@@ -319,7 +325,10 @@ class SabrSession(
                 }
             } catch (e: SabrException) { throw e
             } catch (_: IOException) { throw IOException("Could not read the SABR audio transport.")
-            } finally { activeCall = null }
+            } finally {
+                activeCall = null
+                diagnostic("videoId=${config.videoId} client=${config.profile} transport=SABR event=ump parts=${partCounts.entries.joinToString(",") { "${it.key}:${it.value}" }} otherParts=$otherParts")
+            }
             if (redirected != null) {
                 url = requireNotNull(redirected)
                 if (added == 0) {
@@ -329,9 +338,10 @@ class SabrSession(
             }
             if (headers.isNotEmpty()) throw IOException("Incomplete SABR media segment.")
             if (added == 0) {
-                // A pending proof may be accompanied by a pacing response. Wait
-                // once, then stop; never manufacture proof or spin indefinitely.
-                if (protection == 2L && emptyAttempts++ == 0 && !closed) {
+                // A server may send context + NEXT_REQUEST_POLICY before media.
+                // Follow that explicit policy once, retaining its opaque context;
+                // repeated empty responses remain a failure, never EOF or success.
+                if ((protection == 2L || controlPolicy) && emptyAttempts++ == 0 && !closed) {
                     try { Thread.sleep(backoffMs) } catch (_: InterruptedException) {
                         Thread.currentThread().interrupt(); throw IOException("SABR request was canceled.")
                     }

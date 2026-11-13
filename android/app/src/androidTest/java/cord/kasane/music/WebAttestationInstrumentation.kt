@@ -9,6 +9,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 import org.json.JSONArray
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -147,6 +148,25 @@ class WebAttestationInstrumentation: Instrumentation() {
             }
             val status=root.optJSONObject("playabilityStatus")?.optString("status").orEmpty().takeIf {it.matches(Regex("[A-Z_]{1,40}"))} ?: "UNKNOWN"
             sendStatus(0,Bundle().apply{putString("stream","WEB player profile=$profile status=$status timestampPresent=true sessionBoundPlayerProof=true\n")})
+            phase="web_player_url"
+            val streaming=requireNotNull(root.optJSONObject("streamingData"))
+            val streamUrl=streaming.getString("serverAbrStreamingUrl").toHttpUrl()
+            streamUrl.queryParameter("n")?.let { original ->
+                val quoted=Regex(""""jsUrl"\s*:\s*("(?:\\.|[^"\\]){1,1024}")""").find(html)?.groupValues?.get(1)
+                    ?: error("No matching player script")
+                val path=JSONArray("[$quoted]").getString(0)
+                check(path.matches(Regex("/s/player/[A-Za-z0-9_./-]{1,220}/base\\.js")) && !path.contains(".."))
+                val script=webClient.newCall(okhttp3.Request.Builder().url("https://www.youtube.com$path").build()).execute().use { r ->
+                    check(r.isSuccessful);val source=requireNotNull(r.body).source();source.request(4L*1024*1024+1)
+                    check(source.buffer.size<=4L*1024*1024);source.readUtf8()
+                }
+                val prepared=objectResult(view,"globalThis.KasanePlayer.prepare(${JSONObject.quote(script)},${JSONObject.quote(original)})")
+                check(!prepared.has("error"))
+                val transformed=prepared.getString("n")
+                check(transformed.matches(Regex("[-_a-zA-Z0-9]{1,4096}")) && transformed!=original)
+                streaming.put("serverAbrStreamingUrl",streamUrl.newBuilder().setQueryParameter("n",transformed).build().toString())
+                sendStatus(0,Bundle().apply{putString("stream","WEB player URL nPresent=true nPrepared=true\n")})
+            }
             phase="sabr_config"
             val config=requireNotNull(cord.kasane.music.provider.sabr.SabrConfig.parse(root,"JALbemLw3G4",profile,version))
             phase="gvs_proof"
@@ -154,6 +174,7 @@ class WebAttestationInstrumentation: Instrumentation() {
                 System.currentTimeMillis()+minOf(integrity.optLong(1),3600)*1000)
             var protection=-1
             cord.kasane.music.provider.sabr.SabrSession(config,webClient,diagnostic={line->
+                sendStatus(0,Bundle().apply{putString("stream","$line\n")})
                 Regex("event=protection status=([0-9]+)").find(line)?.let {protection=it.groupValues[1].toInt();sendStatus(0,Bundle().apply{putString("stream","WEB GVS protection status=$protection\n")})}
             },proof=proof).use {session->
                 session.initialize()
