@@ -119,7 +119,7 @@ class WebAttestationInstrumentation: Instrumentation() {
             val html=webClient.newCall(okhttp3.Request.Builder().url("https://www.youtube.com/?app=desktop&persist_app=1&hl=en").build()).execute().use {r->
                 sendStatus(0,Bundle().apply{putString("stream","Anonymous web context HTTP=${r.code}\n")})
                 check(r.isSuccessful);val source=requireNotNull(r.body).source()
-                source.request(512L*1024);source.readUtf8(minOf(source.buffer.size,512L*1024))
+                source.request(2L*1024*1024+1);check(source.buffer.size<=2L*1024*1024);source.readUtf8()
             }
             phase="web_context_parse"
             val context=webContext(html)
@@ -132,16 +132,21 @@ class WebAttestationInstrumentation: Instrumentation() {
             check(visitor.length in 1..4096);context.put("visitorData",visitor)
             evaluate(view,"globalThis.KasaneAttest.mint(${JSONObject.quote(visitor)});void 0;")
             val playerProof=waitFor(view,"ready").getString("token")
+            // Use the timestamp advertised by this exact web context, never a guessed version.
+            val sts=Regex("\"STS\"\\s*:\\s*([0-9]{5})").find(html)?.groupValues?.get(1)?.toIntOrNull()
+            check(sts!=null)
             phase="web_player"
             val body=JSONObject().put("videoId","JALbemLw3G4").put("context",JSONObject().put("client",context))
-                .put("serviceIntegrityDimensions",JSONObject().put("poToken",contentProof))
+                .put("playbackContext",JSONObject().put("contentPlaybackContext",JSONObject()
+                    .put("signatureTimestamp",sts).put("html5Preference","HTML5_PREF_WANTS")))
+                .put("serviceIntegrityDimensions",JSONObject().put("poToken",playerProof))
             val root=webClient.newCall(okhttp3.Request.Builder().url("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
                 .header("X-Youtube-Client-Name",if(profile=="WEB")"1" else "2").header("X-Youtube-Client-Version",version)
                 .post(body.toString().toRequestBody("application/json".toMediaType())).build()).execute().use {r->
                 check(r.isSuccessful);val source=requireNotNull(r.body).source();source.request(2L*1024*1024+1);check(source.buffer.size<=2L*1024*1024);JSONObject(source.readUtf8())
             }
             val status=root.optJSONObject("playabilityStatus")?.optString("status").orEmpty().takeIf {it.matches(Regex("[A-Z_]{1,40}"))} ?: "UNKNOWN"
-            sendStatus(0,Bundle().apply{putString("stream","WEB player profile=$profile status=$status\n")})
+            sendStatus(0,Bundle().apply{putString("stream","WEB player profile=$profile status=$status timestampPresent=true sessionBoundPlayerProof=true\n")})
             phase="sabr_config"
             val config=requireNotNull(cord.kasane.music.provider.sabr.SabrConfig.parse(root,"JALbemLw3G4",profile,version))
             phase="gvs_proof"
@@ -149,14 +154,14 @@ class WebAttestationInstrumentation: Instrumentation() {
                 System.currentTimeMillis()+minOf(integrity.optLong(1),3600)*1000)
             var protection=-1
             cord.kasane.music.provider.sabr.SabrSession(config,webClient,diagnostic={line->
-                Regex("event=protection status=([0-9]+)").find(line)?.let {protection=it.groupValues[1].toInt()}
+                Regex("event=protection status=([0-9]+)").find(line)?.let {protection=it.groupValues[1].toInt();sendStatus(0,Bundle().apply{putString("stream","WEB GVS protection status=$protection\n")})}
             },proof=proof).use {session->
                 session.initialize()
                 sendStatus(0,Bundle().apply{putString("stream","WEB GVS proof status=$protection\n")})
                 check(protection==1)
             }
             finish(Activity.RESULT_OK,Bundle().apply{putString("stream","WEB ATTESTATION: real proof accepted by GVS, status=1; full playback not yet tested\n")})
-        }catch(e:Throwable){finish(Activity.RESULT_CANCELED,Bundle().apply{putString("stream","WEB ATTESTATION FAILED: phase=$phase type=${e.javaClass.simpleName}\n")})}
+        }catch(e:Throwable){finish(Activity.RESULT_CANCELED,Bundle().apply{putString("stream","WEB ATTESTATION FAILED: phase=$phase type=${e.javaClass.simpleName} reason=${(e as? cord.kasane.music.provider.sabr.SabrException)?.code ?: "DIAGNOSTIC"}\n")})}
         finally {main {web?.apply {stopLoading();destroy()};activity?.finish()}}
     }
 }

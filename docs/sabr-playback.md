@@ -153,3 +153,21 @@ successful account reads or writes against a real signed-in YouTube session.
 The optional attestation dependency preparation script was executed successfully:
 the pinned MIT archive hash matched and the emulator-only bundle was generated
 under ignored build output. No generated proof bundle is part of the release APK.
+
+### Complete WEB player-context control
+
+A subsequent bounded control corrected the diagnostic request: it uses the
+signature timestamp published by the same freshly fetched web context, sends
+session-bound player proof to `player`, and retains the separate video-bound
+proof for the GVS payload. With those corrections anonymous WEB returned `OK`
+and a usable clear-AAC SABR bootstrap. The initial GVS POST still returned HTTP
+403 before any UMP protection status. No audio/EOF was obtained.
+
+This supersedes the earlier `UNPLAYABLE` result as the current WEB observation.
+It does **not** establish that attestation alone caused this HTTP 403: no
+`StreamProtectionStatus` was received. The WEB path may additionally need the
+matching player-JS URL transformation; that has not been implemented or verified.
+The [YouTube.js player](https://github.com/LuanRT/YouTube.js/blob/main/src/core/Player.ts)
+prepares SABR URLs using its player logic, separately from placing proof in the
+request body. No player code was copied and no parameter/signature was fabricated.
+Signed-in WEB_REMIX is still unverified pending the user's manual emulator login.
