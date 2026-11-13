@@ -17,11 +17,13 @@ import kotlin.concurrent.thread
 /** Synthetic tone only, disposable emulator only. No account/network/production package access. */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class HlsPlaybackInstrumentation : Instrumentation() {
+    private var composeOnly = false
     private var radioOnly = false
     private var liveOnly = false
     private var liveVideoId = "dQw4w9WgXcQ"
     override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); liveOnly = arguments?.getString("live") == "true"
         radioOnly = arguments?.getString("radio") == "true"
+        composeOnly = arguments?.getString("compose") == "true"
         arguments?.getString("videoId")?.let { require(it.matches(Regex("[A-Za-z0-9_-]{11}"))); liveVideoId = it }
         start() }
     private fun <T> main(block: () -> T): T {
@@ -106,8 +108,47 @@ class HlsPlaybackInstrumentation : Instrumentation() {
             finish(Activity.RESULT_CANCELED, Bundle().apply { putString("stream", "RADIO PREFETCH FAILED: ${e.javaClass.simpleName}\n") })
         } finally { main { controller?.stop(); controller?.clearMediaItems(); controller?.release(); activity?.finish() } }
     }
+    private fun runComposeTransitions() {
+        var activity: Activity? = null
+        var view: androidx.compose.ui.platform.ComposeView? = null
+        val signed = androidx.compose.runtime.mutableStateOf(false)
+        val cloud = cord.kasane.music.provider.CloudLikes({ cord.kasane.music.provider.CloudLikeState.LIKED }, { _, _ -> })
+        val navigation = cord.kasane.music.ui.components.TrackNavigation(kotlinx.coroutines.flow.MutableStateFlow(emptyMap()), {})
+        try {
+            activity = startActivitySync(android.content.Intent(targetContext, cord.kasane.music.playback.PlaybackProbeActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            main {
+                view = androidx.compose.ui.platform.ComposeView(activity!!).apply {
+                    setContent {
+                        androidx.compose.material3.MaterialTheme {
+                            androidx.compose.runtime.CompositionLocalProvider(
+                                cord.kasane.music.ui.components.LocalCloudLikes provides if (signed.value) cloud else null,
+                                cord.kasane.music.ui.components.LocalTrackNavigation provides if (signed.value) navigation else null) {
+                                androidx.compose.foundation.lazy.LazyColumn {
+                                    items(12, key = { it }) { index ->
+                                        val track = cord.kasane.music.model.Track("dQw4w9WgXcQ", "Transition test $index", "Preview")
+                                        cord.kasane.music.ui.components.TrackRow(track, onClick = {}, onToggleFavorite = {})
+                                        cord.kasane.music.ui.components.TrackCard(track, androidx.compose.ui.unit.Dp(148f), onClick = {})
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                activity!!.setContentView(view)
+            }
+            waitForIdleSync()
+            repeat(60) { main { signed.value = !signed.value }; waitForIdleSync(); Thread.sleep(40) }
+            main { view?.disposeComposition(); activity?.finish(); cloud.close() }
+            finish(Activity.RESULT_OK, Bundle().apply { putString("stream", "COMPOSE TRANSITIONS PASSED: 60 Guest/Signed-in switches, TrackRow + TrackCard + TrackContextMenu\n") })
+        } catch (e: Throwable) {
+            main { view?.disposeComposition(); activity?.finish(); cloud.close() }
+            finish(Activity.RESULT_CANCELED, Bundle().apply { putString("stream", "COMPOSE TRANSITIONS FAILED: ${e.javaClass.simpleName}\n") })
+        }
+    }
     override fun onStart() {
         check(android.os.Build.HARDWARE in setOf("ranchu", "goldfish")) { "Disposable emulator required" }
+        if (composeOnly) { runComposeTransitions(); return }
         if (radioOnly) { runRadioPrefetch(); return }
         if (liveOnly) { runPublicHls(); return }
         val server = ServerSocket(0, 16, java.net.InetAddress.getByName("127.0.0.1"))

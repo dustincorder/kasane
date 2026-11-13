@@ -92,3 +92,9 @@ Gradle debug/release and JVM checks, preview rendering, and diff validation are 
 - Four mocked safe-install script checks passed; no physical-device installation was performed.
 - `git diff --check`: clean.
 - Six Compose previews rendered and opened: HomeScreenPreview, ProfilePreview, NowPlayingPreview, TrackRowPreview, UnknownCloudLikePreview and TrackContextMenuPreview. PNGs are under `android/build/previews/cord/kasane/music/ui/`; they are local build artifacts, not published binaries. The expanded menu preview shows wrapped title, full action list and distinct source labels. Physical system-bar behavior remains unverified.
+
+## Compose crash follow-up
+
+A user crash report identified `LaunchedEffectImpl cannot be cast to MutableState` inside `TrackContextMenu.collectAsState`. Nullable safe-call chains conditionally invoked composable collectors as account/navigation providers changed. TrackContextMenu and TrackLikeButton now collect unconditionally from a real or shared empty StateFlow, with provider keys that reset collected state when account scope changes.
+
+An isolated `.dev` emulator regression switched Guest/Signed-in providers 60 times with lazy TrackRows, TrackCards and TrackContextMenus mounted. It completed with `COMPOSE TRANSITIONS PASSED`. Debug/release and JVM checks passed (142 passed, 9 opt-in skipped), and menu/unknown-rating previews were rendered and opened. No real account was used by that test; the full personal crash report was not copied into the repository.

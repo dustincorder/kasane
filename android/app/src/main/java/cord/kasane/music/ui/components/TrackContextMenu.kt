@@ -24,6 +24,7 @@ object TrackMenuPolicy {
 }
 class TrackActions(val play: (Track) -> Unit, val next: (Track) -> Unit, val queue: (Track) -> Unit, val radio: (Track) -> Unit)
 class TrackNavigation(val links: kotlinx.coroutines.flow.StateFlow<Map<String, cord.kasane.music.provider.TrackLinks>>, val open: (cord.kasane.music.model.CatalogItem) -> Unit)
+private val EmptyTrackLinks: kotlinx.coroutines.flow.StateFlow<Map<String, cord.kasane.music.provider.TrackLinks>> = kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
 val LocalTrackNavigation = staticCompositionLocalOf<TrackNavigation?> { null }
 val LocalTrackActions = staticCompositionLocalOf<TrackActions?> { null }
 
@@ -35,13 +36,14 @@ fun TrackContextMenu(
     onLocalFavorite: (() -> Unit)? = null, localFavorite: Boolean = false,
 ) {
     val navigation = LocalTrackNavigation.current
-    val links = navigation?.links?.collectAsState()?.value?.get(track.id)
+    val allLinks by key(navigation) { (navigation?.links ?: EmptyTrackLinks).collectAsState() }
+    val links = allLinks[track.id]
     val actions = LocalTrackActions.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val youtube = !track.isLocal && track.sourceProvider == "youtube" && track.id.matches(Regex("[A-Za-z0-9_-]{11}"))
     val cloud = LocalCloudLikes.current?.takeIf { !track.isLocal && track.sourceProvider == "youtube" }
-    val states = cloud?.states?.collectAsState()?.value.orEmpty()
-    val pending = cloud?.pending?.collectAsState()?.value.orEmpty()
+    val states by key(cloud) { (cloud?.states ?: EmptyCloudLikes).collectAsState() }
+    val pending by key(cloud) { (cloud?.pending ?: EmptyPendingLikes).collectAsState() }
     LaunchedEffect(expanded, cloud, track.id) { if (expanded) cloud?.refresh(track.id) }
     val ratings = TrackMenuPolicy.ratings(cloud != null, track.isLocal, states[track.id], cloud?.supportsDislike == true)
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, containerColor = Gray900) {

@@ -15,14 +15,16 @@ import cord.kasane.music.provider.CloudLikes
 import cord.kasane.music.provider.CloudLikeState
 import cord.kasane.music.ui.theme.*
 
+internal val EmptyCloudLikes: kotlinx.coroutines.flow.StateFlow<Map<String, CloudLikeState>> = kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
+internal val EmptyPendingLikes: kotlinx.coroutines.flow.StateFlow<Set<String>> = kotlinx.coroutines.flow.MutableStateFlow(emptySet())
 val LocalCloudLikes = staticCompositionLocalOf<CloudLikes?> { null }
 
 @Composable
 fun TrackLikeButton(track: Track, localFavorite: Boolean, onLocalToggle: () -> Unit, useCloud: Boolean = true, refreshOnEnter: Boolean = false) {
     val cloud = LocalCloudLikes.current?.takeIf { useCloud && !track.isLocal && track.sourceProvider == "youtube" }
-    val states = cloud?.states?.collectAsState()?.value
-    val pending = cloud?.pending?.collectAsState()?.value.orEmpty()
-    val state = states?.get(track.id) ?: CloudLikeState.UNKNOWN
+    val states by key(cloud) { (cloud?.states ?: EmptyCloudLikes).collectAsState() }
+    val pending by key(cloud) { (cloud?.pending ?: EmptyPendingLikes).collectAsState() }
+    val state = states[track.id] ?: CloudLikeState.UNKNOWN
     LaunchedEffect(cloud, track.id) { cloud?.refresh(track.id, force = refreshOnEnter) }
     val liked = if (cloud == null) localFavorite else state == CloudLikeState.LIKED
     val unknown = cloud != null && state in setOf(CloudLikeState.UNKNOWN, CloudLikeState.LOADING)
