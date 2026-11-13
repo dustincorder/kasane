@@ -145,3 +145,29 @@ entry through PlaybackManager retained the queue and its original metadata.
 This is a real guest radio/queue result, not proof of full-track audio playback.
 The signed-in radio and real account ratings/library checks still require manual
 emulator sign-in. No Pixel installation or account mutation was performed.
+
+### Real guest catalog cache measurement (API 35 isolated emulator)
+
+`CatalogCacheInstrumentation`, selected with `-PkasaneCacheProbe=true`, uses the
+production OnlineCatalog request/parser and Room cache implementation, an
+anonymous HTTP client and actual public results. The runner permits only emulator
+hardware and `.dev`; it never reads account credentials or clears application data.
+It writes only public metadata under a dedicated measurement cache scope.
+
+| Operation | Measured time | Actual HTTP requests |
+|---|---:|---:|
+| Explicit fresh Home | 1726 ms | 1 |
+| Explicit fresh Songs search | 465 ms | 1 |
+| Home memory cache, median of 20 reads | 22 us | 0 |
+| Search memory cache, median of 20 reads | 942 us | 0 |
+| Home from Room through a new repository/cache | 8 ms | 0 |
+| Search from Room through a new repository/cache | 9 ms | 0 |
+
+The instrumented network interceptor verified there were no Cookie/Authorization
+headers and no network requests during all 40 memory reads or the two fresh
+repository reads. Both fresh remote responses contained actual catalog items;
+cache reads preserved the returned pages. This is a single-run data-layer result,
+not a historical before/after optimization benchmark, actual process restart,
+UI first-content time, image loading time, or signed-in Library measurement.
+Those broader claims remain unverified. No further cache rewrite is justified by
+these guest data-layer timings alone.
