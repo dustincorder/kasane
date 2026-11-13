@@ -10,6 +10,7 @@ import java.security.MessageDigest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.asSharedFlow
 
 /** Persistent catalog metadata only; audio stream URLs are never part of CatalogPage. */
 interface CatalogCacheStore {
@@ -51,11 +52,19 @@ class CatalogCache(private val store: CatalogCacheStore) {
         const val MAX_AGE_MS = 30L * 24 * 60 * 60 * 1000
         const val MAX_ENTRIES = 100
         const val MAX_PAGE_CHARS = 512 * 1024
-        fun accountScope(session: AccountSession?, identity: AccountIdentity? = null): String {
+        fun accountScope(session: AccountSession?, @Suppress("UNUSED_PARAMETER") identity: AccountIdentity? = null): String {
             if (session == null) return "guest"
-            val raw = listOf(session.channelId.orEmpty(), session.dataSyncId.orEmpty(), session.authUser.toString(),
-                identity?.name.orEmpty(), identity?.avatar.orEmpty(), identity?.channelId.orEmpty()).joinToString("|")
-            return "account:" + sha256(raw)
+            val cookies = session.cookie.split(';').mapNotNull { raw ->
+                val pair = raw.trim().split('=', limit = 2)
+                if (pair.size == 2) pair[0] to pair[1] else null
+            }.toMap()
+            val principal = listOf("SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID")
+                .firstNotNullOfOrNull { cookies[it]?.takeIf(String::isNotBlank) } ?: session.cookie
+            // Public display names/avatars are neither an identity nor a stable
+            // cache key. Only an irreversible fingerprint enters metadata storage.
+            val raw = listOf(session.channelId.orEmpty(), session.dataSyncId.orEmpty(), session.delegatedSessionId.orEmpty(),
+                session.authUser.toString(), sha256(principal)).joinToString("|")
+            return "account:v2:" + sha256(raw)
         }
         private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
             .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
@@ -127,6 +136,9 @@ class CachedCatalogRepository(
     private val catalog: CatalogRemote,
     val diagnostics: CatalogRequestDiagnostics = CatalogRequestDiagnostics(),
 ) {
+    data class PlaylistChange(val scope: String, val playlistId: String)
+    private val mutablePlaylistChanges = kotlinx.coroutines.flow.MutableSharedFlow<PlaylistChange>(extraBufferCapacity = 16)
+    val playlistChanges = mutablePlaylistChanges.asSharedFlow()
     private val flightLock = Mutex()
     private val inFlight = mutableMapOf<String, CompletableDeferred<CatalogPage>>()
 
@@ -146,11 +158,24 @@ class CachedCatalogRepository(
             throw failure
         } finally {
             diagnostics.record(category, (System.nanoTime() - startedAt) / 1_000_000)
-            flightLock.withLock { if (inFlight[key] === deferred) inFlight.remove(key) }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                flightLock.withLock { if (inFlight[key] === deferred) inFlight.remove(key) }
+            }
         }
     }
 
     suspend fun cached(scope: String, key: String) = cache.read(scope, key)
+
+    /** Preserve cached content, but make only the changed playlist stale. */
+    suspend fun playlistChanged(scope: String, playlistId: String) {
+        val id = playlistId.removePrefix("VL")
+        require(id.matches(Regex("[A-Za-z0-9_-]{2,256}")))
+        for (key in listOf("playlist:VL$id", "playlist:$id", "browse:VL$id", "browse:$id")) {
+            val entry = cache.read(scope, key) ?: continue
+            cache.write(scope, key, entry.page, minOf(entry.updatedAt, System.currentTimeMillis() - LIBRARY_TTL_MS - 1))
+        }
+        mutablePlaylistChanges.emit(PlaylistChange(scope, id))
+    }
 
     suspend fun refresh(scope: String, key: String, fetch: suspend () -> CatalogPage): CatalogPage {
         val page = fetch()

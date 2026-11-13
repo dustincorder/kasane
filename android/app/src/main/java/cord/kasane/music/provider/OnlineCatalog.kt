@@ -23,7 +23,7 @@ class OnlineCatalog(
     private val client: OkHttpClient,
     private val session: () -> AccountSession? = { null },
     private val apiBaseUrl: okhttp3.HttpUrl = "https://music.youtube.com/".toHttpUrl(),
-) : AccountLibraryProvider, cord.kasane.music.data.CatalogRemote {
+) : AccountLibraryProvider, AccountPlaylistProvider, cord.kasane.music.data.CatalogRemote {
     private val mutableTrackLinks = kotlinx.coroutines.flow.MutableStateFlow<Map<String, TrackLinks>>(emptyMap())
     val trackLinks: kotlinx.coroutines.flow.StateFlow<Map<String, TrackLinks>> = mutableTrackLinks
     private val origin = "https://music.youtube.com"
@@ -184,21 +184,26 @@ class OnlineCatalog(
         val body = if (continuation == null) JSONObject().put("browseId", collection.browseId)
         else JSONObject().put("continuation", continuation)
         val response = request("browse", body, account)
-        return withContext(Dispatchers.Default) { CatalogParser.page(response) }
+        return withContext(Dispatchers.Default) { AccountLibraryParser.page(response) }
     }
 
     override suspend fun playlist(playlistId: String, continuation: String?): CatalogPage {
         require(playlistId.isNotBlank())
         val account = session()
-        return if (account == null) browse(playlistId, continuation) else playlistFor(account, playlistId, continuation)
+        return if (account == null) browse(playlistBrowseId(playlistId), continuation) else playlistFor(account, playlistId, continuation)
+    }
+
+    private fun playlistBrowseId(playlistId: String): String {
+        require(playlistId.matches(Regex("[A-Za-z0-9_-]{2,258}"))) { "Invalid playlist identifier." }
+        return if (playlistId.startsWith("VL")) playlistId else "VL$playlistId"
     }
 
     override suspend fun playlistFor(account: AccountSession, playlistId: String, continuation: String?): CatalogPage {
-        require(playlistId.isNotBlank())
-        val body = if (continuation == null) JSONObject().put("browseId", playlistId)
+        val browseId = playlistBrowseId(playlistId)
+        val body = if (continuation == null) JSONObject().put("browseId", browseId)
         else JSONObject().put("continuation", continuation)
         val response = request("browse", body, account)
-        return withContext(Dispatchers.Default) { CatalogParser.page(response) }
+        return withContext(Dispatchers.Default) { AccountLibraryParser.page(response) }
     }
 
     suspend fun likeState(account: AccountSession, videoId: String): CloudLikeState {
@@ -221,5 +226,20 @@ class OnlineCatalog(
         val status = response.optString("status")
         if (status.isNotBlank() && status != "STATUS_SUCCEEDED")
             throw IOException("YouTube Music did not accept the library change.")
+    }
+
+    override suspend fun playlistDestinations(account: AccountSession, videoId: String): List<PlaylistDestination> {
+        require(videoId.matches(Regex("[A-Za-z0-9_-]{11}")))
+        val response=request("playlist/get_add_to_playlist",JSONObject()
+            .put("videoIds",org.json.JSONArray().put(videoId)).put("excludeWatchLater",true),account)
+        return withContext(Dispatchers.Default) {PlaylistActionParser.destinations(response,videoId)}
+    }
+
+    override suspend fun addVideoToPlaylist(account: AccountSession, playlistId: String, videoId: String) {
+        require(videoId.matches(Regex("[A-Za-z0-9_-]{11}")))
+        val id=PlaylistActionParser.playlistId(playlistId)
+        val response=request("browse/edit_playlist",JSONObject().put("playlistId",id)
+            .put("actions",org.json.JSONArray().put(JSONObject().put("action","ACTION_ADD_VIDEO").put("addedVideoId",videoId))),account)
+        withContext(Dispatchers.Default) {PlaylistActionParser.requireAddReceipt(response,videoId)}
     }
 }

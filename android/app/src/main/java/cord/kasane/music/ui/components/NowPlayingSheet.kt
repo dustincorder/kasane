@@ -10,6 +10,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.tooling.preview.Preview
 import cord.kasane.music.model.Track
 import androidx.compose.ui.Alignment
@@ -66,9 +68,10 @@ fun NowPlayingSheet(
             if (showQueue) {
                 Text("Queue", style = KasaneTypography.titleMedium)
                 if (uiState.queue.isEmpty()) Text("The queue is empty", color = Gray400)
-                uiState.queue.forEach { queued ->
-                    TextButton(onClick = { onQueueTrack(queued) }) {
-                        Text(queued.title + " · " + queued.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+                    items(uiState.queue, key = { it.id }) { queued ->
+                        TrackRow(queued, isPlaying = queued.id == track.id && uiState.isPlaying,
+                            onClick = { onQueueTrack(queued) })
                     }
                 }
             }

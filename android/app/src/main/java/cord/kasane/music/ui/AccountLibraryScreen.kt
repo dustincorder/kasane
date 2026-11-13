@@ -52,6 +52,11 @@ fun AccountLibraryScreen(state: AccountState, provider: AccountLibraryProvider, 
     val scopeKey = remember(session, state) {
         CatalogCache.accountScope(session, (state as? AccountState.SignedIn)?.identity)
     }
+    LaunchedEffect(cachedCatalog, scopeKey, selectedPlaylist?.id) {
+        cachedCatalog?.playlistChanges?.collect { change ->
+            if (change.scope == scopeKey && selectedPlaylist?.id?.removePrefix("VL") == change.playlistId) revision++
+        }
+    }
     LaunchedEffect(state, selected, revision, selectedPlaylist?.id, scopeKey) {
         generation++
         error = null
@@ -99,7 +104,7 @@ fun AccountLibraryScreen(state: AccountState, provider: AccountLibraryProvider, 
             val serverEntries = page?.shelves?.flatMap { it.items }.orEmpty()
             val entries = buildList {
                 addAll(serverEntries)
-                if (selectedPlaylist == null && selected == AccountCollection.PLAYLISTS &&
+                if (page != null && selectedPlaylist == null && selected == AccountCollection.PLAYLISTS &&
                     serverEntries.none { it.kind == CatalogKind.PLAYLIST && it.id == YtmLikedSongs.id }) add(YtmLikedSongs)
             }.distinctBy { it.kind to it.id }
             if (!loading && error == null && entries.isEmpty()) Text(if (selectedPlaylist == null) "No saved items in this collection." else "This playlist has no available tracks.", color = Gray400, modifier = Modifier.padding(20.dp))

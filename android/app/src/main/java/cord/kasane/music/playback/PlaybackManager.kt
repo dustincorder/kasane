@@ -64,10 +64,11 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
             errorMessage = player.playerError?.takeUnless { it === dismissedError }?.let {
                 val streamError = generateSequence<Throwable>(it) { cause -> cause.cause }
                     .firstOrNull { cause -> cause is cord.kasane.music.provider.StreamUnavailableException ||
+                        cause is cord.kasane.music.provider.sabr.SabrException ||
                         cause is cord.kasane.music.provider.AudioHttpException || cause is cord.kasane.music.provider.TransportUnavailableException || cause is cord.kasane.music.provider.PlayerHttpException }
                 if (streamError != null) streamError.message
                 else if (it.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS)
-                    "This track is unavailable or its stream expired. Try again."
+                    "The audio server rejected this stream. This does not mean the track or your account is unavailable."
                 else "Could not play this track. Check your connection or try another track."
             },
             shuffleEnabled = player.shuffleModeEnabled, repeatMode = player.repeatMode,
@@ -79,6 +80,15 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
         else if (pendingCommands.size < 20) pendingCommands.addLast(action)
     }
     fun playTrack(track: Track) = playSingle(track, "single")
+    /** Selecting an existing queue entry must preserve its collection/radio context. */
+    fun playQueueItem(trackId: String) = command { player ->
+        val index = (0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId == trackId }
+        if (index != null) {
+            if (index != player.currentMediaItemIndex || player.playbackState == Player.STATE_ENDED || player.playerError != null)
+                player.seekToDefaultPosition(index)
+            player.prepare(); player.play()
+        }
+    }
     fun startRadio(track: Track) = playSingle(track, "forced")
     private fun playSingle(track: Track, radioMode: String) = command { player ->
         val index = (0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId == track.id }

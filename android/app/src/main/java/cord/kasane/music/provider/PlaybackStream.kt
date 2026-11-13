@@ -2,6 +2,7 @@ package cord.kasane.music.provider
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
@@ -9,6 +10,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
 sealed interface PlaybackStream
+class SabrStream(val session: cord.kasane.music.provider.sabr.SabrSession) : PlaybackStream {
+    init { session.requireVerifiedForPlayback() }
+    override fun toString() = "SabrStream(credentials=[redacted])"
+}
 /** A concrete direct format from a compatible profile, never an ANDROID_VR fallback marker. */
 class ProgressiveStream(val audio: ResolvedAudioStream, val clientProfile: String) : PlaybackStream {
     override fun toString() = "ProgressiveStream(client=$clientProfile, url=[redacted])"
@@ -24,6 +29,7 @@ class HlsPlayerResolver(
     private val client: OkHttpClient,
     private val endpoint: String = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
     private val diagnostic: (String) -> Unit = {},
+    private val progressiveCheck: (suspend (String, ResolvedAudioStream) -> Boolean)? = null,
     private val authenticatedPlayer: suspend (String) -> JSONObject? = { null },
 ) {
     init {
@@ -42,7 +48,14 @@ class HlsPlayerResolver(
             report(videoId, "WEB_REMIX", authenticated)
             val selected = select(authenticated, videoId, allowProgressive = true)
             if (selected is HlsStream) return@withContext HlsStream(selected.url, "WEB_REMIX")
-            if (selected is ProgressiveStream) return@withContext selected
+            prepareSabr(authenticated, videoId, "WEB_REMIX")?.let { if (it is SabrStream) return@withContext it }
+            // A direct URL in an OK/SABR response is not proof of CDN access. In
+            // particular, WEB_REMIX can return a URL that rejects the first byte.
+            if (selected is ProgressiveStream) {
+                val accessible = (progressiveCheck ?: ::checkProgressive)(videoId, selected.audio)
+                if (accessible) return@withContext selected
+                diagnostic("videoId=$videoId client=WEB_REMIX event=direct_rejected fallback=IOS_HLS")
+            }
         }
         val body = JSONObject().put("videoId", videoId).put("context", JSONObject().put("client", JSONObject()
             .put("clientName", "IOS").put("clientVersion", "21.26.4").put("deviceModel", "iPhone16,2")
@@ -59,8 +72,48 @@ class HlsPlayerResolver(
                 source.readUtf8()
             } ?: return@withContext UnavailableStream("Empty player response."))
             report(videoId, "IOS", root)
-            select(root, videoId)
+            val selected = select(root, videoId)
+            if (selected is HlsStream) selected else prepareSabr(root, videoId, "IOS") ?: selected
         }
+    }
+    private suspend fun prepareSabr(root: JSONObject, videoId: String, profile: String): PlaybackStream? {
+        val config = cord.kasane.music.provider.sabr.SabrConfig.parse(root, videoId, profile) ?: return null
+        val session = cord.kasane.music.provider.sabr.SabrSession(config, client, diagnostic)
+        return kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            val worker = kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    session.initialize()
+                    continuation.resume(SabrStream(session)) { _, _, _ -> session.close() }
+                } catch (e: Exception) {
+                    session.close()
+                    diagnostic("videoId=$videoId client=$profile transport=SABR error=${if (e is cord.kasane.music.provider.sabr.SabrException) e.code else e.javaClass.simpleName}")
+                    if (continuation.isActive) continuation.resumeWith(Result.success(UnavailableStream(
+                        if (e is cord.kasane.music.provider.sabr.SabrException) e.message.orEmpty() else "Could not prepare the SABR audio transport.",
+                        if (e is cord.kasane.music.provider.sabr.SabrException) e.code else "SABR_NETWORK_ERROR")))
+                }
+            }
+            continuation.invokeOnCancellation { session.close(); worker.cancel() }
+        }
+    }
+    internal suspend fun checkProgressive(videoId: String, audio: ResolvedAudioStream): Boolean {
+        val anonymous = client.newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES)
+            .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
+        // Probe the initial byte and the previously failing chunk boundary. This
+        // rejects known-bad candidates; it does NOT establish full-track access.
+        val offsets = if (audio.contentLength > 512L * 1024) listOf(0L, 512L * 1024) else listOf(0L)
+        for (offset in offsets) {
+            try {
+                val request = Request.Builder().url(audio.url).header("Range", "bytes=$offset-$offset").build()
+                await(anonymous.newCall(request)).use { response ->
+                    diagnostic("videoId=$videoId client=WEB_REMIX event=direct_probe offset=$offset http=${response.code}")
+                    if (response.code !in setOf(200, 206) || response.body?.source()?.request(1) != true) return false
+                }
+            } catch (e: java.io.IOException) {
+                diagnostic("videoId=$videoId client=WEB_REMIX event=direct_probe offset=$offset error=${e.javaClass.simpleName}")
+                return false
+            }
+        }
+        return true
     }
     private fun report(videoId: String, profile: String, root: JSONObject) {
         val rawStatus = root.optJSONObject("playabilityStatus")?.optString("status").orEmpty()
@@ -99,7 +152,7 @@ class HlsPlayerResolver(
                     return ProgressiveStream(audio, "WEB_REMIX")
             }
             return UnavailableStream(if (data.optString("serverAbrStreamingUrl").isNotBlank())
-                "YouTube returned SABR audio, which Kasane does not support yet. No compatible full-length stream was supplied."
+                "YouTube returned SABR without a supported clear AAC bootstrap. No compatible stream was supplied."
                 else "YouTube did not provide a supported full-length stream for this track.",
                 if (data.optString("serverAbrStreamingUrl").isNotBlank()) "SABR_REQUIRED" else "NO_COMPATIBLE_STREAM")
         }

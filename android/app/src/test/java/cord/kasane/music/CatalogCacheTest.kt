@@ -13,6 +13,7 @@ import cord.kasane.music.model.CatalogItem
 import cord.kasane.music.provider.AccountCollection
 import cord.kasane.music.data.CatalogRemote
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import org.junit.Assert.*
@@ -52,6 +53,28 @@ class CatalogCacheTest {
     }
 
     private val session get() = AccountSession("SAPISID=secret-fixture", channelId = "channel-a", dataSyncId = "sync-a")
+
+    @Test fun playlistMutationRetainsContentAndInvalidatesOnlyItsAccountAndCollection() = runTest {
+        val cache = CatalogCache(MemoryStore())
+        val remote = FakeRemote()
+        val repo = CachedCatalogRepository(cache, remote)
+        val scope = CatalogCache.accountScope(session)
+        val now = System.currentTimeMillis()
+        cache.write(scope, "playlist:PLchanged", page("Old tracks"), now)
+        cache.write(scope, "playlist:PLother", page("Other tracks"), now)
+        cache.write(scope, "library:PLAYLISTS", page("Collections"), now)
+        cache.write("other-account", "playlist:PLchanged", page("Private"), now)
+        repo.playlistChanged(scope, "VLPLchanged")
+        assertEquals("Old tracks", repo.cached(scope, "playlist:PLchanged")?.page?.title)
+        assertTrue(System.currentTimeMillis() - repo.cached(scope, "playlist:PLchanged")!!.updatedAt >= CachedCatalogRepository.LIBRARY_TTL_MS)
+        assertEquals(now, repo.cached(scope, "playlist:PLother")?.updatedAt)
+        assertEquals(now, repo.cached(scope, "library:PLAYLISTS")?.updatedAt)
+        assertEquals(now, repo.cached("other-account", "playlist:PLchanged")?.updatedAt)
+        assertEquals(0, remote.collections)
+        assertEquals(0, remote.browses)
+        assertEquals("Other tracks", repo.library(scope, session, AccountCollection.PLAYLISTS, "PLother").title)
+        assertEquals("Playlist", repo.library(scope, session, AccountCollection.PLAYLISTS, "PLchanged").title)
+    }
 
     @Test fun firstHomeOpenFetchesAndStoresMetadata() = runTest {
         val remote = FakeRemote()
@@ -168,6 +191,45 @@ class CatalogCacheTest {
         assertEquals(listOf("id", "next"), merged.shelves.flatMap { it.items }.map { it.id }.distinct())
         cache.clearAccount(session)
         assertNull(cache.read(scope, "library:PLAYLISTS"))
+    }
+
+    @Test fun identicalPublicProfilesDoNotShareAccountCache() {
+        val identity=AccountIdentity("Same name",null,null)
+        val a=AccountSession("SAPISID=first-private-session")
+        val b=AccountSession("SAPISID=second-private-session")
+        assertNotEquals(CatalogCache.accountScope(a,identity),CatalogCache.accountScope(b,identity))
+    }
+
+    @Test fun logoutClearsTheScopeUsedWithDisplayedIdentity() = runTest {
+        val cache=CatalogCache(MemoryStore())
+        val scope=CatalogCache.accountScope(session,AccountIdentity("A name","https://img.example/a.jpg",null))
+        cache.write(scope,"library:PLAYLISTS",page("Personal library"))
+        cache.clearAccount(session)
+        assertNull(cache.read(scope,"library:PLAYLISTS"))
+    }
+
+    @Test fun canceledContendedSingleFlightDoesNotPoisonLaterScreenOpens() = runTest {
+        val remote=object:FakeRemote(){
+            override suspend fun home(account:AccountSession?):CatalogPage {
+                homes++
+                if(homes==1)kotlinx.coroutines.awaitCancellation()
+                return page("Recovered")
+            }
+        }
+        val repo=CachedCatalogRepository(CatalogCache(MemoryStore()),remote)
+        val first=backgroundScope.launch {repo.home("guest",force=true)}
+        testScheduler.runCurrent()
+        // Hold the internal lock to reproduce cancellation during cleanup,
+        // then verify the public retry behavior after releasing contention.
+        val field=repo.javaClass.getDeclaredField("flightLock").apply {isAccessible=true}
+        val lock=field.get(repo) as kotlinx.coroutines.sync.Mutex
+        lock.lock()
+        first.cancel()
+        testScheduler.runCurrent()
+        lock.unlock()
+        first.join()
+        assertEquals("Recovered",repo.home("guest",force=true)?.title)
+        assertEquals(2,remote.homes)
     }
 
     private companion object {

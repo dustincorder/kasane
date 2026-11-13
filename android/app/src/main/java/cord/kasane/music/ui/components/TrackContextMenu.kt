@@ -58,6 +58,8 @@ fun TrackContextMenu(
         if (next != null) DropdownMenuItem(text = { Text("Play next") }, onClick = { onDismiss(); next() })
         if (queue != null) DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onDismiss(); queue() })
         if (actions != null && youtube) DropdownMenuItem(text = { Text("Start radio") }, onClick = { onDismiss(); actions.radio(track) })
+        val playlists = LocalPlaylistPicker.current
+        if (youtube && playlists != null) DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onDismiss(); playlists.open(track) })
         if (ratings.like != null) DropdownMenuItem(
             text = { Text(ratings.like) },
             enabled = track.id !in pending && states[track.id] != CloudLikeState.LOADING, onClick = { onDismiss(); cloud?.toggle(track.id) })
@@ -88,11 +90,20 @@ fun TrackContextMenuPreview() {
             writeDislike = { _, _ -> }, dispatcher = kotlinx.coroutines.Dispatchers.Unconfined).apply { seedLiked(listOf(track.id)) }
     }
     DisposableEffect(cloud) { onDispose { cloud.close() } }
+    val playlists = remember {
+        cord.kasane.music.provider.PlaylistPicker(cord.kasane.music.auth.AccountSession("SAPISID=preview-only"),
+            object : cord.kasane.music.provider.AccountPlaylistProvider {
+                override suspend fun playlistDestinations(account: cord.kasane.music.auth.AccountSession, videoId: String) = emptyList<cord.kasane.music.provider.PlaylistDestination>()
+                override suspend fun addVideoToPlaylist(account: cord.kasane.music.auth.AccountSession, playlistId: String, videoId: String) {}
+            }, dispatcher = kotlinx.coroutines.Dispatchers.Unconfined)
+    }
+    DisposableEffect(playlists) { onDispose { playlists.close() } }
     val links = remember { kotlinx.coroutines.flow.MutableStateFlow(mapOf(track.id to cord.kasane.music.provider.TrackLinks(
         cord.kasane.music.model.CatalogItem("UCpreview", cord.kasane.music.model.CatalogKind.ARTIST, "Preview artist"),
         cord.kasane.music.model.CatalogItem("MPREpreview", cord.kasane.music.model.CatalogKind.ALBUM, "Preview album")))) }
     MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
         CompositionLocalProvider(LocalCloudLikes provides cloud, LocalTrackActions provides TrackActions({}, {}, {}, {}),
+            LocalPlaylistPicker provides playlists,
             LocalTrackNavigation provides TrackNavigation(links, {})) {
             Surface(Modifier.fillMaxSize()) {
                 Box(Modifier.padding(top = 24.dp, start = 16.dp)) {

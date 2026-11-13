@@ -16,7 +16,13 @@ android {
         targetSdk = 35
         versionCode = 2
         versionName = "0.1.1-alpha"
-        testInstrumentationRunner = if (providers.gradleProperty("kasaneHlsProbe").orNull == "true")
+        testInstrumentationRunner = if (providers.gradleProperty("kasanePlaylistProbe").orNull == "true")
+            "cord.kasane.music.PlaylistUiInstrumentation"
+        else if (providers.gradleProperty("kasaneProofProbe").orNull == "true")
+            "cord.kasane.music.WebAttestationInstrumentation"
+        else if (providers.gradleProperty("kasaneSabrProbe").orNull == "true")
+            "cord.kasane.music.SabrPlaybackInstrumentation"
+        else if (providers.gradleProperty("kasaneHlsProbe").orNull == "true")
             "cord.kasane.music.HlsPlaybackInstrumentation"
         else if (providers.gradleProperty("kasanePlaybackProbe").orNull == "true")
             "cord.kasane.music.GuestPlaybackInstrumentation"
@@ -25,6 +31,9 @@ android {
 
     // Instrumentation is debug-only and isolated from the user's release package/data.
     testBuildType = "debug"
+    if (providers.gradleProperty("kasaneProofProbe").orNull == "true") {
+        sourceSets.getByName("androidTest").assets.srcDir(layout.buildDirectory.dir("generated/attestationProbeAssets"))
+    }
 
     testOptions {
         unitTests.isReturnDefaultValues = true

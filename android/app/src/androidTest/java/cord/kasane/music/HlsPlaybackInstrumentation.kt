@@ -103,6 +103,15 @@ class HlsPlaybackInstrumentation : Instrumentation() {
                 check(ids.size == ids.distinct().size)
                 check(p.currentPosition < 45000)
             }
+            // The application's controller selects an existing entry without
+            // replacing collection/radio metadata or resetting the queue.
+            val app = targetContext.applicationContext as KasaneApplication
+            main { app.playbackManager.playQueueItem("wzpAehzNCU8") }
+            waitFor("select existing queue entry") { p.currentMediaItem?.mediaId == "wzpAehzNCU8" }
+            main {
+                check(p.currentMediaItem?.mediaMetadata?.extras?.getString("radioMode") == null)
+                check(p.mediaItemCount > 2)
+            }
             finish(Activity.RESULT_OK, Bundle().apply { putString("stream", "RADIO PREFETCH PASSED: queue=${main { p.mediaItemCount }} manual-preserved=true deduplicated=true before-end=true\n") })
         } catch (e: Throwable) {
             finish(Activity.RESULT_CANCELED, Bundle().apply { putString("stream", "RADIO PREFETCH FAILED: ${e.javaClass.simpleName}\n") })

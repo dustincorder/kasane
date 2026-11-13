@@ -70,12 +70,38 @@ class AccountLibraryRequestTest {
 
     @Test fun signedInLibraryUsesInnerTubeBrowseAndPagination() = runTest {
         MockWebServer().use { server ->
-            server.enqueue(MockResponse().setBody("""{"header":{"musicDetailHeaderRenderer":{"title":{"runs":[{"text":"Playlists"}]}}},"continuation":"next"}"""))
+            server.enqueue(MockResponse().setBody("""{"header":{"musicDetailHeaderRenderer":{"title":{"runs":[{"text":"Playlists"}]}}},"contents":{"sectionListRenderer":{"contents":[]}},"continuation":"next"}"""))
             catalog(server).collection(AccountCollection.PLAYLISTS)
             val request = server.takeRequest()
             assertTrue(request.path.orEmpty().contains("browse"))
             assertEquals("SAPISID=mock-secret; LOGIN_INFO=mock-login", request.getHeader("Cookie"))
             assertTrue(request.body.readUtf8().contains("FEmusic_liked_playlists"))
+        }
+    }
+
+    @Test fun malformedLibraryResponseDoesNotMasqueradeAsEmptyCollections() = runTest {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("{}"))
+            try { catalog(server).collection(AccountCollection.PLAYLISTS); fail("Unknown response must be an error") }
+            catch (expected: java.io.IOException) { assertTrue(expected.message.orEmpty().contains("library response")) }
+        }
+    }
+
+    @Test fun privatePlaylistReadsUseExplicitSessionAndRequestedPlaylist() = runTest {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"contents":{"musicPlaylistShelfRenderer":{"contents":[]}}}"""))
+            catalog(server, null).playlistFor(session, "PLprivate")
+            val request = server.takeRequest()
+            assertEquals(session.cookie, request.getHeader("Cookie"))
+            assertEquals("VLPLprivate", JSONObject(request.body.readUtf8()).getString("browseId"))
+        }
+    }
+
+    @Test fun alreadyNormalizedLikedPlaylistKeepsItsBrowseId() = runTest {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"contents":{"musicPlaylistShelfRenderer":{"contents":[]}}}"""))
+            catalog(server).playlistFor(session, "VLLM")
+            assertEquals("VLLM", JSONObject(server.takeRequest().body.readUtf8()).getString("browseId"))
         }
     }
 

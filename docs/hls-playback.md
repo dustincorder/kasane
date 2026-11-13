@@ -1,3 +1,5 @@
+> Subsequent work adds an on-demand SABR/fMP4 bridge through the existing native HLS extractor. See [SABR playback](sabr-playback.md) for scope, tests and protection limitations. Historical profile observations below do not mean SABR is universally available.
+
 # Media3 HLS playback
 
 ## Runtime

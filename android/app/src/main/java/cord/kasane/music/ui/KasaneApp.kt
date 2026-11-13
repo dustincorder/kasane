@@ -69,10 +69,23 @@ import android.widget.Toast
 fun KasaneApp(app: KasaneApplication) {
     val account by app.accountRepository.state.collectAsState()
     val session = app.accountRepository.session().takeIf { account is AccountState.SignedIn }
-    val cloud = remember(session) { session?.let { captured -> cord.kasane.music.provider.CloudLikes(
-        read = { id -> app.ytProvider.catalog.likeState(captured, id) },
-        write = { id, liked -> app.ytProvider.catalog.setLikedFor(captured, id, liked) },
-        writeDislike = { id, disliked -> app.ytProvider.catalog.setDislikedFor(captured, id, disliked) }) } }
+    val cloud = remember(session) { session?.let { captured ->
+        val scopeKey = cord.kasane.music.data.CatalogCache.accountScope(captured)
+        suspend fun invalidateLikes() {
+            try { app.cachedCatalog.playlistChanged(scopeKey, "LM") }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Remote success remains success if local metadata refresh fails. */ }
+        }
+        cord.kasane.music.provider.CloudLikes(
+            read = { id -> app.ytProvider.catalog.likeState(captured, id) },
+            write = { id, liked -> app.ytProvider.catalog.setLikedFor(captured, id, liked); invalidateLikes() },
+            writeDislike = { id, disliked -> app.ytProvider.catalog.setDislikedFor(captured, id, disliked); invalidateLikes() })
+    } }
+    val playlists = remember(session) { session?.let { captured ->
+        cord.kasane.music.provider.PlaylistPicker(captured, app.ytProvider.catalog,
+            onAdded = { id -> app.cachedCatalog.playlistChanged(cord.kasane.music.data.CatalogCache.accountScope(captured), id) })
+    } }
+    DisposableEffect(playlists) { onDispose { playlists?.close() } }
     LaunchedEffect(cloud, session) {
         if (cloud != null && session != null) {
             val scopeKey = cord.kasane.music.data.CatalogCache.accountScope(session, (account as? AccountState.SignedIn)?.identity)
@@ -86,6 +99,7 @@ fun KasaneApp(app: KasaneApplication) {
     val context = LocalContext.current
     LaunchedEffect(cloud) { cloud?.errors?.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
     CompositionLocalProvider(cord.kasane.music.ui.components.LocalCloudLikes provides cloud,
+        cord.kasane.music.ui.components.LocalPlaylistPicker provides playlists,
         cord.kasane.music.ui.components.LocalTrackActions provides cord.kasane.music.ui.components.TrackActions(
             app.playbackManager::playTrack, app.playbackManager::playNextInQueue, app.playbackManager::addToQueue, app.playbackManager::startRadio)) { KasaneContent(app) }
 }
@@ -329,7 +343,7 @@ private fun KasaneContent(app: KasaneApplication) {
                         }
                     }
                 },
-                onQueueTrack = { app.playbackManager.playTrack(it) },
+                onQueueTrack = { app.playbackManager.playQueueItem(it.id) },
                 onShuffle = { app.playbackManager.toggleShuffle() },
                 onRepeat = { app.playbackManager.cycleRepeat() },
                 sheetState = nowPlayingSheetState
@@ -446,7 +460,8 @@ private fun KasaneContent(app: KasaneApplication) {
                         CatalogDetailScreen(detail, app.ytProvider.catalog,
                             { detailStack = detailStack.dropLast(1) }, openCatalog,
                             { tracks, shuffle -> app.playbackManager.playTracks(tracks, shuffle) },
-                            { app.playbackManager.addToQueue(it) }, app.cachedCatalog, catalogScope)
+                            { app.playbackManager.addToQueue(it) }, app.cachedCatalog, catalogScope,
+                            app.accountRepository.session().takeIf { accountState is AccountState.SignedIn })
                     }
                 } else screenState.SaveableStateProvider(selectedTab) {
                 when (selectedTab) {
@@ -537,6 +552,7 @@ private fun KasaneContent(app: KasaneApplication) {
                 }
             }
         }
+        cord.kasane.music.ui.components.PlaylistPickerHost()
     }
     }
 }

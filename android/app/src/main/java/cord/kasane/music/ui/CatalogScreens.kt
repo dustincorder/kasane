@@ -23,6 +23,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import cord.kasane.music.model.*
 import cord.kasane.music.provider.OnlineCatalog
+import cord.kasane.music.auth.AccountSession
+import cord.kasane.music.provider.AccountCollection
 import cord.kasane.music.data.CachedCatalogRepository
 import cord.kasane.music.data.CatalogCache
 import cord.kasane.music.ui.components.*
@@ -162,7 +164,7 @@ private fun CatalogResult(item: CatalogItem, onClick: () -> Unit) {
 @Composable
 fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () -> Unit,
     onOpen: (CatalogItem) -> Unit, onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
-    cachedCatalog: CachedCatalogRepository? = null, cacheScope: String = "guest") {
+    cachedCatalog: CachedCatalogRepository? = null, cacheScope: String = "guest", accountSession: AccountSession? = null) {
     var page by remember(item.id) { mutableStateOf<CatalogPage?>(null) }
     var revision by remember(item.id) { mutableIntStateOf(0) }
     var loading by remember(item.id) { mutableStateOf(true) }
@@ -170,15 +172,26 @@ fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () ->
     var loadingMore by remember(item.id) { mutableStateOf(false) }
     var handledRevision by remember(item.id) { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(item.id, revision, cachedCatalog, cacheScope) {
+    val accountPlaylist = item.kind == CatalogKind.PLAYLIST && accountSession != null
+    LaunchedEffect(cachedCatalog, cacheScope, item.id) {
+        cachedCatalog?.playlistChanges?.collect { change ->
+            if (item.kind == CatalogKind.PLAYLIST && change.scope == cacheScope && item.id.removePrefix("VL") == change.playlistId) revision++
+        }
+    }
+    LaunchedEffect(item.id, revision, cachedCatalog, cacheScope, accountSession) {
         error = null
-        val saved = cachedCatalog?.cached(cacheScope, "browse:${item.id}")
+        val saved = cachedCatalog?.cached(cacheScope, if (accountPlaylist) "playlist:${item.id}" else "browse:${item.id}")
         page = saved?.page
         val force = revision != handledRevision
         val stale = saved == null || System.currentTimeMillis() - saved.updatedAt >= CachedCatalogRepository.LIBRARY_TTL_MS
         if (!stale && !force) { loading = false; return@LaunchedEffect }
         loading = saved == null
-        try { page = if (cachedCatalog != null) cachedCatalog.browse(cacheScope, item.id, force = force) else catalog.browse(item.id) }
+        try { page = when {
+            accountPlaylist && cachedCatalog != null -> cachedCatalog.library(cacheScope, requireNotNull(accountSession), AccountCollection.PLAYLISTS, item.id, force = force)
+            accountPlaylist -> catalog.playlistFor(requireNotNull(accountSession), item.id)
+            cachedCatalog != null -> cachedCatalog.browse(cacheScope, item.id, force = force)
+            else -> catalog.browse(item.id)
+        } }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = e.message ?: "This page is unavailable." }
         finally { loading = false; handledRevision = revision }
@@ -189,7 +202,12 @@ fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () ->
         loadingMore = true; error = null
         scope.launch {
             try {
-                val next = cachedCatalog?.browse(cacheScope, item.id, token) ?: catalog.browse(item.id, token)
+                val next = when {
+                    accountPlaylist && cachedCatalog != null -> cachedCatalog.library(cacheScope, requireNotNull(accountSession), AccountCollection.PLAYLISTS, item.id, token)
+                    accountPlaylist -> catalog.playlistFor(requireNotNull(accountSession), item.id, token)
+                    cachedCatalog != null -> cachedCatalog.browse(cacheScope, item.id, token)
+                    else -> catalog.browse(item.id, token)
+                }
                 page = if (cachedCatalog != null) next else current.copy(
                     shelves = (current.shelves + next.shelves).groupBy { it.title }.map { (title, shelves) ->
                         CatalogShelf(title, shelves.flatMap { it.items }.distinctBy { it.kind to it.id })

@@ -1,5 +1,10 @@
 # Android core reliability — 2026-11-13
 
+**Latest transport work:** clear AAC/fMP4 SABR decoding and a native Media3 bridge
+have been added. See [SABR implementation and evidence](sabr-playback.md).
+The earlier observations below describe the preceding HLS/direct-only iteration;
+SABR support does not imply that server attestation requirements are satisfied.
+
 ## Playback: verified subset, unresolved catalog-wide blocker
 
 The active `PlaybackService` no longer treats absence of HLS as permission to use ANDROID_VR. `ProgressiveStream` now contains a concrete direct audio format from authenticated WEB_REMIX; its MediaSource uses ordinary HTTP, not the VR range DataSource. Guest IOS is considered only for an actual HLS manifest. Unsupported SABR, missing formats, network failure, and player HTTP refusal are distinguished. No DRM/attestation/token is fabricated, no proxy is used, and no automatic profile loop restarts the song.
@@ -98,3 +103,45 @@ Gradle debug/release and JVM checks, preview rendering, and diff validation are 
 A user crash report identified `LaunchedEffectImpl cannot be cast to MutableState` inside `TrackContextMenu.collectAsState`. Nullable safe-call chains conditionally invoked composable collectors as account/navigation providers changed. TrackContextMenu and TrackLikeButton now collect unconditionally from a real or shared empty StateFlow, with provider keys that reset collected state when account scope changes.
 
 An isolated `.dev` emulator regression switched Guest/Signed-in providers 60 times with lazy TrackRows, TrackCards and TrackContextMenus mounted. It completed with `COMPOSE TRANSITIONS PASSED`. Debug/release and JVM checks passed (142 passed, 9 opt-in skipped), and menu/unknown-rating previews were rendered and opened. No real account was used by that test; the full personal crash report was not copied into the repository.
+
+## Immediate authenticated CDN refusal (Pixel, follow-up)
+
+A fresh manual Play on Pixel produced these credential-free diagnostics for
+`JALbemLw3G4`: WEB_REMIX player status OK, HLS absent, SABR present; selected
+progressive Opus/WebM; HTTP 403 with offset=0 and bytes=0, Media3 code 2004 at
+position=0. This is an initial CDN refusal, not evidence of an expired URL.
+The selector previously returned the direct candidate immediately, preventing
+any IOS HLS fallback. The CDN's underlying authorization/attestation decision
+cannot be determined from this status alone.
+
+The resolver now checks a direct candidate anonymously before selection (one-byte
+GET at offset zero and, when content length permits, the 512 KiB boundary).
+Responses are closed, redirects and automatic connection retries are disabled,
+no cookies are forwarded, cancellation propagates, and no URL is logged.
+A refusal falls through once to the existing IOS HLS resolver. This rejects
+known-bad candidates; successful probes do not prove full-track availability.
+No ANDROID_VR fallback or SABR-as-progressive handling was introduced.
+
+Fresh anonymous host player requests: `JALbemLw3G4` returned IOS OK/SABR/no HLS;
+`dQw4w9WgXcQ` returned IOS OK/HLS. These requests did not use the user's session,
+and they are player-response checks, not new full Media3 playback tests.
+SABR-only tracks remain unsupported; the fallback must report this accurately.
+Regression tests cover rejected/accepted direct candidates, single HLS fallback,
+SABR-only fallback, first-byte/boundary 403, redirects, empty success bodies,
+cookie isolation, and cancellation. No account mutation or physical-device
+instrumentation was used.
+
+Verification of this follow-up: `assembleDebug testDebugUnitTest assembleRelease`
+passed; 159 unit tests discovered, 150 passed, 9 opt-in live tests skipped;
+`git diff --check` passed. No new full-track Media3 test was run for this patch.
+The existing full IOS/HLS control-track evidence above predates this change.
+
+### Subsequent isolated queue verification
+
+The API 35 emulator ran the real guest radio prefetch through PlaybackService and
+MediaSession. The queue reached 51 unique IDs before the original track ended;
+the manually queued Brand New Day entry remained second. Selecting that existing
+entry through PlaybackManager retained the queue and its original metadata.
+This is a real guest radio/queue result, not proof of full-track audio playback.
+The signed-in radio and real account ratings/library checks still require manual
+emulator sign-in. No Pixel installation or account mutation was performed.

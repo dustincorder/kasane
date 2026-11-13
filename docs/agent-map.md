@@ -30,6 +30,9 @@ Application ID: `cord.kasane.music`
   - `MainActivity : ComponentActivity()`: Edge-to-Edge окно, запуск `KasaneApp()`.
 
 ### 2.2. Воспроизведение (`playback/`)
+- `provider/sabr/SabrWire.kt`, `SabrSession.kt`: ограниченный SABR/UMP AAC/fMP4 транспорт, ephemeral context, server protection handling.
+- `playback/SabrDataSource.kt`: внутренний on-demand HLS/fMP4 bridge для существующего Media3, без файлов/HTTP proxy.
+- Статус и ограничения: `docs/sabr-playback.md` (полное YouTube-воспроизведение ещё не подтверждено).
 - `GuestPlayerResolver.kt`:
   - Класс: `GuestPlayerResolver(client: OkHttpClient)`
   - Резолв гостевых потоков через клиент `ANDROID_VR` (`1.65.10`) с автоматическим `visitorData` handshake.
@@ -89,3 +92,8 @@ Application ID: `cord.kasane.music`
 - `src/`: Svelte 5 + Tailwind CSS UI.
 - `src-tauri/`: Tauri 2 backend на Rust.
 - `crates/`: `vibe-audio`, `vibe-core`, `vibe-db`, `vibe-providers`.
+
+- Playlist destination parsing and confirmed account mutation: `android/app/src/main/java/cord/kasane/music/provider/PlaylistActions.kt`.
+- Account-scoped picker state and lost-acknowledgement recovery: `android/app/src/main/java/cord/kasane/music/provider/PlaylistPicker.kt`.
+- Shared native playlist modal: `android/app/src/main/java/cord/kasane/music/ui/components/PlaylistPickerSheet.kt`.
+- Malformed account-library response guard: `android/app/src/main/java/cord/kasane/music/provider/AccountLibraryParser.kt`.

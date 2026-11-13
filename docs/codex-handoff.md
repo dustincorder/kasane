@@ -1,5 +1,11 @@
 # Kasane — Codex Handoff
 
+> **Historical handoff — current playback limitation:** the earlier “fully works”
+> wording below records the initial short Pixel test, not full-catalog reliability.
+> Current measured SABR-only playback stops around 69.845 seconds while the server
+> reports pending attestation. Three real full-track Media3 runs have not passed.
+> See [SABR evidence](sabr-playback.md) and [online status](android-online-status.md).
+
 Документ передачи контекста для продолжения разработки **OpenAI Codex CLI** (основной coding agent проекта Kasane).
 
 ---
