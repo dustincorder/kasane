@@ -14,4 +14,3 @@ data class Track(
     val isLocal: Boolean = false,
     val sourceProvider: String = "youtube"
 )
-
