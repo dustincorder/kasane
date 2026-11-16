@@ -2,17 +2,12 @@ package cord.kasane.music.provider
 
 import cord.kasane.music.model.CatalogPage
 import org.json.JSONObject
+import kotlinx.serialization.json.JsonObject
 import java.io.IOException
 
-/** A malformed/unsupported response is not an empty personal library. */
+/** Legacy boundary; the supported-library schema check lives in shared code. */
 object AccountLibraryParser {
-    fun page(root: JSONObject): CatalogPage {
-        val supported = listOf("sectionListRenderer", "gridRenderer", "gridContinuation", "musicShelfRenderer",
-            "musicCarouselShelfRenderer", "musicPlaylistShelfRenderer", "musicShelfContinuation",
-            "musicPlaylistShelfContinuation", "appendContinuationItemsAction", "musicResponsiveListItemRenderer",
-            "musicTwoRowItemRenderer", "messageRenderer")
-            .any { CatalogParser.objects(root, it).isNotEmpty() }
-        if (!supported) throw IOException("YouTube Music returned an unsupported library response. Refresh to try again.")
-        return CatalogParser.page(root)
-    }
+    fun page(root: JSONObject): CatalogPage = try {
+        CatalogJsonParser.libraryPage(legacyCatalogJson(root) as JsonObject)
+    } catch (failure: CatalogFailure) { throw IOException(failure.message) }
 }

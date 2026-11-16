@@ -11,8 +11,11 @@ kotlin {
     }
     sourceSets {
         commonMain.dependencies {
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+            api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+            api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
         }
         commonTest.dependencies { implementation(kotlin("test")) }
+        jvmMain.dependencies { api("com.squareup.okhttp3:okhttp:4.12.0") }
+        jvmTest.dependencies { implementation("com.squareup.okhttp3:mockwebserver:4.12.0") }
     }
 }

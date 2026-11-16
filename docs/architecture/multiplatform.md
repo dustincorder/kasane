@@ -79,3 +79,33 @@ port parser traversal to existing kotlinx.serialization JSON. Android OnlineCata
 must delegate to this implementation, preserving its validated response, auth-host,
 cancellation and error behavior. Keep one provider, not a copied Linux provider;
 then wire Compose Desktop and libmpv to that shared catalog/queue.
+
+
+## Verified provider checkpoint (2026-11-16)
+
+Android OnlineCatalog now delegates typed reads and explicit library writes to
+SharedOnlineCatalog in commonMain. InnerTubeClient owns request/context/error
+policy; common JSON parsers own catalog, artwork, radio, rating and playlist
+response conversion. The JVM OkHttp adapter bounds responses, cancels calls,
+rejects redirects and avoids persistent cookie jars. Platform clock/SHA ports
+keep Android APIs out of common code. Remaining org.json entry points are
+compatibility facades for login and stream consumers, not a second provider.
+
+Blank rating acknowledgements now require a read-only status confirmation; an
+unknown result rolls back the optimistic controller state without repeating the
+mutation. A partial HTTP body failure is classified NETWORK rather than malformed
+JSON. Both corrections have regression coverage with synthetic credentials only.
+
+Verification: shared JVM tests 37 passed; Android tests 188 total, 179 passed,
+nine opt-in live tests skipped. Debug, release and isolated test APK builds passed.
+The isolated emulator guest cache probe passed (Home 1794 ms/one request, search
+929 ms/one request; memory medians 19/1090 us and Room 6/5 ms, zero HTTP requests).
+These are metadata timings, not UI/image timings or a controlled speed comparison.
+The isolated MediaSession radio probe passed: queue 51, deduplicated, manual entry
+preserved and populated before the first track ended. No Pixel installation,
+account credential access or personal-account mutation was performed.
+
+This checkpoint does not implement or prove full SABR playback. Earlier partial
+SABR results remain as documented in sabr-playback.md; full real-track EOF is not
+confirmed. Cache and session/controller migration, Kotlin desktop and the remaining
+product roadmap are unfinished. Work paused here at the user's explicit request.
