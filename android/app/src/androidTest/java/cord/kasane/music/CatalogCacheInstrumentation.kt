@@ -21,6 +21,23 @@ class CatalogCacheInstrumentation : Instrumentation() {
         try {
             activity = startActivitySync(android.content.Intent(targetContext, cord.kasane.music.playback.PlaybackProbeActivity::class.java)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            phase = "shared_track_persistence"
+            val memory = androidx.room.Room.inMemoryDatabaseBuilder(targetContext, KasaneDatabase::class.java).build()
+            try {
+                runBlocking {
+                    val dao = memory.trackDao()
+                    val local = cord.kasane.music.model.Track("local:kmp-test", "Stored title", "Stored artist", "Album",
+                        213.5, "content://fixture/artwork", "content://fixture/audio", true, "local")
+                    val online = cord.kasane.music.model.Track("fixture0001", "Online title", "Online artist")
+                    dao.insertTrack(local)
+                    dao.insertTracks(listOf(online))
+                    check(dao.getTrackById(local.id) == local)
+                    check(dao.getTrackById(online.id) == online)
+                    dao.addFavorite(cord.kasane.music.model.FavoriteEntity(local.id, addedAt = 1))
+                    check(dao.getFavoritesForExport().single() == local)
+                }
+            } finally { memory.close() }
+            sendStatus(0, Bundle().apply { putString("stream", "ROOM SHARED DOMAIN PASSED: single/batch insert, full Track projection, favorite join; in-memory DB only\n") })
             val requests = AtomicInteger()
             val client = OkHttpClient.Builder().addNetworkInterceptor { chain ->
                 check(chain.request().header("Cookie") == null && chain.request().header("Authorization") == null)

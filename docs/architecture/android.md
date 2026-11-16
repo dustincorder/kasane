@@ -2,12 +2,14 @@
 
 Документация архитектуры нативного Android-клиента Kasane (`cord.kasane.music`).
 
+> Migration: portable Track/catalog/queue rules now live in `shared/commonMain`; see [KMP boundaries](multiplatform.md). The old range-stream discussion below is historical; active playback uses TransportMediaSource and the limitations in [SABR evidence](../sabr-playback.md). It is not proof of current full-track reliability.
+
 ---
 
 ## 1. Обзор стека
 
-- **Язык**: Kotlin 2.1.10
-- **UI Toolkit**: Jetpack Compose (BOM 2025.01.00)
+- **Язык**: Kotlin 2.0.21
+- **UI Toolkit**: Jetpack Compose (BOM 2024.12.01)
 - **Медиа-подсистема**: AndroidX Media3 1.5.1 (`media3-exoplayer`, `media3-session`, `media3-ui`)
 - **База данных**: AndroidX Room 2.6.1 с SQLite
 - **Сетевой клиент**: OkHttp 4.12.0

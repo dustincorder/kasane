@@ -2,7 +2,7 @@ package cord.kasane.music.playback
 
 import cord.kasane.music.model.Track
 
-/** Input validation only. The authoritative queue is the Media3 timeline. */
+/** Input validation only. The active playback backend owns the authoritative timeline. */
 object QueuePolicy {
     const val LIMIT = 2000
     fun nextInsertionIndex(currentIndex: Int, existingIndex: Int?, count: Int): Int {

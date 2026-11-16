@@ -1,8 +1,7 @@
 package cord.kasane.music
 import cord.kasane.music.model.Track
 import cord.kasane.music.playback.QueuePolicy
-import org.junit.Assert.*
-import org.junit.Test
+import kotlin.test.*
 class QueuePolicyTest {
     @Test fun keepsOrderAndRemovesDuplicateMediaIds() {
         val a = Track("a", "A", "Artist")

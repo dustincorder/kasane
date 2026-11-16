@@ -5,21 +5,6 @@ import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 
 @Serializable
-@Entity(tableName = "tracks")
-data class Track(
-    @PrimaryKey
-    val id: String,
-    val title: String,
-    val artist: String,
-    val album: String? = null,
-    val durationSeconds: Double = 0.0,
-    val thumbnailUri: String? = null,
-    val streamUri: String? = null,
-    val isLocal: Boolean = false,
-    val sourceProvider: String = "youtube"
-)
-
-@Serializable
 @Entity(tableName = "favorites")
 data class FavoriteEntity(
     @PrimaryKey

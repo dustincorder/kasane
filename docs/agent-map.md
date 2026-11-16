@@ -9,7 +9,8 @@
 
 | Подсистема | Путь | Стек | Описание |
 |---|---|---|---|
-| **Android Client** | `android/` | Kotlin 2.1.10, Jetpack Compose, Media3 1.5.1, Room 2.6.1 | Нативное Android-приложение (`cord.kasane.music`). |
+| **Shared KMP Domain** | `shared/` | Kotlin Multiplatform, commonMain + JVM target | Shared Track/catalog models and queue policy; Android consumes this module. |
+| **Android Client** | `android/` | Kotlin 2.0.21, Jetpack Compose, Media3 1.5.1, Room 2.6.1 | Нативное Android-приложение (`cord.kasane.music`). |
 | **Desktop Client** | `src/`, `src-tauri/` | Svelte 5, Tailwind CSS, Tauri 2, Rust | Десктоп-клиент для Linux (`cord.kasane.desktop`). |
 | **Audio Engine** | `crates/vibe-audio/` | Rust, rodio / cpal | Воспроизведение, очередь, буферизация. |
 | **Core Domain** | `crates/vibe-core/` | Rust | Модели данных (`Track`, `Playlist`, `Artist`), общие структуры. |
@@ -47,7 +48,7 @@ Application ID: `cord.kasane.music`
   - `PlaybackService : MediaSessionService()`: ExoPlayer, MediaSession, системное уведомление воспроизведения.
 - `PlaybackManager.kt`:
   - Управление воспроизведением из Compose через `MediaControllerCompat`/`MediaController`.
-- `QueuePolicy.kt`:
+- `shared/src/commonMain/kotlin/cord/kasane/music/playback/QueuePolicy.kt`:
   - Политика дедупликации и управления порядком очереди воспроизведения.
 
 ### 2.3. Провайдеры и Каталог (`provider/`, `model/`)
@@ -97,3 +98,5 @@ Application ID: `cord.kasane.music`
 - Account-scoped picker state and lost-acknowledgement recovery: `android/app/src/main/java/cord/kasane/music/provider/PlaylistPicker.kt`.
 - Shared native playlist modal: `android/app/src/main/java/cord/kasane/music/ui/components/PlaylistPickerSheet.kt`.
 - Malformed account-library response guard: `android/app/src/main/java/cord/kasane/music/provider/AccountLibraryParser.kt`.
+
+- KMP migration boundaries and verified schema compatibility: `docs/architecture/multiplatform.md`; product scope/acceptance: `docs/ROADMAP.md`, `docs/ACCEPTANCE.md`.

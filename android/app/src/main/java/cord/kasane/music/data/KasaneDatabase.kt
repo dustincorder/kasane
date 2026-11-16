@@ -47,11 +47,14 @@ data class CachedCatalogShelfItemRecord(
 
 @Dao
 interface TrackDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertTrack(track: Track)
+    suspend fun insertTrack(track: Track) = insertTrackRecord(TrackRecord.from(track))
+    suspend fun insertTracks(tracks: List<Track>) = insertTrackRecords(tracks.map(TrackRecord::from))
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertTracks(tracks: List<Track>)
+    suspend fun insertTrackRecord(track: TrackRecord)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTrackRecords(tracks: List<TrackRecord>)
 
     @Query("SELECT * FROM tracks WHERE id = :id")
     suspend fun getTrackById(id: String): Track?
@@ -92,7 +95,7 @@ interface TrackDao {
 }
 
 @Database(
-    entities = [Track::class, FavoriteEntity::class, HistoryEntity::class, CachedCatalogPageRecord::class,
+    entities = [TrackRecord::class, FavoriteEntity::class, HistoryEntity::class, CachedCatalogPageRecord::class,
         CachedCatalogShelfRecord::class, CachedCatalogItemEntity::class, CachedCatalogShelfItemRecord::class],
     version = 3,
     exportSchema = false
