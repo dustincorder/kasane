@@ -6,8 +6,6 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 
-enum class CloudLikeState { UNKNOWN, LOADING, LIKED, DISLIKED, NEUTRAL }
-
 /** Reads only statuses scoped to the requested video, never an unrelated recommended row. */
 object CloudLikeParser {
     fun parse(root: JSONObject, videoId: String): CloudLikeState {

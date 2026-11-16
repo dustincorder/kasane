@@ -24,7 +24,7 @@ Status labels are defined in `ACCEPTANCE.md`; a checked build is not product com
 |---|---|---|
 | M0 Architecture | Current-state inventory, roadmap, acceptance matrix, safe build/test boundaries | IMPLEMENTED & VERIFIED (documentation/inventory) |
 | M1 Shared domain | Extract existing portable Track/catalog/queue rules; Android consumes shared code; unchanged Room schema; shared and Android regression tests pass | IMPLEMENTED & VERIFIED for this extraction; desktop app/UI still absent |
-| M2 Shared provider/cache/auth logic | One InnerTube implementation, typed HTTP boundary, portable parsers, account-scoped SWR cache, session lifecycle/contracts, cloud ratings and playlist operations; read/write transport tests | Not started |
+| M2 Shared provider/cache/auth logic | One InnerTube implementation, typed HTTP boundary, portable parsers, account-scoped SWR cache, session lifecycle/contracts, cloud ratings and playlist operations; read/write transport tests | PARTIAL: contracts shared; actual client/parser/cache/controller not migrated yet |
 | M3 Kotlin Linux vertical slice | Compose Desktop window using shared catalog, real libmpv/JNA backend, one queue, local-file playback, lifecycle cleanup, launch/audio/seek/next tests | Not started |
 | M4 Shared Compose and navigation | Real Home/Search/detail/Library/Profile/Now Playing, platform-adapted navigation, actions, insets/Back, adaptive desktop and touch layouts, accessibility and UI tests | Not started |
 | M5 Playback and radio | Unified transport selection, Progressive/HLS/SABR where accessible, server policies, cancellation/limited recovery, prefetch/continuations/manual queue, 3 real full-track EOF matrix | Partial (existing Android evidence) |
@@ -58,4 +58,4 @@ local audio and available online full-track tests. No Cargo rebuild is required 
 unchanged legacy code; do not regenerate its large target cache as a substitute for Kotlin QA.
 Keep exact commands, evidence and limitations in ACCEPTANCE.md after every stage.
 
-**Current next action:** extract account/library contracts and the existing provider into shared code, then build the first functioning Kotlin desktop catalog/playback slice. Domain extraction evidence is in `architecture/multiplatform.md`; no full-client completion is claimed.
+**Current next action:** extract the existing InnerTube request/error policy into a common client plus bounded HTTP/crypto/clock ports, port parsers to kotlinx.serialization JSON, and make Android delegate to it before wiring the Kotlin desktop catalog/playback slice. Account/library contracts are already shared. Domain extraction evidence is in `architecture/multiplatform.md`; no full-client completion is claimed.

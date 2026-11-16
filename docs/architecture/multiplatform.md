@@ -55,3 +55,27 @@ JSON/request logic without maintaining two evolving provider implementations.
 Then add Compose Desktop with a real libmpv adapter (already available on the host),
 shared catalog/queue and verified audio. Keep Rust/Tauri until parity passes.
 See `../ROADMAP.md` and `../ACCEPTANCE.md` for the complete product scope.
+
+## Shared account/library contracts (subsequent extraction)
+
+commonMain now also owns AccountSession/Identity/State and SessionStore,
+AccountCollection/AccountLibraryProvider, CatalogRemote, CloudLikeState and
+TrackLinks. Android continues using these exact public packages; the Keystore,
+WebView, AccountRepository, HTTP/parser, Room cache and rating controller
+implementations remain their existing Android implementations for now. No account
+cookies/IDs, session file format, login behavior or remote writes were changed.
+The common session model has no serialization annotation and retains redacted
+`toString()` and input validation; sensitive values do not become domain exports.
+
+`./gradlew :shared:jvmTest assembleDebug testDebugUnitTest assembleRelease` passed:
+12 shared tests, 187 Android tests (178 passed, nine live skipped). This is common
+contract/compiler validation plus Android regression coverage, not a new live login
+or verified Linux account session. The native Room test above belongs to the prior
+Track extraction and does not claim real account coverage.
+
+**Next concrete implementation:** move request construction/error policy to a common
+InnerTube client with a bounded, cancellable HTTP port and platform SHA/clock ports;
+port parser traversal to existing kotlinx.serialization JSON. Android OnlineCatalog
+must delegate to this implementation, preserving its validated response, auth-host,
+cancellation and error behavior. Keep one provider, not a copied Linux provider;
+then wire Compose Desktop and libmpv to that shared catalog/queue.

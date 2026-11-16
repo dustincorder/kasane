@@ -94,3 +94,8 @@ builds passed. Room v3 identity and generated table SQL are unchanged; isolated 
 runtime verified inserts, projections, favorite join and existing cache DB opening.
 See `architecture/multiplatform.md`. Linux UI/backend, common provider and full product
 acceptance remain incomplete; this is not a new release milestone.
+
+Common account/library contracts: **IMPLEMENTED & VERIFIED** as extracted contracts
+used by Android; request/parser/cache/controller migration remains **PARTIAL**.
+Subsequent shared tests: 12 passed; Android tests: 178 passed, nine live skipped;
+debug and release builds passed. No new claim of live account or Linux client verification.

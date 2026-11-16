@@ -3,8 +3,6 @@ package cord.kasane.music.provider
 import cord.kasane.music.model.*
 import org.json.JSONObject
 
-data class TrackLinks(val artist: CatalogItem? = null, val album: CatalogItem? = null)
-
 /** Only browse endpoints in the exact track renderer; never a title-based catalog guess. */
 object TrackLinksParser {
     fun parse(root: JSONObject): Map<String, TrackLinks> {

@@ -100,14 +100,6 @@ class RoomCatalogCacheStore(private val dao: KasaneDatabase.CatalogCacheDao) : C
 
 data class CacheEntry(val page: CatalogPage, val updatedAt: Long)
 
-interface CatalogRemote {
-    suspend fun home(account: AccountSession? = null): CatalogPage
-    suspend fun browse(id: String, continuation: String? = null): CatalogPage
-    suspend fun search(query: String, kind: CatalogKind, continuation: String? = null): CatalogPage
-    suspend fun collectionFor(account: AccountSession, collection: AccountCollection, continuation: String? = null): CatalogPage
-    suspend fun playlistFor(account: AccountSession, playlistId: String, continuation: String? = null): CatalogPage
-}
-
 /** Aggregate counters intentionally contain no query, account, track, or cookie data. */
 class CatalogRequestDiagnostics {
     private val counts = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()

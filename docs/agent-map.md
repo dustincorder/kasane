@@ -58,16 +58,16 @@ Application ID: `cord.kasane.music`
   - Парсинг ответов InnerTube (песни, альбомы, артисты, плейлисты, видео).
 - `ThumbnailParser.kt`:
   - Парсинг превью и обложек высокого разрешения.
-- `AccountLibraryProvider.kt`:
-  - Заготовки взаимодействия с пользовательской библиотекой (Liked songs, Playlists).
+- `shared/src/commonMain/kotlin/cord/kasane/music/provider/AccountLibraryProvider.kt`:
+  - Shared account library contract. OnlineCatalog implements the Android operations; live account checks are distinct from contract tests.
 - `Catalog.kt`, `Track.kt`:
   - Доменные модели: `Track`, `BrowsePage`, `Section`, `ShelfItem`.
 
 ### 2.4. Хранилище и Сессии (`data/`, `auth/`)
 - `KasaneDatabase.kt`:
   - Room Database (`recent_tracks`, `TrackDao`).
-- `AccountSession.kt`, `AccountRepository.kt`:
-  - Состояние аккаунта (Guest / Authenticated).
+- `shared/src/commonMain/kotlin/cord/kasane/music/auth/AccountSession.kt`: portable session/state/store contracts.
+- Android `AccountRepository.kt`: current session lifecycle controller; Keystore/WebView remain platform adapters.
 - `KeystoreSessionStore.kt`:
   - Безопасное хранение токенов через Android Keystore (AES-GCM).
 
@@ -100,3 +100,5 @@ Application ID: `cord.kasane.music`
 - Malformed account-library response guard: `android/app/src/main/java/cord/kasane/music/provider/AccountLibraryParser.kt`.
 
 - KMP migration boundaries and verified schema compatibility: `docs/architecture/multiplatform.md`; product scope/acceptance: `docs/ROADMAP.md`, `docs/ACCEPTANCE.md`.
+
+- Shared `data/CatalogRemote.kt`, `provider/TrackLinks.kt`, `provider/CloudLikeState.kt`: common contracts/DTOs. Their HTTP/Room/controller adapters have not all moved to commonMain yet.
