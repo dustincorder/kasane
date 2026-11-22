@@ -25,7 +25,7 @@
         {#if track.thumbnail_url}
           <img src={track.thumbnail_url} alt={track.title} class="w-full h-full object-cover" />
         {:else}
-          <div class="w-full h-full bg-surface-border flex items-center justify-center text-text-muted text-xs font-mono">
+          <div class="w-full h-full bg-surface-border flex items-center justify-center text-text-muted text-xs">
             ♪
           </div>
         {/if}
@@ -39,7 +39,7 @@
         class="ml-2 text-text-muted hover:text-text-primary transition-colors p-1"
         aria-label="Favorite"
       >
-        <Heart size={16} fill={isFav ? '#EDEDEF' : 'none'} color={isFav ? '#EDEDEF' : 'currentColor'} />
+        <Heart size={16} fill={isFav ? '#EF5C7D' : 'none'} color={isFav ? '#EF5C7D' : 'currentColor'} />
       </button>
     {:else}
       <div class="text-xs text-text-muted">No track selected</div>
@@ -60,7 +60,7 @@
 
       <button
         onclick={() => player.togglePlay()}
-        class="w-9 h-9 rounded-full bg-text-primary text-surface-base flex items-center justify-center hover:opacity-90 active:scale-95 transition disabled:opacity-30"
+        class="w-9 h-9 rounded-full bg-accent-active text-white flex items-center justify-center hover:opacity-90 active:scale-95 transition disabled:opacity-30"
         aria-label={isPlaying ? 'Pause' : 'Play'}
         disabled={!player.canPlay}
       >

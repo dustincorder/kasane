@@ -5,24 +5,25 @@ export default {
     extend: {
       colors: {
         surface: {
-          base: '#111215',
-          elevated: '#17181D',
-          hover: '#202228',
-          border: '#282A32',
+          base: '#0C0D10',
+          elevated: '#13151A',
+          hover: '#1B1E26',
+          border: '#262A35',
         },
         text: {
-          primary: '#EDEDEF',
-          secondary: '#8F93A0',
-          muted: '#5A5E6B',
+          primary: '#F4F5F8',
+          secondary: '#9FA6B7',
+          muted: '#7E859C',
         },
         accent: {
           subtle: '#2B121B',
           active: '#D52F58', // Kasane Crimson
           highlight: '#EF5C7D', // Kasane Rose
+          wine: '#790F32',
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: ['system-ui', '-apple-system', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
       },
     },

@@ -68,7 +68,7 @@
     {:else if searched && !loading && !results.length}
       <p role="status" class="text-sm text-text-secondary">No tracks found.</p>
     {:else if results.length}
-      <h2 class="text-xs uppercase tracking-wider text-text-muted">Found {results.length} tracks</h2>
+      <h2 class="text-xs text-text-muted">Found {results.length} tracks</h2>
     {/if}
 
     {#if results.length}
@@ -76,11 +76,11 @@
       {#each results as track}
         <div class="flex items-center justify-between p-3 hover:bg-surface-hover transition group">
           <div class="flex items-center gap-3 min-w-0">
-            <div class="w-10 h-10 rounded bg-surface-base flex-shrink-0 overflow-hidden relative">
+            <div class="w-10 h-10 rounded-md bg-surface-base flex-shrink-0 overflow-hidden relative">
               {#if track.thumbnail_url}
                 <img src={track.thumbnail_url} alt={track.title} class="w-full h-full object-cover" />
               {:else}
-                <div class="w-full h-full flex items-center justify-center text-xs font-mono text-text-muted">♪</div>
+                <div class="w-full h-full flex items-center justify-center text-xs text-text-muted">♪</div>
               {/if}
             </div>
             <div class="truncate">
@@ -90,7 +90,7 @@
           </div>
 
           <div class="flex items-center gap-2 flex-shrink-0">
-            <span class="text-xs font-mono text-text-muted mr-3">{player.formatTime(track.duration_secs)}</span>
+            <span class="text-xs tabular-nums text-text-muted mr-3">{player.formatTime(track.duration_secs)}</span>
             <button
               onclick={() => player.addToQueue(track)}
               class="p-2 text-text-secondary hover:text-text-primary rounded hover:bg-surface-border transition"
@@ -101,7 +101,7 @@
             <button
               onclick={() => player.playTrack(track)}
               disabled={player.isBusy}
-              class="p-2 text-surface-base bg-text-primary rounded-full hover:opacity-90 active:scale-95 transition"
+              class="p-2 bg-accent-active text-white rounded-full hover:opacity-90 active:scale-95 transition"
               title="Play now"
             >
               <Play size={14} fill="currentColor" class="translate-x-0.5" />

@@ -15,10 +15,10 @@
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape') player.showNowPlayingModal = false; }} />
 
 {#if player.showNowPlayingModal && track}
-  <div class="fixed inset-0 z-50 bg-[#0e0f12] flex flex-col justify-between p-8 md:p-12 animate-fade-in select-none">
+  <div class="fixed inset-0 z-50 bg-surface-base flex flex-col justify-between p-8 md:p-12 animate-fade-in select-none">
     <!-- Top Bar -->
     <div class="flex items-center justify-between w-full max-w-4xl mx-auto">
-      <div class="text-xs uppercase tracking-wider font-mono text-text-muted">Now Playing</div>
+      <div class="text-xs text-text-muted">Now playing</div>
       <button
         onclick={() => (player.showNowPlayingModal = false)}
         class="text-text-secondary hover:text-text-primary p-2 transition-colors rounded-full hover:bg-surface-hover"
@@ -34,7 +34,7 @@
         {#if track.thumbnail_url}
           <img src={track.thumbnail_url} alt={track.title} class="w-full h-full object-cover" />
         {:else}
-          <div class="w-full h-full flex items-center justify-center text-4xl text-text-muted font-mono">
+          <div class="w-full h-full flex items-center justify-center text-4xl text-text-muted">
             ♪
           </div>
         {/if}
@@ -46,7 +46,7 @@
             <h1 class="text-2xl md:text-3xl font-semibold text-text-primary leading-tight">{track.title}</h1>
             <p class="text-base md:text-lg text-text-secondary mt-1">{track.artist}</p>
             {#if track.album}
-              <p class="text-xs text-text-muted font-mono mt-2">{track.album.title}</p>
+              <p class="text-xs text-text-muted mt-2">{track.album.title}</p>
             {/if}
           </div>
           <button
@@ -54,7 +54,7 @@
             class="text-text-secondary hover:text-text-primary p-2 transition-colors"
             aria-label="Favorite"
           >
-            <Heart size={24} fill={isFav ? '#EDEDEF' : 'none'} color={isFav ? '#EDEDEF' : 'currentColor'} />
+            <Heart size={24} fill={isFav ? '#EF5C7D' : 'none'} color={isFav ? '#EF5C7D' : 'currentColor'} />
           </button>
         </div>
 
@@ -89,7 +89,7 @@
           <button
             onclick={() => player.togglePlay()}
             disabled={!player.canPlay}
-            class="w-16 h-16 rounded-full bg-text-primary text-surface-base flex items-center justify-center hover:opacity-90 active:scale-95 transition"
+            class="w-16 h-16 rounded-full bg-accent-active text-white flex items-center justify-center hover:opacity-90 active:scale-95 transition"
             aria-label={isPlaying ? 'Pause' : 'Play'}
           >
             {#if isPlaying}
@@ -111,7 +111,7 @@
     </div>
 
     <!-- Bottom Indicator -->
-    <div class="text-center text-xs text-text-muted font-mono w-full max-w-4xl mx-auto">
+    <div class="text-center text-xs text-text-muted w-full max-w-4xl mx-auto">
       Source: {track.provider} &bull; Native Playback Engine
     </div>
   </div>
