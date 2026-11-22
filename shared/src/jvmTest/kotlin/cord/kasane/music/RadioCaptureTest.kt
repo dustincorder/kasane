@@ -56,3 +56,35 @@ class RadioRequestTest {
         assertEquals("TOKEN", next["continuation"].toString().trim('"')); assertNull(next["playlistId"])
     }
 }
+
+class CreatorCaptureTest {
+    private fun page(name: String) = CatalogJsonParser.page(Json.parseToJsonElement(
+        checkNotNull(javaClass.getResourceAsStream("/captured/$name")).readBytes().decodeToString()) as JsonObject)
+
+    @Test fun albumCreatorIsTheLinkedArtistWithAvatarAndYearStaysSecondary() {
+        val p = page("album_kira_introduction_guest.json")
+        val artist = p.creators.single()
+        assertEquals("KIRA", artist.name); assertEquals("UCXFEPK5iEJ1MQQmjfleJxlA", artist.browseId)
+        assertFalse(artist.userChannel); assertTrue(artist.avatar!!.startsWith("https://yt3.ggpht.com/"))
+        assertEquals("Album • 2018", p.subtitle); assertEquals("11 songs • 37 minutes", p.stats); assertFalse(p.owned)
+    }
+
+    @Test fun publicPlaylistCreatorIsTheOwnerChannelNotATrackArtist() {
+        val p = page("playlist_phonk_public_guest.json")
+        val owner = p.creators.single()
+        assertEquals("Phonk Time", owner.name); assertEquals("UC50Skh8HNEXD5Ir4StWh5MQ", owner.browseId)
+        assertTrue(owner.userChannel); assertTrue(owner.avatar!!.startsWith("https://yt3.ggpht.com/"))
+        assertTrue(p.stats.contains("64 tracks"))
+        assertTrue(p.tracks.none { it.artist == owner.name })
+    }
+
+    @Test fun missingOrNonLinkedCreatorsAreNeverInvented() {
+        val none = CatalogJsonParser.page(Json.parseToJsonElement("""{"header":{"musicResponsiveHeaderRenderer":{"title":{"runs":[{"text":"Mix"}]}}}}""") as JsonObject)
+        assertTrue(none.creators.isEmpty())
+        val unlinked = CatalogJsonParser.creators(Json.parseToJsonElement("""{"straplineTextOne":{"runs":[{"text":"YouTube Music"}]}}""") as JsonObject)
+        assertEquals(listOf(cord.kasane.music.model.CatalogCreator("YouTube Music")), unlinked)
+        val two = CatalogJsonParser.creators(Json.parseToJsonElement("""{"straplineTextOne":{"runs":[
+          {"text":"A","navigationEndpoint":{"browseEndpoint":{"browseId":"UCa"}}},{"text":" & "},{"text":"B","navigationEndpoint":{"browseEndpoint":{"browseId":"UCb"}}}]}}""") as JsonObject)
+        assertEquals(listOf("A", "B"), two.map { it.name }); assertEquals(listOf("UCa", "UCb"), two.map { it.browseId })
+    }
+}

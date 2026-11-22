@@ -12,6 +12,7 @@ import cord.kasane.music.provider.AccountCollection
 import cord.kasane.music.provider.AccountLibraryProvider
 import cord.kasane.music.ui.AccountLibraryScreen
 import cord.kasane.music.ui.CatalogDetailContent
+import cord.kasane.music.ui.creditsFor
 import cord.kasane.music.ui.theme.KasaneTheme
 import cord.kasane.music.ui.withCover
 import org.junit.Assert.*
@@ -55,7 +56,7 @@ class PlaylistNavigationTest {
         compose.setContent { KasaneTheme(dynamicColor = false) { Surface {
             val (item, title) = cases[index]
             CatalogDetailContent(item, CatalogPage(title, "Someone · 2026", "https://yt3.googleusercontent.com/x=w226-h226", listOf(tracks(5))),
-                false, null, false, {}, {}, {}, { _, _ -> }, {}, {})
+                false, null, false, {}, {}, {}, { _, _ -> }, {}, onLoadMore = {})
         } } }
         for (i in cases.indices) {
             index = i; compose.waitForIdle()
@@ -69,7 +70,7 @@ class PlaylistNavigationTest {
         var loads = 0
         val page = CatalogPage("Big", "", null, listOf(tracks(6)), continuation = "next")
         compose.setContent { KasaneTheme(dynamicColor = false) { Surface {
-            CatalogDetailContent(personal, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, { loads++ })
+            CatalogDetailContent(personal, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, onLoadMore = { loads++ })
         } } }
         compose.waitForIdle()
         assertTrue("short list with a continuation must request more", loads >= 1)
@@ -80,5 +81,38 @@ class PlaylistNavigationTest {
         assertEquals(cover, Track("a", "T", "A").withCover(cover).thumbnailUri)
         assertEquals("own", Track("a", "T", "A", thumbnailUri = "own").withCover(cover).thumbnailUri)
         assertNull(Track("a", "T", "A").withCover(null).thumbnailUri)
+    }
+
+    private fun render(item: CatalogItem, page: CatalogPage, owner: AccountIdentity? = null, onOpen: (CatalogItem) -> Unit = {}) {
+        compose.setContent { KasaneTheme(dynamicColor = false) { Surface {
+            CatalogDetailContent(item, page, false, null, false, {}, {}, onOpen, { _, _ -> }, {}, owner = owner, onLoadMore = {})
+        } } }
+    }
+
+    @Test fun albumShowsItsLinkedArtistsBelowTheTitleAndOpensThem() {
+        val opened = mutableListOf<CatalogItem>()
+        val page = CatalogPage("The Introduction", "Album • 2018", null, listOf(tracks(3)), creators = listOf(
+            CatalogCreator("KIRA", "UCa", null), CatalogCreator("GUMI", "UCb", null)), stats = "11 songs • 37 minutes")
+        render(CatalogItem("MPREb_x", CatalogKind.ALBUM, "The Introduction"), page, onOpen = { opened += it })
+        compose.onNodeWithText("KIRA").assertExists(); compose.onNodeWithText("GUMI").assertExists()
+        compose.onNodeWithText("Album • 2018").assertExists(); compose.onNodeWithText("11 songs • 37 minutes").assertExists()
+        compose.onNodeWithText("GUMI").performClick()
+        assertEquals(listOf("UCb"), opened.map { it.id }); assertEquals(CatalogKind.ARTIST, opened.single().kind)
+    }
+
+    @Test fun publicPlaylistShowsItsRealOwnerNotATrackArtist() {
+        val page = CatalogPage("PilotRedSky", "Playlist • 2026", null, listOf(tracks(3)), creators = listOf(CatalogCreator("Phonk Time", "UC50", null, userChannel = true)))
+        render(CatalogItem("VLPLpub", CatalogKind.PLAYLIST, "PilotRedSky"), page)
+        compose.onNodeWithText("Phonk Time").assertExists(); compose.onNodeWithText("Made by YouTube Music").assertDoesNotExist()
+    }
+
+    @Test fun ownedPlaylistShowsMyProfileAndGeneratedMixesAreLabelled() {
+        val me = AccountIdentity("Kasane Listener", null, "UCme")
+        render(personal, CatalogPage("My playlist", "Playlist", null, listOf(tracks(3)), owned = true), owner = me)
+        compose.onNodeWithText("Kasane Listener").assertExists()
+        assertEquals(listOf(CatalogCreator("Kasane Listener", "UCme", null, userChannel = true)), creditsFor(personal, CatalogPage("x", "", null, emptyList(), owned = true), me).creators)
+        assertTrue(creditsFor(CatalogItem("VLRDCLAK5uy_x", CatalogKind.PLAYLIST, "Mix"), CatalogPage("Mix", "", null, emptyList()), me).generated)
+        assertTrue(creditsFor(personal, CatalogPage("x", "", null, emptyList()), me).creators.isEmpty())
+        assertTrue("never invent: not owned and no creators", !creditsFor(personal, CatalogPage("x", "", null, emptyList()), me).generated)
     }
 }

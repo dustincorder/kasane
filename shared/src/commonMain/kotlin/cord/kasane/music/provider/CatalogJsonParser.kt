@@ -144,7 +144,48 @@ object CatalogJsonParser {
         val nextToken = if (playlistShelf != null) continuation(playlistShelf) else continuation(root)
         return CatalogPage(text(header?.optJsonObject("title")).ifBlank { fallback },
             text(header?.optJsonObject("subtitle")), header?.let(ThumbnailJsonParser::bestUrl), shelves, nextToken,
-            text(header?.optJsonObject("description")), chips(root))
+            text(header?.optJsonObject("description")), chips(root),
+            creators(header), text(header?.optJsonObject("secondSubtitle")),
+            objects(root, "musicEditablePlaylistDetailHeaderRenderer").isNotEmpty())
+    }
+
+    private val SEPARATORS = setOf("&", ",", "•", "and", "·")
+
+    /**
+     * Creators from the header: the strapline (albums, most playlists) or the owner facepile (playlists), else
+     * artist/channel links inside the subtitle (older album headers). Nothing is inferred from track artists.
+     */
+    fun creators(header: JsonObject?): List<CatalogCreator> {
+        if (header == null) return emptyList()
+        fun kindOf(endpoint: JsonObject?): Pair<String?, Boolean> {
+            val browse = endpoint?.let { objects(it, "browseEndpoint").firstOrNull() } ?: return null to false
+            val id = browse.optString("browseId").takeIf { it.isNotBlank() } ?: return null to false
+            val type = objects(browse, "browseEndpointContextMusicConfig").firstOrNull()?.optString("pageType").orEmpty()
+            return if (type == "MUSIC_PAGE_TYPE_ARTIST" || type == "MUSIC_PAGE_TYPE_USER_CHANNEL" || id.startsWith("UC")) id to (type == "MUSIC_PAGE_TYPE_USER_CHANNEL") else null to false
+        }
+        fun fromRuns(source: JsonObject?): List<CatalogCreator> = source?.optJsonArray("runs").orEmpty().mapNotNull { run ->
+            val name = (run as? JsonObject)?.optString("text")?.trim().orEmpty()
+            if (name.isBlank() || name in SEPARATORS) return@mapNotNull null
+            val (id, user) = kindOf((run as JsonObject).optJsonObject("navigationEndpoint"))
+            CatalogCreator(name, id, null, user)
+        }
+        val strap = fromRuns(header.optJsonObject("straplineTextOne"))
+        if (strap.isNotEmpty()) {
+            val avatar = ThumbnailJsonParser.bestUrl(header.optJsonObject("straplineThumbnail"))
+            return if (strap.size == 1 && avatar != null) listOf(strap[0].copy(avatar = avatar)) else strap
+        }
+        val facepile = objects(header.optJsonObject("facepile"), "avatarStackViewModel").firstOrNull()
+        if (facepile != null) {
+            val name = facepile.optJsonObject("text")?.optString("content").orEmpty().trim()
+            if (name.isNotBlank()) {
+                val (id, user) = kindOf(facepile.optJsonObject("rendererContext"))
+                val url = facepile.optJsonArray("avatars")?.optJsonObject(0)?.let { a ->
+                    objects(a, "image").firstOrNull()?.optJsonArray("sources")?.optJsonObject(0)?.optString("url")
+                }?.takeIf { it.isNotBlank() && it.startsWith("https://") }
+                return listOf(CatalogCreator(name, id, url, user))
+            }
+        }
+        return fromRuns(header.optJsonObject("subtitle")).filter { it.browseId != null }
     }
     /** Mood and activity filters. Only chips that carry a browse token are usable; the rest are ignored. */
     fun chips(root: JsonObject): List<CatalogChip> = objects(root, "chipCloudChipRenderer").mapNotNull { chip ->

@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -198,6 +199,49 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
     }
 }
 
+/** Who is credited on the page, and whether it is YouTube Music itself rather than a person. */
+internal data class Credits(val creators: List<CatalogCreator>, val generated: Boolean = false)
+
+/**
+ * Creators come only from what YouTube Music returned for this page. For the signed-in user's own playlists the
+ * header carries no owner, so the account profile is used. YouTube's generated mixes and charts are labelled as
+ * such by their playlist id prefix. Nothing is borrowed from track artists.
+ */
+internal fun creditsFor(item: CatalogItem, page: CatalogPage?, owner: cord.kasane.music.auth.AccountIdentity?): Credits {
+    page?.creators?.takeIf { it.isNotEmpty() }?.let { return Credits(it) }
+    if (item.kind != CatalogKind.PLAYLIST) return Credits(emptyList())
+    if (page?.owned == true && owner != null)
+        return Credits(listOf(CatalogCreator(owner.name, owner.channelId?.takeIf { it.startsWith("UC") }, owner.avatar, userChannel = true)))
+    val id = item.id.removePrefix("VL")
+    if (id.startsWith("RD") || id.startsWith("OLAK") || id == "LM") return Credits(emptyList(), generated = true)
+    return Credits(emptyList())
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CreatorLine(credits: Credits, start: Boolean, onOpen: (CatalogItem) -> Unit) {
+    if (credits.generated) {
+        Text("Made by YouTube Music", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+        return
+    }
+    if (credits.creators.isEmpty()) return
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp, if (start) Alignment.Start else Alignment.CenterHorizontally),
+        verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        credits.creators.forEachIndexed { index, creator ->
+            if (index > 0) Text(if (index == credits.creators.lastIndex) "&" else ",", style = MaterialTheme.typography.bodyMedium)
+            val link = creator.browseId?.let { CatalogItem(it, CatalogKind.ARTIST, creator.name, artwork = creator.avatar) }
+            Row(verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.heightIn(min = 36.dp).clip(MaterialTheme.shapes.small).then(
+                    if (link != null) Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Open ${creator.name}") { onOpen(link) } else Modifier)
+                    .padding(horizontal = 4.dp)) {
+                if (!creator.avatar.isNullOrBlank()) TrackArtwork(creator.avatar, Modifier.size(24.dp), shape = androidx.compose.foundation.shape.CircleShape).also { Spacer(Modifier.width(6.dp)) }
+                Text(creator.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = if (link != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+            }
+        }
+    }
+}
+
 internal fun Track.withCover(cover: String?): Track = if (thumbnailUri.isNullOrBlank() && !cover.isNullOrBlank()) copy(thumbnailUri = cover) else this
 
 @Composable
@@ -224,7 +268,8 @@ private fun CatalogResult(item: CatalogItem, onClick: () -> Unit) {
 @Composable
 fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () -> Unit,
     onOpen: (CatalogItem) -> Unit, onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
-    cachedCatalog: CachedCatalogRepository? = null, cacheScope: String = "guest", accountSession: AccountSession? = null) {
+    cachedCatalog: CachedCatalogRepository? = null, cacheScope: String = "guest", accountSession: AccountSession? = null,
+    accountIdentity: cord.kasane.music.auth.AccountIdentity? = null) {
     var page by remember(item.id) { mutableStateOf<CatalogPage?>(null) }
     var revision by remember(item.id) { mutableIntStateOf(0) }
     var loading by remember(item.id) { mutableStateOf(true) }
@@ -256,7 +301,7 @@ fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () ->
         catch (e: Exception) { error = e.message ?: "This page is unavailable." }
         finally { loading = false; handledRevision = revision }
     }
-    CatalogDetailContent(item, page, loading, error, loadingMore, onBack, { revision++ }, onOpen, onPlay, onQueue) {
+    CatalogDetailContent(item, page, loading, error, loadingMore, onBack, { revision++ }, onOpen, onPlay, onQueue, owner = accountIdentity) {
         val current = page ?: return@CatalogDetailContent
         val token = current.continuation ?: return@CatalogDetailContent
         loadingMore = true; error = null
@@ -284,6 +329,7 @@ fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () ->
 fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean, error: String?,
     loadingMore: Boolean, onBack: () -> Unit, onRetry: () -> Unit, onOpen: (CatalogItem) -> Unit,
     onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
+    owner: cord.kasane.music.auth.AccountIdentity? = null,
     onLoadMore: () -> Unit) {
     // Album rows carry no artwork of their own, so they show (and queue with) the album cover instead of a placeholder note.
     val albumCover = if (item.kind == CatalogKind.ALBUM) page?.artwork ?: item.artwork else null
@@ -316,11 +362,13 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                     val align = if (start) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center
                     Column(horizontalAlignment = if (start) Alignment.Start else Alignment.CenterHorizontally) {
                         Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = align, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        CreatorLine(creditsFor(item, page, owner), start, onOpen)
+                        // Type and year, then YouTube's own count and length; our own count only when YouTube sent none.
                         if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodyMediumMuted, textAlign = align, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        if (tracks.isNotEmpty()) {
-                            val duration = tracks.sumOf { it.durationSeconds }
-                            Text(plural(tracks.size, "track") + if (duration > 0) " · ${formatDuration(duration)}" else "", style = MaterialTheme.typography.labelMediumMuted, textAlign = align)
+                        val stats = page?.stats.orEmpty().ifBlank {
+                            if (tracks.isEmpty()) "" else plural(tracks.size, "track") + tracks.sumOf { it.durationSeconds }.let { if (it > 0) " · ${formatDuration(it)}" else "" }
                         }
+                        if (stats.isNotBlank()) Text(stats, style = MaterialTheme.typography.labelMediumMuted, textAlign = align)
                     }
                 }
                 // Playback controls span the full width: equally reachable by either thumb, and the primary action is the widest.
@@ -396,6 +444,31 @@ fun CatalogDetailPreview() {
         val item = CatalogItem("UCpreview", CatalogKind.ARTIST, "KIRA", "Artist")
         val page = CatalogPage(item.title, "1.2M subscribers", null, listOf(CatalogShelf("Songs", (1..4).map {
             CatalogItem("song$it", CatalogKind.SONG, "Popular song number $it", "KIRA", durationSeconds = 180.0 + it) })))
-        Surface(color = MaterialTheme.colorScheme.background) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, {}) }
+        Surface(color = MaterialTheme.colorScheme.background) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, onLoadMore = {}) }
+    }
+}
+
+@Preview(name = "Album 412", showBackground = true, widthDp = 412, heightDp = 892)
+@Preview(name = "Album 360", showBackground = true, widthDp = 360, heightDp = 780)
+@Composable
+fun AlbumDetailPreview() {
+    KasaneTheme(dynamicColor = false) {
+        val item = CatalogItem("MPREb_x", CatalogKind.ALBUM, "The Introduction", "KIRA")
+        val page = CatalogPage("The Introduction", "Album • 2018", null, listOf(CatalogShelf("Tracks", (1..3).map {
+            CatalogItem("a$it", CatalogKind.SONG, "Track number $it", "KIRA", durationSeconds = 200.0) })),
+            creators = listOf(CatalogCreator("KIRA", "UCa"), CatalogCreator("GUMI", "UCb")), stats = "11 songs • 37 minutes")
+        Surface(color = MaterialTheme.colorScheme.background) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, onLoadMore = {}) }
+    }
+}
+
+@Preview(name = "Playlist 412", showBackground = true, widthDp = 412, heightDp = 892)
+@Composable
+fun PlaylistDetailPreview() {
+    KasaneTheme(dynamicColor = false) {
+        val item = CatalogItem("VLPLpub", CatalogKind.PLAYLIST, "BEST PHONK MIX PLAYLIST", "")
+        val page = CatalogPage("BEST PHONK MIX PLAYLIST", "Playlist • 2026", null, listOf(CatalogShelf("Tracks", (1..3).map {
+            CatalogItem("p$it", CatalogKind.SONG, "Phonk track $it", "Some artist", durationSeconds = 160.0) })),
+            creators = listOf(CatalogCreator("Phonk Time", "UC50", null, userChannel = true)), stats = "107M views • 64 tracks • 3 hours, 21 minutes")
+        Surface(color = MaterialTheme.colorScheme.background) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, onLoadMore = {}) }
     }
 }

@@ -30,6 +30,8 @@ data class CachedCatalogPageRecord(
     val updatedAt: Long = System.currentTimeMillis(),
     /** Home mood chips as `title<TAB>params` lines; null for pages without chips. */
     val chips: String? = null,
+    /** JSON [cord.kasane.music.model.PageMeta]: creators, stats, ownership. Null when the page has none. */
+    val meta: String? = null,
 )
 
 @Entity(tableName = "catalog_cache_shelf", primaryKeys = ["scopeKey", "cacheKey", "shelfIndex"])
@@ -126,7 +128,7 @@ interface TrackDao {
     entities = [TrackRecord::class, FavoriteEntity::class, HistoryEntity::class, CachedCatalogPageRecord::class,
         CachedCatalogShelfRecord::class, CachedCatalogItemEntity::class, CachedCatalogShelfItemRecord::class,
         cord.kasane.music.offline.AudioFileRecord::class],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class KasaneDatabase : RoomDatabase() {
@@ -199,7 +201,8 @@ abstract class KasaneDatabase : RoomDatabase() {
         suspend fun save(scopeKey: String, cacheKey: String, page: CatalogPage, now: Long) {
             putPage(CachedCatalogPageRecord(scopeKey, cacheKey, page.title, page.subtitle, page.artwork,
                 page.continuation, page.description, now,
-                page.chips.takeIf { it.isNotEmpty() }?.joinToString("\n") { it.title.replace('\t', ' ').replace('\n', ' ') + "\t" + it.params }))
+                page.chips.takeIf { it.isNotEmpty() }?.joinToString("\n") { it.title.replace('\t', ' ').replace('\n', ' ') + "\t" + it.params },
+                cord.kasane.music.model.PageMeta.of(page)?.let { kotlinx.serialization.json.Json.encodeToString(cord.kasane.music.model.PageMeta.serializer(), it) }))
             deleteShelfItems(scopeKey, cacheKey)
             deleteShelves(scopeKey, cacheKey)
             val itemRows = linkedMapOf<String, CachedCatalogItemEntity>()
@@ -240,6 +243,12 @@ abstract class KasaneDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_catalog_cache_updatedAt ON catalog_cache(updatedAt)")
             }
         }
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `catalog_cache_page` ADD COLUMN `meta` TEXT")
+            }
+        }
+
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `catalog_cache_shelf` ADD COLUMN `moreBrowseId` TEXT")

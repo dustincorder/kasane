@@ -494,7 +494,8 @@ private fun KasaneContent(app: KasaneApplication) {
                             { detailStack = detailStack.dropLast(1) }, openCatalog,
                             { tracks, shuffle -> app.playbackManager.playTracks(tracks, shuffle) },
                             { app.playbackManager.addToQueue(it) }, app.cachedCatalog, catalogScope,
-                            app.accountRepository.session().takeIf { accountState is AccountState.SignedIn })
+                            app.accountRepository.session().takeIf { accountState is AccountState.SignedIn },
+                            (accountState as? AccountState.SignedIn)?.identity)
                     }
                 } else screenState.SaveableStateProvider(selectedTab) {
                 when (selectedTab) {
