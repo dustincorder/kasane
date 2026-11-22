@@ -202,6 +202,9 @@ private fun KasaneContent(app: KasaneApplication) {
         }
         val favorites by app.database.trackDao().getFavorites().collectAsState(initial = emptyList())
         val history by app.database.trackDao().getRecentHistory().collectAsState(initial = emptyList())
+        val monthAgo = remember { System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000 }
+        val topPlayed by remember { app.database.trackDao().topPlayed(monthAgo) }.collectAsState(initial = emptyList())
+        val recentlySaved by remember { app.database.trackDao().recentlySaved() }.collectAsState(initial = emptyList())
         val favoriteIds = remember(favorites) { favorites.map { it.id }.toSet() }
 
         // Home feed recommendations from YouTube Music
@@ -221,7 +224,10 @@ private fun KasaneContent(app: KasaneApplication) {
             if (accountState is AccountState.SignedIn) libraryOnline = true
         }
         var activeHomeScope by remember { mutableStateOf<String?>(null) }
-        LaunchedEffect(homeRevision, accountState, catalogScope) {
+        val homeSections = remember(homeShelves, topPlayed, history, recentlySaved, offlineOnly) {
+            HomeComposer.build(homeShelves, topPlayed, history, recentlySaved, offlineOnly)
+        }
+        LaunchedEffect(homeRevision, accountState, catalogScope, offlineOnly) {
             if (activeHomeScope != catalogScope) {
                 activeHomeScope = catalogScope
                 homeShelves = emptyList()
@@ -232,6 +238,8 @@ private fun KasaneContent(app: KasaneApplication) {
                 homeShelves = saved.page.shelves
                 homeRecommendations = saved.page.tracks
             }
+            // Offline Only: the saved feed and local sections are all Home shows; never touch the network.
+            if (offlineOnly) { isHomeLoading = false; isHomeRefreshing = false; homeError = null; handledHomeRevision = homeRevision; return@LaunchedEffect }
             val isStale = saved == null || System.currentTimeMillis() - saved.updatedAt >= cord.kasane.music.data.CachedCatalogRepository.HOME_TTL_MS
             val shouldRefresh = homeRevision != handledHomeRevision || isStale
             if (!shouldRefresh) { isHomeLoading = false; homeError = null; return@LaunchedEffect }
@@ -470,35 +478,14 @@ private fun KasaneContent(app: KasaneApplication) {
                 } else screenState.SaveableStateProvider(selectedTab) {
                 when (selectedTab) {
                     0 -> HomeScreen(
-                        currentTrack = playbackState.currentTrack,
-                        isPlaying = playbackState.isPlaying,
-                        isLoading = playbackState.isLoading,
-                        recentHistory = history,
-                        favorites = favorites,
-                        favoriteIds = favoriteIds,
-                        recommendations = homeRecommendations,
-                        isHomeLoading = isHomeLoading,
-                        onOpenSearch = { selectedTab = 1 },
-                        onOpenSettings = { showSettings = true },
-                        catalogShelves = homeShelves,
-                        isRefreshing = isHomeRefreshing,
-                        onRefresh = { homeRevision++ },
-                        onCatalogOpen = openCatalog,
-                        homeError = homeError,
-                        onRetryHome = { homeRevision++ },
-                        onTrackClick = { app.playbackManager.playTrack(it) },
-                        onAddToQueue = { app.playbackManager.addToQueue(it) },
-                        onToggleFavorite = { track ->
-                            scope.launch {
-                                app.database.trackDao().insertTrack(track)
-                                if (favoriteIds.contains(track.id)) {
-                                    app.database.trackDao().removeFavorite(track.id)
-                                } else {
-                                    app.database.trackDao().addFavorite(FavoriteEntity(track.id))
-                                }
-                            }
-                        }
-                    )
+                        sections = homeSections, loading = isHomeLoading, refreshing = isHomeRefreshing, error = homeError,
+                        offlineOnly = offlineOnly, currentTrackId = playbackState.currentTrack?.id,
+                        actions = HomeActions(
+                            playTrack = { app.playbackManager.playTrack(it) },
+                            playList = { tracks, index -> app.playbackManager.playTracks(tracks.drop(index.coerceAtLeast(0))) },
+                            startRadio = { app.playbackManager.startRadio(it) },
+                            open = openCatalog, openSearch = { selectedTab = 1 }, openSettings = { showSettings = true },
+                            openSaved = { showDownloads = true }, refresh = { homeRevision++ }))
                     1 -> if (offlineOnly) OfflineSearchScreen(app.database.trackDao(), playbackState.currentTrack?.id) { app.playbackManager.playTrack(it) }
                     else CatalogSearchScreen(
                         app.ytProvider.catalog, openCatalog, playbackState.currentTrack?.id, favoriteIds,
@@ -586,92 +573,6 @@ private fun KasaneContent(app: KasaneApplication) {
 }
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
-fun HomeScreen(
-    currentTrack: Track?,
-    isPlaying: Boolean,
-    isLoading: Boolean,
-    recentHistory: List<HistoryEntity>,
-    favorites: List<Track>,
-    favoriteIds: Set<String>,
-    recommendations: List<Track>,
-    isHomeLoading: Boolean,
-    onOpenSearch: () -> Unit,
-    onTrackClick: (Track) -> Unit,
-    onAddToQueue: (Track) -> Unit,
-    onToggleFavorite: (Track) -> Unit,
-    onOpenSettings: () -> Unit = {},
-    homeError: String? = null,
-    onRetryHome: () -> Unit = {},
-    catalogShelves: List<CatalogShelf> = emptyList(),
-    onCatalogOpen: (CatalogItem) -> Unit = {},
-    isRefreshing: Boolean = false,
-    onRefresh: () -> Unit = {}
-) {
-    val listenAgain = remember(recentHistory) { HomeFeedPolicy.latestHistory(recentHistory) }
-    val uniqueRecommendations = remember(recommendations) { HomeFeedPolicy.uniqueTracks(recommendations) }
-    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = onRefresh,
-        modifier = Modifier.fillMaxSize(),
-    ) {
-    LazyColumn(state = androidx.compose.foundation.lazy.rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item {
-            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Kasane", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                IconButton(onClick = onOpenSearch) { Icon(Icons.Default.Search, "Search", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-        }
-        if (catalogShelves.isNotEmpty()) {
-            catalogShelves.forEach { shelf -> item { CatalogShelfRow(shelf, onCatalogOpen) } }
-            if (isHomeLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(20.dp), color = MaterialTheme.colorScheme.primary) }
-            if (homeError != null) item {
-                Text(homeError, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
-                TextButton(onClick = onRetryHome) { Text("Retry") }
-            }
-        } else {
-        item { SectionTitle("Fast picks", "For the moment") }
-        item {
-            when {
-                isHomeLoading -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(20.dp), color = MaterialTheme.colorScheme.primary)
-                homeError != null -> Column(Modifier.padding(horizontal = 20.dp)) {
-                    Text(homeError, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = onRetryHome) { Text("Try again") }
-                }
-                uniqueRecommendations.isEmpty() -> Text("No recommendations yet. Find something you love in Search.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
-                else -> LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(uniqueRecommendations, key = { it.id }) { track ->
-                        cord.kasane.music.ui.components.TrackCard(track, 156.dp, onClick = { onTrackClick(track) },
-                            onLocalFavorite = { onToggleFavorite(track) }, localFavorite = track.id in favoriteIds)
-                    }
-                }
-            }
-        }
-        }
-        if (listenAgain.isNotEmpty()) {
-            item { SectionTitle("Listen Again", "Recently played") }
-            items(listenAgain.take(15), key = { it.trackId }) { item ->
-                val track = Track(item.trackId, item.title, item.artist, item.album, thumbnailUri = item.thumbnailUri)
-                TrackRow(track = track, isPlaying = currentTrack?.id == track.id && isPlaying,
-                    isLoading = currentTrack?.id == track.id && isLoading,
-                    onClick = { onTrackClick(track) }, onAddToQueue = { onAddToQueue(track) },
-                    onToggleFavorite = { onToggleFavorite(track) }, isFavorite = track.id in favoriteIds)
-            }
-        }
-    }
-    }
-}
-
-@Composable
-private fun SectionTitle(title: String, subtitle: String) {
-    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp), verticalAlignment = Alignment.Bottom) {
-        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-        Text(subtitle, style = MaterialTheme.typography.labelMedium)
-    }
-}
-
-@Composable
 fun LibraryScreen(
     accountState: AccountState,
     accountProvider: cord.kasane.music.provider.AccountLibraryProvider,
@@ -751,66 +652,6 @@ private fun LibraryCollectionRow(title: String, subtitle: String, icon: androidx
             Text(subtitle, style = MaterialTheme.typography.bodySmall)
         }
         Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Preview(name = "HomeScreen State Preview", showBackground = true, backgroundColor = 0xFF0F1012, widthDp = 390, heightDp = 844)
-@Composable
-fun HomeScreenPreview() {
-    KasaneTheme(dynamicColor = false) {
-        Surface(color = MaterialTheme.colorScheme.background) { HomeScreen(
-            currentTrack = Track(
-                id = "prev-current",
-                title = "Beat It",
-                artist = "Michael Jackson",
-                album = "Thriller",
-                durationSeconds = 258.0
-            ),
-            isPlaying = true,
-            isLoading = false,
-            recentHistory = listOf(
-                HistoryEntity(
-                    trackId = "prev-h1",
-                    title = "Midnight City Lights",
-                    artist = "Aether",
-                    album = "Neon Drift"
-                ),
-                HistoryEntity(
-                    trackId = "prev-h2",
-                    title = "Subway Melancholy",
-                    artist = "Dustin Corder",
-                    album = "Echoes of Silence"
-                )
-            ),
-            favorites = listOf(
-                Track(
-                    id = "prev-f1",
-                    title = "Synthetic Dawn",
-                    artist = "Kuro",
-                    album = "Genesis"
-                )
-            ),
-            favoriteIds = setOf("prev-f1"),
-            recommendations = listOf(
-                Track(
-                    id = "prev-r1",
-                    title = "Choosin' Texas",
-                    artist = "Ella Langley",
-                    album = "Hungover"
-                ),
-                Track(
-                    id = "prev-r2",
-                    title = "a thousand years",
-                    artist = "Christina Perri",
-                    album = "Lovestrong"
-                )
-            ),
-            isHomeLoading = false,
-            onOpenSearch = {},
-            onTrackClick = {},
-            onAddToQueue = {},
-            onToggleFavorite = {}
-        ) }
     }
 }
 

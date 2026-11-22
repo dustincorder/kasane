@@ -12,6 +12,12 @@ import kotlinx.coroutines.flow.Flow
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
+/** Aggregated listening statistic for Home; not an entity. */
+data class PlayStat(val trackId: String, val title: String, val artist: String, val album: String?, val thumbnailUri: String?,
+    val plays: Int, val lastPlayed: Long) {
+    fun track() = Track(trackId, title, artist, album, thumbnailUri = thumbnailUri)
+}
+
 @Entity(tableName = "catalog_cache_page", primaryKeys = ["scopeKey", "cacheKey"], indices = [Index("updatedAt")])
 data class CachedCatalogPageRecord(
     val scopeKey: String,
@@ -96,6 +102,22 @@ interface TrackDao {
 
     @Query("SELECT * FROM history ORDER BY playedAt DESC, id DESC")
     suspend fun getHistoryForExport(): List<HistoryEntity>
+
+    /** Play counts per track since [since], most played first. Metadata comes from the newest history row. */
+    @Query("""
+        SELECT h.trackId AS trackId, h.title AS title, h.artist AS artist, h.album AS album, h.thumbnailUri AS thumbnailUri,
+               stats.plays AS plays, stats.lastPlayed AS lastPlayed
+        FROM (SELECT trackId, COUNT(*) AS plays, MAX(playedAt) AS lastPlayed, MAX(id) AS latestId
+              FROM history WHERE playedAt >= :since GROUP BY trackId) stats
+        JOIN history h ON h.id = stats.latestId
+        ORDER BY stats.plays DESC, stats.lastPlayed DESC
+        LIMIT :limit
+    """)
+    fun topPlayed(since: Long, limit: Int = 40): Flow<List<PlayStat>>
+
+    /** Tracks whose audio is saved on this device, most recently saved first. */
+    @Query("SELECT t.* FROM tracks t JOIN audio_files a ON a.videoId = t.id WHERE a.pinned = 1 AND a.state = 'saved' ORDER BY a.updatedAt DESC LIMIT :limit")
+    fun recentlySaved(limit: Int = 20): Flow<List<Track>>
 }
 
 @Database(

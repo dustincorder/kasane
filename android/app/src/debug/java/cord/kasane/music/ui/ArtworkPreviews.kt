@@ -54,10 +54,9 @@ private fun WithRealArtwork(content: @Composable () -> Unit) {
 @Preview(showBackground = true, widthDp = 390, heightDp = 620)
 @Composable
 fun HomeRealArtworkPreview() = WithRealArtwork {
-    HomeScreen(null, false, false, emptyList(), emptyList(), emptySet(), emptyList(), false,
-        {}, {}, {}, {}, catalogShelves = listOf(CatalogShelf("Quick picks", listOf(
-            CatalogItem(homeTrack.id, CatalogKind.SONG, homeTrack.title, homeTrack.artist, homeTrack.thumbnailUri),
-            CatalogItem(searchTrack.id, CatalogKind.SONG, searchTrack.title, searchTrack.artist, searchTrack.thumbnailUri)))))
+    HomeScreen(listOf(HomeSection.SongGrid("qp", "Quick picks", listOf(homeTrack, searchTrack, homeTrack.copy(id = "artwork-preview-3")))),
+        loading = false, refreshing = false, error = null, offlineOnly = false, currentTrackId = null,
+        actions = HomeActions({}, { _, _ -> }, {}, {}, {}, {}, {}, {}))
 }
 
 @Preview(showBackground = true, widthDp = 390)

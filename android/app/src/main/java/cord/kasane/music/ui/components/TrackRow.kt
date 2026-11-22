@@ -47,6 +47,7 @@ fun TrackRow(
     isFavorite: Boolean = false,
     modifier: Modifier = Modifier,
     useCloudFavorite: Boolean = true,
+    showLike: Boolean = true,
     extraMenu: List<MenuEntry> = emptyList(),
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
@@ -87,7 +88,7 @@ fun TrackRow(
                     style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        if (onToggleFavorite != null || LocalCloudLikes.current != null) {
+        if (showLike && (onToggleFavorite != null || LocalCloudLikes.current != null)) {
             TrackLikeButton(track, isFavorite, onToggleFavorite ?: {}, useCloud = useCloudFavorite)
         }
         Box {
