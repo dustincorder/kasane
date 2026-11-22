@@ -1,0 +1,17 @@
+{
+  "sas": {
+    "fpServer": "54bd2779e2817d5eebb678c7f47fa262f64928971f2947992bc9c61b270db766",
+    "fpClient": "ce4e177d2a0b8af57b1ee9d6dcafbc25bf4f31fc9dae373411cf35e38765f258",
+    "ns": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "nc": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "commit": "debf03455f3ef2aea43d30b25118e5c3eae1d6c6e39f1a6ff25b26f016b00955",
+    "code": "562206"
+  },
+  "frames": [
+    "{\"type\":\"hello\",\"protocol\":1,\"minProtocol\":1,\"device\":{\"id\":\"3f2c9a6e-0b1d-4c55-9a51-6d7f0e2b8c11\",\"name\":\"Pixel 6 Pro\",\"platform\":\"android\",\"app\":\"Kasane\",\"appVersion\":\"0.1\"}}",
+    "{\"type\":\"command\",\"id\":\"c-1\",\"seq\":1,\"action\":\"seek\",\"positionMs\":61000}",
+    "{\"type\":\"command\",\"id\":\"c-2\",\"seq\":2,\"action\":\"moveQueue\",\"from\":3,\"to\":1,\"queueRev\":7}",
+    "{\"type\":\"state\",\"rev\":4,\"queueRev\":2,\"playback\":\"playing\",\"track\":{\"id\":\"a0nze6VvaXY\",\"title\":\"Аполлинария\",\"artist\":\"Электрослабость\",\"artists\":[{\"name\":\"Электрослабость\",\"id\":\"UCLPaSURRnbBu4iN1BfClbnA\"}],\"album\":{\"title\":\"Имена, животные и бабка без квартиры\",\"id\":\"MPREb_IMj1ifT1q91\"},\"durationMs\":201000,\"artworkUrl\":null,\"source\":\"youtube\"},\"positionMs\":15000,\"durationMs\":201000,\"volume\":0.5,\"shuffle\":false,\"repeat\":\"off\",\"queueIndex\":0,\"queue\":[],\"error\":null,\"capabilities\":[\"seek\",\"volume\",\"queue\",\"handoff\"],\"futureField\":true}",
+    "{\"type\":\"handoff\",\"transferId\":\"t-1\",\"queue\":[],\"index\":0,\"positionMs\":42000,\"playing\":true,\"shuffle\":false,\"repeat\":\"all\"}"
+  ]
+}

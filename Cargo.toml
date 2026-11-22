@@ -4,6 +4,7 @@ members = [
     "crates/vibe-audio",
     "crates/vibe-providers",
     "crates/vibe-db",
+    "crates/kasane-connect",
     "src-tauri",
 ]
 resolver = "2"
