@@ -1,19 +1,20 @@
 <script lang="ts">
   import { player } from '$lib/stores/player.svelte';
-  import { Play, Pause, SkipBack, SkipForward, Heart, Volume2, Maximize2 } from 'lucide-svelte';
+  import { connect, view } from '$lib/stores/connect.svelte';
+  import { Play, Pause, SkipBack, SkipForward, Heart, Volume2, Maximize2, MonitorSmartphone } from 'lucide-svelte';
 
-  let track = $derived(player.currentTrack);
-  let isPlaying = $derived(player.isPlaying);
-  let isFav = $derived(track ? player.isFavorite(track.id) : false);
+  let track = $derived(view.currentTrack);
+  let isPlaying = $derived(view.isPlaying);
+  let isFav = $derived(track && !view.controlling ? player.isFavorite(track.id) : false);
 
   function handleSeek(e: Event) {
     const target = e.target as HTMLInputElement;
-    player.seek(parseFloat(target.value));
+    view.seek(parseFloat(target.value));
   }
 
   function handleVolume(e: Event) {
     const target = e.target as HTMLInputElement;
-    player.setVolume(parseFloat(target.value));
+    view.setVolume(parseFloat(target.value));
   }
 </script>
 
@@ -50,19 +51,19 @@
   <div class="flex flex-col items-center gap-1.5 w-2/4 max-w-xl">
     <div class="flex items-center gap-5">
       <button
-        onclick={() => player.previous()}
+        onclick={() => view.previous()}
         class="text-text-secondary hover:text-text-primary transition-colors p-1 disabled:opacity-30"
         aria-label="Previous"
-        disabled={!player.canPrevious}
+        disabled={!view.canPrevious}
       >
         <SkipBack size={18} />
       </button>
 
       <button
-        onclick={() => player.togglePlay()}
+        onclick={() => view.togglePlay()}
         class="w-9 h-9 rounded-full bg-accent-active text-white flex items-center justify-center hover:opacity-90 active:scale-95 transition disabled:opacity-30"
         aria-label={isPlaying ? 'Pause' : 'Play'}
-        disabled={!player.canPlay}
+        disabled={!view.canPlay}
       >
         {#if isPlaying}
           <Pause size={18} fill="currentColor" />
@@ -72,10 +73,10 @@
       </button>
 
       <button
-        onclick={() => player.next()}
+        onclick={() => view.next()}
         class="text-text-secondary hover:text-text-primary transition-colors p-1 disabled:opacity-30"
         aria-label="Next"
-        disabled={!player.canNext}
+        disabled={!view.canNext}
       >
         <SkipForward size={18} />
       </button>
@@ -83,30 +84,48 @@
 
     <!-- Scrubber -->
     <div class="w-full flex items-center gap-2 text-[11px] tabular-nums text-text-muted">
-      <span>{player.formatTime(player.positionSecs)}</span>
+      <span>{player.formatTime(view.positionSecs)}</span>
       <input
         type="range"
         min="0"
-        max={player.durationSecs || 100}
-        value={player.positionSecs}
+        max={view.durationSecs || 100}
+        value={view.positionSecs}
         onchange={handleSeek}
         aria-label="Seek"
         class="w-full h-1 bg-surface-border rounded-lg appearance-none cursor-pointer accent-accent-highlight"
-        disabled={!player.canSeek}
+        disabled={!view.canSeek}
       />
-      <span>{player.formatTime(player.durationSecs)}</span>
+      <span>{player.formatTime(view.durationSecs)}</span>
     </div>
   </div>
 
   <!-- Volume & Modal Expand -->
   <div class="flex items-center justify-end gap-2 w-1/4 min-w-0">
+    {#if view.controlling}
+      <button
+        onclick={() => connect.stopControlling()}
+        class="hidden sm:flex items-center gap-1.5 text-[11px] text-accent-highlight border border-accent-highlight/40 rounded px-2 py-1 hover:bg-surface-hover transition flex-shrink-0"
+        title="Return control to this PC"
+      >
+        <MonitorSmartphone size={12} />
+        Controlling {connect.targetName}
+      </button>
+    {:else}
+      <button
+        onclick={() => (connect.showDevices = !connect.showDevices)}
+        class="text-text-muted hover:text-text-primary transition-colors p-1 flex-shrink-0"
+        aria-label="Devices"
+      >
+        <MonitorSmartphone size={16} />
+      </button>
+    {/if}
     <Volume2 size={16} class="hidden sm:block text-text-muted flex-shrink-0" />
     <input
       type="range"
       min="0"
       max="1"
       step="0.01"
-      value={player.volume}
+      value={view.volume}
       oninput={handleVolume}
       aria-label="Volume"
       class="w-20 min-w-0 h-1 bg-surface-border rounded-lg appearance-none cursor-pointer accent-accent-highlight"

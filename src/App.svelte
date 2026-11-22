@@ -4,10 +4,13 @@
   import SearchView from '$lib/components/SearchView.svelte';
   import LibraryView from '$lib/components/LibraryView.svelte';
   import QueueView from '$lib/components/QueueView.svelte';
+  import DevicesView from '$lib/components/DevicesView.svelte';
+  import PairingDialog from '$lib/components/PairingDialog.svelte';
   import { player } from '$lib/stores/player.svelte';
-  import { Search, Library, ListMusic } from 'lucide-svelte';
+  import { connect } from '$lib/stores/connect.svelte';
+  import { Search, Library, ListMusic, MonitorSmartphone } from 'lucide-svelte';
 
-  type Tab = 'search' | 'library' | 'queue';
+  type Tab = 'search' | 'library' | 'queue' | 'devices';
   let activeTab = $state<Tab>('search');
 </script>
 
@@ -48,6 +51,14 @@
             <ListMusic size={16} />
             <span class="sr-only sm:not-sr-only">Queue</span>
           </button>
+
+          <button
+            onclick={() => (activeTab = 'devices')}
+            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition {activeTab === 'devices' ? 'bg-surface-hover text-accent-highlight' : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover/50'}"
+          >
+            <MonitorSmartphone size={16} />
+            <span class="sr-only sm:not-sr-only">Devices</span>
+          </button>
         </nav>
       </div>
 
@@ -70,6 +81,8 @@
         <LibraryView />
       {:else if activeTab === 'queue'}
         <QueueView />
+      {:else if activeTab === 'devices'}
+        <DevicesView />
       {/if}
     </main>
   </div>
@@ -90,4 +103,20 @@
 
   <!-- Fullscreen Modal View -->
   <NowPlayingView />
+
+  <!-- Devices overlay from the player bar -->
+  {#if connect.showDevices}
+    <div class="fixed inset-0 z-40 bg-surface-base/95 overflow-y-auto" role="dialog" aria-label="Devices">
+      <div class="flex justify-end p-4">
+        <button
+          class="text-text-secondary hover:text-text-primary text-sm px-3 py-1.5 rounded-lg hover:bg-surface-hover transition"
+          onclick={() => (connect.showDevices = false)}
+        >Close</button>
+      </div>
+      <DevicesView />
+    </div>
+  {/if}
+
+  <!-- Pairing prompts can appear from any screen -->
+  <PairingDialog />
 </div>

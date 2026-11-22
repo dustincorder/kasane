@@ -1,14 +1,15 @@
 <script lang="ts">
   import { player } from '$lib/stores/player.svelte';
+  import { connect, view } from '$lib/stores/connect.svelte';
   import { X, Play, Pause, SkipBack, SkipForward, Heart } from 'lucide-svelte';
 
-  let track = $derived(player.currentTrack);
-  let isPlaying = $derived(player.isPlaying);
-  let isFav = $derived(track ? player.isFavorite(track.id) : false);
+  let track = $derived(view.currentTrack);
+  let isPlaying = $derived(view.isPlaying);
+  let isFav = $derived(track && !view.controlling ? player.isFavorite(track.id) : false);
 
   function handleSeek(e: Event) {
     const target = e.target as HTMLInputElement;
-    player.seek(parseFloat(target.value));
+    view.seek(parseFloat(target.value));
   }
 </script>
 
@@ -18,7 +19,13 @@
   <div class="fixed inset-0 z-50 bg-surface-base flex flex-col justify-between p-8 md:p-12 animate-fade-in select-none">
     <!-- Top Bar -->
     <div class="flex items-center justify-between w-full max-w-4xl mx-auto">
-      <div class="text-xs text-text-muted">Now playing</div>
+      <div class="text-xs text-text-muted">
+        {#if view.controlling}
+          <span class="text-accent-highlight">Controlling {connect.targetName}</span>
+        {:else}
+          Now playing
+        {/if}
+      </div>
       <button
         onclick={() => (player.showNowPlayingModal = false)}
         class="text-text-secondary hover:text-text-primary p-2 transition-colors rounded-full hover:bg-surface-hover"
@@ -63,32 +70,32 @@
           <input
             type="range"
             min="0"
-            max={player.durationSecs || 100}
-            value={player.positionSecs}
+            max={view.durationSecs || 100}
+            value={view.positionSecs}
             onchange={handleSeek}
             aria-label="Seek"
-            disabled={!player.canSeek}
+            disabled={!view.canSeek}
             class="w-full h-1.5 bg-surface-border rounded-lg appearance-none cursor-pointer accent-accent-highlight"
           />
           <div class="flex justify-between text-xs tabular-nums text-text-muted mt-2">
-            <span>{player.formatTime(player.positionSecs)}</span>
-            <span>{player.formatTime(player.durationSecs)}</span>
+            <span>{player.formatTime(view.positionSecs)}</span>
+            <span>{player.formatTime(view.durationSecs)}</span>
           </div>
         </div>
 
         <!-- Big Playback Controls -->
         <div class="flex items-center justify-center gap-8 mt-6">
           <button
-            onclick={() => player.previous()}
-            disabled={!player.canPrevious}
+            onclick={() => view.previous()}
+            disabled={!view.canPrevious}
             class="text-text-secondary hover:text-text-primary transition p-2"
             aria-label="Previous"
           >
             <SkipBack size={26} />
           </button>
           <button
-            onclick={() => player.togglePlay()}
-            disabled={!player.canPlay}
+            onclick={() => view.togglePlay()}
+            disabled={!view.canPlay}
             class="w-16 h-16 rounded-full bg-accent-active text-white flex items-center justify-center hover:opacity-90 active:scale-95 transition"
             aria-label={isPlaying ? 'Pause' : 'Play'}
           >
@@ -99,8 +106,8 @@
             {/if}
           </button>
           <button
-            onclick={() => player.next()}
-            disabled={!player.canNext}
+            onclick={() => view.next()}
+            disabled={!view.canNext}
             class="text-text-secondary hover:text-text-primary transition p-2"
             aria-label="Next"
           >

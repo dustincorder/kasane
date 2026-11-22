@@ -1,5 +1,6 @@
 <script lang="ts">
   import { player } from '$lib/stores/player.svelte';
+  import { view } from '$lib/stores/connect.svelte';
   import { Play, Heart, Clock, FolderOpen } from 'lucide-svelte';
 
   let favorites = $derived(player.favorites);
@@ -46,7 +47,7 @@
 
             <div class="flex items-center gap-2">
               <button
-                onclick={() => player.playTrack(track)}
+                onclick={() => view.playTrack(track)}
                 disabled={player.isBusy}
                 class="p-2 bg-accent-active text-white rounded-full hover:opacity-90 active:scale-95 transition"
                 title="Play track"
@@ -92,7 +93,7 @@
             <div class="flex items-center gap-3">
               <span class="text-xs tabular-nums text-text-muted">{track.duration_secs > 0 ? player.formatTime(track.duration_secs) : '—'}</span>
               <button
-                onclick={() => player.playTrack(track)}
+                onclick={() => view.playTrack(track)}
                 disabled={player.isBusy}
                 class="p-1.5 text-text-secondary hover:text-text-primary rounded hover:bg-surface-border transition"
                 title="Play again"

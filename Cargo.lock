@@ -5163,6 +5163,7 @@ name = "vibeplayer"
 version = "0.1.1-alpha"
 dependencies = [
  "async-trait",
+ "kasane-connect",
  "serde",
  "serde_json",
  "tauri",
