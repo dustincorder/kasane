@@ -265,7 +265,7 @@ class ConnectStore {
     return this.command('seek', { positionMs: Math.round(secs * 1000) });
   }
   remoteSetVolume(volume: number) {
-    return this.command('volume', { volume });
+    return this.command('setVolume', { volume });
   }
   remotePlayQueueIndex(index: number) {
     return this.command('playQueueIndex', {

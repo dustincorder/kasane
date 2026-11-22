@@ -185,7 +185,7 @@ impl PlayerAdapter for DesktopPlayerAdapter {
                     .await
                     .map_err(CmdError::failed)?;
             }
-            "volume" => {
+            "setVolume" => {
                 let volume = args
                     .get("volume")
                     .and_then(Value::as_f64)
@@ -195,13 +195,13 @@ impl PlayerAdapter for DesktopPlayerAdapter {
                     .await
                     .map_err(CmdError::failed)?;
             }
-            "shuffle" => {
+            "setShuffle" => {
                 return Err(CmdError::new(
                     "unsupported",
                     "queue shuffle is not implemented",
                 ))
             }
-            "repeat" => {
+            "setRepeat" => {
                 let mode = match args.get("mode").and_then(Value::as_str) {
                     Some("off") => RepeatMode::Off,
                     Some("all") => RepeatMode::All,
