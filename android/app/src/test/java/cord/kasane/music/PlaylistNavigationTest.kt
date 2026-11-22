@@ -60,7 +60,7 @@ class PlaylistNavigationTest {
         } } }
         for (i in cases.indices) {
             index = i; compose.waitForIdle()
-            compose.onNodeWithText("Play").assertExists(); compose.onNodeWithText("Shuffle").assertExists()
+            compose.onNodeWithText("Play").assertExists(); compose.onNodeWithContentDescription("Shuffle play").assertExists()
             compose.onNodeWithText("5 tracks", substring = true).assertExists()
             compose.onNodeWithText("Song 1").assertExists()
         }

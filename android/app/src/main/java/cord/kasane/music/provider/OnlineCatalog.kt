@@ -42,6 +42,7 @@ class OnlineCatalog(
     override suspend fun home(account: AccountSession?) = native { shared.home(account) }
     suspend fun homeFiltered(account: AccountSession?, params: String) = native { shared.homeFiltered(account, params) }
     suspend fun suggestions(query: String): List<String> = shared.suggestions(query)
+    suspend fun loadTrackLinks(videoId: String) = native { shared.loadTrackLinks(videoId) }
     suspend fun radio(videoId: String): List<Track> = radioPage(videoId).tracks
     suspend fun radioPage(videoId: String, continuation: String? = null) = native { shared.radioPage(videoId, continuation) }
     suspend fun identity(account: AccountSession) = native { shared.identity(account) }

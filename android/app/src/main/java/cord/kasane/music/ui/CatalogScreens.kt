@@ -372,29 +372,50 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                     }
                 }
                 // Playback controls span the full width: equally reachable by either thumb, and the primary action is the widest.
+                // One clear primary action; Shuffle and More are icon buttons so they never claim half the screen.
                 val actions: @Composable () -> Unit = {
                     if (tracks.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = { onPlay(tracks, false) }, modifier = Modifier.weight(1.15f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.medium, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                        Button(onClick = { onPlay(tracks, false) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp), shape = MaterialTheme.shapes.medium) {
                             Icon(Icons.Default.PlayArrow, null, Modifier.size(22.dp)); Spacer(Modifier.width(8.dp)); Text("Play", style = MaterialTheme.typography.labelLarge)
                         }
-                        FilledTonalButton(onClick = { onPlay(tracks, true) }, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.medium, contentPadding = PaddingValues(horizontal = 12.dp)) {
-                            Icon(Icons.Default.Shuffle, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text("Shuffle", style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
+                        FilledTonalIconButton(onClick = { onPlay(tracks, true) }, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
+                            Icon(Icons.Default.Shuffle, "Shuffle play")
                         }
-                        FilledTonalIconButton(onClick = { more = true }, modifier = Modifier.size(52.dp), shape = MaterialTheme.shapes.medium) {
+                        FilledTonalIconButton(onClick = { more = true }, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
                             Icon(Icons.Default.MoreVert, "More actions for this ${item.kind.label.removeSuffix("s").lowercase()}")
                         }
                     }
                 }
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
                     val widthDp = maxWidth
-                    if (widthDp >= 600.dp) Row(Modifier.padding(horizontal = 24.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
-                        artwork(Modifier.width(240.dp))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) { info(true); Box(Modifier.widthIn(max = 480.dp)) { actions() } }
-                    } else Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        artwork(Modifier.fillMaxWidth(if (widthDp < 380.dp) 0.62f else 0.68f).widthIn(max = 300.dp))
-                        info(false)
-                        actions()
-                        if (!page?.description.isNullOrBlank()) Text(page!!.description, style = MaterialTheme.typography.bodySmallMuted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    if (item.kind == CatalogKind.ARTIST) {
+                        // Full-width banner: the image is cropped to fill, a gradient into the background keeps the name readable.
+                        Column {
+                            Box(Modifier.fillMaxWidth().height(minOf(widthDp * 0.72f, 300.dp))) {
+                                TrackArtwork(page?.artwork ?: item.artwork, Modifier.fillMaxSize(), minPixels = 1200, shape = androidx.compose.ui.graphics.RectangleShape)
+                                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    0.35f to androidx.compose.ui.graphics.Color.Transparent, 1f to MaterialTheme.colorScheme.background)))
+                                Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 20.dp, vertical = 12.dp)) {
+                                    Text(title, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onBackground)
+                                    if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            Column(Modifier.padding(horizontal = 20.dp).widthIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                actions()
+                                if (!page?.description.isNullOrBlank()) Text(page!!.description, style = MaterialTheme.typography.bodySmallMuted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    } else {
+                        // Albums and playlists: a modest square cover beside the facts, full-width actions below.
+                        val cover = minOf(maxOf(widthDp * 0.34f, 112.dp), 168.dp)
+                        Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                artwork(Modifier.width(cover))
+                                Box(Modifier.weight(1f)) { info(true) }
+                            }
+                            Box(Modifier.widthIn(max = 520.dp)) { actions() }
+                            if (!page?.description.isNullOrBlank()) Text(page!!.description, style = MaterialTheme.typography.bodySmallMuted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
                 if (more) ModalBottomSheet(onDismissRequest = { more = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {

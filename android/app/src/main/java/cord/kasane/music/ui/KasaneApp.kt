@@ -230,6 +230,14 @@ private fun KasaneContent(app: KasaneApplication) {
         var chipShelves by remember { mutableStateOf<List<CatalogShelf>>(emptyList()) }
         var chipLoading by remember { mutableStateOf(false) }
         var chipError by remember { mutableStateOf<String?>(null) }
+        // Artist and album links for Now Playing: fetched once per song when playback did not already bring them.
+        val currentTrackId = playbackState.currentTrack?.takeIf { !it.isLocal }?.id
+        val knownLinks by app.ytProvider.catalog.trackLinks.collectAsState()
+        LaunchedEffect(currentTrackId, offlineOnly) {
+            val id = currentTrackId ?: return@LaunchedEffect
+            if (offlineOnly || knownLinks.containsKey(id) || !id.matches(Regex("[A-Za-z0-9_-]{11}"))) return@LaunchedEffect
+            try { app.ytProvider.catalog.loadTrackLinks(id) } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+        }
         val homeSections = remember(homeShelves, chipShelves, selectedChip, topPlayed, history, recentlySaved, favorites, offlineOnly) {
             if (selectedChip != null) HomeComposer.build(chipShelves, emptyList(), emptyList(), emptyList(), false, local = false)
             else HomeComposer.build(homeShelves, topPlayed, history, recentlySaved, offlineOnly, favorites)

@@ -16,12 +16,13 @@ object TrackLinksJsonParser {
             }
         }
         rows.forEach { (track, row) ->
-            val endpoints = CatalogJsonParser.objects(row, "browseEndpoint")
-            val artist = endpoints.firstOrNull { it.optString("browseId").startsWith("UC") }?.optString("browseId")
-            val album = endpoints.firstOrNull { it.optString("browseId").startsWith("MPRE") }?.optString("browseId")
+            // Names come from the linked runs themselves; a link without a real name is never created.
+            val runs = CatalogJsonParser.linkedRuns(row)
+            val artist = runs.firstOrNull { it.second.startsWith("UC") }
+            val album = runs.firstOrNull { it.second.startsWith("MPRE") }
             if (artist != null || album != null) result[track.id] = TrackLinks(
-                artist?.let { CatalogItem(it, CatalogKind.ARTIST, track.artist.ifBlank { "Artist" }) },
-                album?.let { CatalogItem(it, CatalogKind.ALBUM, track.album ?: "Album") })
+                artist?.let { CatalogItem(it.second, CatalogKind.ARTIST, it.first) },
+                album?.let { CatalogItem(it.second, CatalogKind.ALBUM, it.first) })
         }
         return result
     }

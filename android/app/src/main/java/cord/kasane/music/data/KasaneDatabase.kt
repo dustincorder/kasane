@@ -48,6 +48,7 @@ data class CachedCatalogItemEntity(
     val artwork: String?,
     val durationSeconds: Double,
     val updatedAt: Long,
+    val album: String? = null,
 )
 
 @Entity(tableName = "catalog_cache_shelf_item", primaryKeys = ["scopeKey", "cacheKey", "shelfIndex", "position"], indices = [Index("itemKey")])
@@ -128,7 +129,7 @@ interface TrackDao {
     entities = [TrackRecord::class, FavoriteEntity::class, HistoryEntity::class, CachedCatalogPageRecord::class,
         CachedCatalogShelfRecord::class, CachedCatalogItemEntity::class, CachedCatalogShelfItemRecord::class,
         cord.kasane.music.offline.AudioFileRecord::class],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class KasaneDatabase : RoomDatabase() {
@@ -212,7 +213,7 @@ abstract class KasaneDatabase : RoomDatabase() {
                     shelf.items.forEachIndexed { position, item ->
                         val itemKey = cord.kasane.music.data.CatalogCache.itemKey(scopeKey, item)
                         itemRows[itemKey] = CachedCatalogItemEntity(itemKey, scopeKey, item.kind.name, item.id,
-                            item.title, item.subtitle, item.artwork, item.durationSeconds, now)
+                            item.title, item.subtitle, item.artwork, item.durationSeconds, now, item.album)
                         add(CachedCatalogShelfItemRecord(scopeKey, cacheKey, shelfIndex, position, itemKey))
                     }
                 }
@@ -243,6 +244,12 @@ abstract class KasaneDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_catalog_cache_updatedAt ON catalog_cache(updatedAt)")
             }
         }
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `catalog_cache_item` ADD COLUMN `album` TEXT")
+            }
+        }
+
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `catalog_cache_page` ADD COLUMN `meta` TEXT")

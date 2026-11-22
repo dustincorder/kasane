@@ -54,7 +54,7 @@ class KasaneApplication : Application() {
             applicationContext,
             KasaneDatabase::class.java,
             "kanade.db"
-        ).addMigrations(KasaneDatabase.MIGRATION_1_2, KasaneDatabase.MIGRATION_2_3, KasaneDatabase.MIGRATION_3_4, KasaneDatabase.MIGRATION_4_5, KasaneDatabase.MIGRATION_5_6).build()
+        ).addMigrations(KasaneDatabase.MIGRATION_1_2, KasaneDatabase.MIGRATION_2_3, KasaneDatabase.MIGRATION_3_4, KasaneDatabase.MIGRATION_4_5, KasaneDatabase.MIGRATION_5_6, KasaneDatabase.MIGRATION_6_7).build()
 
         val httpClient = okhttp3.OkHttpClient.Builder()
             .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)

@@ -88,3 +88,49 @@ class CreatorCaptureTest {
         assertEquals(listOf("A", "B"), two.map { it.name }); assertEquals(listOf("UCa", "UCb"), two.map { it.browseId })
     }
 }
+
+class TrackMetadataTest {
+    private fun obj(s: String) = Json.parseToJsonElement(s) as JsonObject
+
+    @Test fun radioTracksCarryArtistAndAlbumSeparatelyNotTheWholeByline() {
+        val root = Json.parseToJsonElement(checkNotNull(javaClass.getResourceAsStream("/captured/next_radio_monster_guest.json")).readBytes().decodeToString()) as JsonObject
+        val seed = CatalogJsonParser.radio(root).tracks.first()
+        assertEquals("KIRA", seed.artist); assertEquals("The Introduction", seed.album)
+        assertTrue(CatalogJsonParser.radio(root).tracks.none { '•' in it.artist })
+    }
+
+    @Test fun albumRowsWithoutAnArtistColumnInheritTheAlbumsArtistAndTitle() {
+        val page = CatalogJsonParser.page(Json.parseToJsonElement(checkNotNull(javaClass.getResourceAsStream("/captured/album_kira_introduction_guest.json")).readBytes().decodeToString()) as JsonObject)
+        val songs = page.shelves.flatMap { it.items }.filter { it.kind == cord.kasane.music.model.CatalogKind.SONG }
+        assertTrue(songs.isNotEmpty())
+        assertTrue(songs.all { it.subtitle == "KIRA" }, "every album track names its artist: ${songs.map { it.subtitle }}")
+        assertTrue(songs.all { it.album == "The Introduction" })
+        assertTrue(page.tracks.all { it.artist == "KIRA" && it.album == "The Introduction" })
+    }
+
+    @Test fun playCountsAreNeverMistakenForAnArtist() {
+        val row = obj("""{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"abcdefghijk"},"flexColumns":[
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Title"}]}}},
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"12K plays"}]}}}]}}""")
+        assertEquals("", CatalogJsonParser.item(row)!!.subtitle)
+        assertNull(CatalogJsonParser.item(row)!!.album)
+    }
+
+    @Test fun playlistRowsKeepArtistAndAlbumColumns() {
+        val row = obj("""{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"abcdefghijk"},"flexColumns":[
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Аполлинария"}]}}},
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Электрослабость","navigationEndpoint":{"browseEndpoint":{"browseId":"UCart"}}}]}}},
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Имена, животные и бабка без квартиры","navigationEndpoint":{"browseEndpoint":{"browseId":"MPREb_alb"}}}]}}}]}}""")
+        val track = CatalogJsonParser.item(row)!!.track()!!
+        assertEquals("Электрослабость", track.artist); assertEquals("Имена, животные и бабка без квартиры", track.album)
+    }
+
+    @Test fun trackLinksUseTheRealLinkedNamesNeverPlaceholders() {
+        val root = obj("""{"a":{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"abcdefghijk"},"flexColumns":[
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"T"}]}}},
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Электрослабость","navigationEndpoint":{"browseEndpoint":{"browseId":"UCart"}}},{"text":" • "},{"text":"Альбом","navigationEndpoint":{"browseEndpoint":{"browseId":"MPREb_alb"}}}]}}}]}}}""")
+        val links = cord.kasane.music.provider.TrackLinksJsonParser.parse(root).getValue("abcdefghijk")
+        assertEquals("Электрослабость", links.artist!!.title); assertEquals("Альбом", links.album!!.title)
+        assertFalse(links.artist!!.title == "Artist" || links.album!!.title == "Album")
+    }
+}

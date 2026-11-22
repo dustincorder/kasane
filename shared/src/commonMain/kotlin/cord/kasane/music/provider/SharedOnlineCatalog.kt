@@ -49,6 +49,8 @@ class SharedOnlineCatalog(private val client: InnerTubeClient, private val sessi
             }.distinct().take(8)
         }.getOrDefault(emptyList())
     }
+    /** Fetches the artist and album links for one song; the response feeds [trackLinks] like any other `next` call. */
+    suspend fun loadTrackLinks(videoId: String) { require(videoId.matches(Regex("[A-Za-z0-9_-]{11}"))); request("next", buildJsonObject { put("videoId", videoId) }, session()) }
     suspend fun radioPage(videoId: String, continuation: String? = null): RadioPage = withContext(Dispatchers.Default) {
         val body = buildJsonObject {
             if (continuation != null) put("continuation", continuation)

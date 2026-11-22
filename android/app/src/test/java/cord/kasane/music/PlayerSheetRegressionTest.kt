@@ -90,4 +90,32 @@ class PlayerSheetRegressionTest {
         compose.waitForIdle()
         assertTrue("sheet must rest at a bound", sheet.progress.value == 0f || sheet.progress.value == 1f)
     }
+
+    private fun openPlayer(t: Track, links: Map<String, cord.kasane.music.provider.TrackLinks> = emptyMap()) {
+        val nav = cord.kasane.music.ui.components.TrackNavigation(kotlinx.coroutines.flow.MutableStateFlow(links)) {}
+        compose.setContent {
+            KasaneTheme(dynamicColor = false) {
+                val sheet = rememberPlayerSheetState()
+                androidx.compose.runtime.LaunchedEffect(Unit) { sheet.progress.snapTo(1f) }
+                androidx.compose.runtime.CompositionLocalProvider(cord.kasane.music.ui.components.LocalTrackNavigation provides nav) {
+                    Box(Modifier.fillMaxSize()) { PlayerSheet(state.copy(currentTrack = t, queue = listOf(t)), sheet, actions, false, 80.dp) }
+                }
+            }
+        }
+    }
+
+    @Test fun nowPlayingShowsRealArtistAndAlbumAndNeverAPlaceholder() {
+        openPlayer(Track("abcdefghijk", "Аполлинария", "Электрослабость", "Имена, животные и бабка без квартиры"))
+        compose.onNodeWithText("Электрослабость").assertExists()
+        compose.onNodeWithText("Имена, животные и бабка без квартиры").assertExists()
+        compose.onAllNodesWithText("Album").assertCountEquals(0)
+    }
+
+    @Test fun missingArtistIsCompletedFromLinkedNamesOrLeftOutNotReplacedByALabel() {
+        val links = mapOf("abcdefghijk" to cord.kasane.music.provider.TrackLinks(
+            cord.kasane.music.model.CatalogItem("UCx", cord.kasane.music.model.CatalogKind.ARTIST, "Электрослабость"),
+            cord.kasane.music.model.CatalogItem("MPREb_x", cord.kasane.music.model.CatalogKind.ALBUM, "Имена")))
+        openPlayer(Track("abcdefghijk", "Аполлинария", "", null), links)
+        compose.onNodeWithText("Электрослабость").assertExists(); compose.onNodeWithText("Имена").assertExists()
+    }
 }

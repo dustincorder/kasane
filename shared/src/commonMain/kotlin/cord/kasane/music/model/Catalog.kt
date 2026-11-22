@@ -12,9 +12,11 @@ enum class CatalogKind(val label: String, val filter: String) {
 }
 @Serializable
 data class CatalogItem(val id: String, val kind: CatalogKind, val title: String,
-    val subtitle: String = "", val artwork: String? = null, val durationSeconds: Double = 0.0) {
+    val subtitle: String = "", val artwork: String? = null, val durationSeconds: Double = 0.0,
+    /** Album title when YouTube names one for this song (its own column, or the album page it is listed on). */
+    val album: String? = null) {
     fun track(): Track? = if (kind == CatalogKind.SONG || kind == CatalogKind.VIDEO)
-        Track(id, title, subtitle, durationSeconds = durationSeconds, thumbnailUri = artwork) else null
+        Track(id, title, subtitle, album, durationSeconds = durationSeconds, thumbnailUri = artwork) else null
 }
 @Serializable
 data class CatalogShelf(val title: String, val items: List<CatalogItem>, val moreBrowseId: String? = null)

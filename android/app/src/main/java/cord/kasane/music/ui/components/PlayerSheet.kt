@@ -274,18 +274,21 @@ private fun FullContent(
             AnimatedContent(track.id, Modifier.weight(1f), transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "titles") { _ ->
                 Column {
                     Text(track.title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // Real metadata only: the track's own names, completed by the linked names YouTube supplied. Nothing generic.
+                    val artistLink = links?.artist
+                    val artistName = track.artist.takeIf { it.isNotBlank() } ?: artistLink?.title
+                    val albumLink = links?.album
+                    val albumName = track.album?.takeIf { it.isNotBlank() } ?: albumLink?.title
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val artistLink = links?.artist
-                        Text(track.artist, style = MaterialTheme.typography.bodyLarge.copy(color = if (artistLink != null) colors.primary else colors.onSurfaceVariant),
+                        if (artistName != null) Text(artistName, style = MaterialTheme.typography.bodyLarge.copy(color = if (artistLink != null) colors.primary else colors.onSurfaceVariant),
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).then(
-                                if (artistLink != null) Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(role = Role.Button, onClickLabel = "Open artist ${track.artist}") { navigation?.open?.invoke(artistLink) } else Modifier))
-                        val albumLink = links?.album
-                        val albumName = track.album?.takeIf { it.isNotBlank() } ?: albumLink?.title
-                        if (albumLink != null && albumName != null) {
-                            Text(" · ", style = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurfaceVariant))
-                            Text(albumName, style = MaterialTheme.typography.bodyLarge.copy(color = colors.primary), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false).clip(MaterialTheme.shapes.extraSmall)
-                                    .clickable(role = Role.Button, onClickLabel = "Open album $albumName") { navigation?.open?.invoke(albumLink) })
+                                if (artistLink != null) Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(role = Role.Button, onClickLabel = "Open artist $artistName") { navigation?.open?.invoke(artistLink) } else Modifier))
+                        if (albumName != null) {
+                            if (artistName != null) Text(" · ", style = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurfaceVariant))
+                            Text(albumName, style = MaterialTheme.typography.bodyLarge.copy(color = if (albumLink != null) colors.primary else colors.onSurfaceVariant),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false).then(
+                                    if (albumLink != null) Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(role = Role.Button, onClickLabel = "Open album $albumName") { navigation?.open?.invoke(albumLink) } else Modifier))
                         }
                     }
                 }

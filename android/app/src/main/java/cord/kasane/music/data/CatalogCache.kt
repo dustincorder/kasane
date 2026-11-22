@@ -85,7 +85,7 @@ class RoomCatalogCacheStore(private val dao: KasaneDatabase.CatalogCacheDao) : C
             val rows = links.filter { it.shelfIndex == shelf.shelfIndex }
             val content = rows.mapNotNull { row -> items[row.itemKey]?.let { item ->
                 runCatching { CatalogKind.valueOf(item.kind) }.getOrNull()?.let { kind ->
-                    cord.kasane.music.model.CatalogItem(item.id, kind, item.title, item.subtitle, item.artwork, item.durationSeconds)
+                    cord.kasane.music.model.CatalogItem(item.id, kind, item.title, item.subtitle, item.artwork, item.durationSeconds, item.album)
                 }
             } }
             CatalogShelf(shelf.title, content, shelf.moreBrowseId)
