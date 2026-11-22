@@ -98,3 +98,28 @@
 - **Touch targets:** at least 48 dp.
 - **Contrast on imagery:** overlaid icons need a scrim, or a tonal icon-button container, whenever contrast with the image is not guaranteed.
 - **Primary action:** at most one prominent action per screen region, with a FAB in the thumb zone for the persistent primary action.
+
+## Downloads and quality settings (YouTube Music, no Premium; read-only look)
+- **Library → Downloaded chip:** filters the library to downloaded playlists, tracks and albums. With nothing downloaded it shows an empty state with a "Find music" action. A gear icon in this view opens "Downloads & storage".
+- **History:** a History button sits in the Library top bar, next to Search and Account. It is not a section on Home.
+- **Settings → Downloads & storage:**
+  - Storage bar (free and used space) and a "Saved files" screen.
+  - "Download only over Wi-Fi".
+  - **Audio quality**: Low / Normal / High.
+  - Video quality.
+  - **Smart downloads**: automatically keeps up to 200 recently played tracks.
+  - "Delete all downloaded content", behind a confirmation dialog.
+- **Settings → Data saving:** separate **streaming** audio quality for mobile data and for Wi-Fi, each Low / Normal / High / Always high. "Stream only over Wi-Fi" is also here.
+- **Settings → Playback:** equalizer (system), start playback from external devices, double-tap seek length, dynamic queue.
+- **Account sheet:** channel, Downloads, History, Recap, Switch account, Settings.
+
+### For Kasane
+- **Quality:**
+  - Separate a **download quality** preset from **streaming quality**. Streaming quality can be set per network type (mobile / Wi-Fi).
+  - Presets: Low ≈ Opus 50k (itag 249) or AAC 48k (139); Normal ≈ AAC 128k (140); High ≈ Opus ~160k (251), with AAC 140 as the fallback where Opus can't be decoded.
+  - Premium-only formats are never offered.
+- **Downloads:**
+  - Albums and playlists get a Download action with progress, and per-row downloaded indicators.
+  - "Downloaded" becomes a Library filter.
+  - "Wi-Fi only" and "Delete all downloads" (with confirmation) go in Settings, along with real storage figures.
+- **Library:** add a History entry point to the Library top bar. The Home "recently played" section becomes optional.
