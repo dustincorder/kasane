@@ -1,6 +1,8 @@
+use crate::hls::{HlsSource, StreamError};
 use async_trait::async_trait;
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
-use std::{fs::File, io::Cursor, thread, time::Duration};
+use std::io::Cursor;
+use std::{fs::File, thread, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use vibe_core::error::{Result, VibeError};
 use vibe_core::model::{PlaybackProgress, PlaybackState, StreamSource};
@@ -10,6 +12,7 @@ const MAX_DOWNLOAD_BYTES: usize = 64 * 1024 * 1024;
 
 enum Media {
     File(String),
+    Hls(String),
     Download(Vec<u8>),
 }
 
@@ -28,6 +31,7 @@ struct AudioWorker {
     output: Option<OutputStream>,
     duration: Duration,
     volume: f32,
+    stream_error: Option<StreamError>,
 }
 
 impl AudioWorker {
@@ -35,8 +39,9 @@ impl AudioWorker {
         &mut self,
         source: std::result::Result<impl Source + Send + 'static, rodio::decoder::DecoderError>,
     ) -> Result<()> {
-        let source =
-            source.map_err(|_| VibeError::Playback("Unsupported or invalid audio file".into()))?;
+        let source = source.map_err(|error| {
+            VibeError::Playback(format!("Unsupported or invalid audio file: {error}"))
+        })?;
         let duration = source.total_duration().unwrap_or_default();
         if self.output.is_none() {
             let output = OutputStreamBuilder::open_default_stream()
@@ -85,6 +90,13 @@ impl AudioWorker {
                     return Err(VibeError::Playback("Choose a regular audio file".into()));
                 }
                 self.play(Decoder::try_from(File::open(path)?))?;
+                self.stream_error = None;
+            }
+            Command::Play(Media::Hls(url)) => {
+                let audio = HlsSource::open(&url)?;
+                let error = audio.error.clone();
+                self.play(Ok(audio))?;
+                self.stream_error = Some(error);
             }
             Command::Play(Media::Download(bytes)) => {
                 let len = bytes.len() as u64;
@@ -94,6 +106,7 @@ impl AudioWorker {
                     .with_seekable(true)
                     .build();
                 self.play(decoder)?;
+                self.stream_error = None;
             }
             Command::Pause => {
                 if let Some(sink) = &self.sink {
@@ -108,6 +121,7 @@ impl AudioWorker {
             Command::Stop => {
                 self.sink = None;
                 self.duration = Duration::ZERO;
+                self.stream_error = None;
             }
             Command::Seek(position) => {
                 if let Some(sink) = self.sink.as_ref().filter(|sink| !sink.empty()) {
@@ -128,6 +142,14 @@ impl AudioWorker {
                 }
             }
             Command::Progress => {}
+        }
+        if let Some(error) = &self.stream_error {
+            if let Some(message) = error.lock().map_err(|_| worker_closed())?.as_ref() {
+                if let Some(sink) = &self.sink {
+                    sink.pause();
+                }
+                return Err(VibeError::Network(message.clone()));
+            }
         }
         Ok(self.progress())
     }
@@ -158,6 +180,7 @@ impl DesktopAudioBackend {
                     output: None,
                     duration: Duration::ZERO,
                     volume: 1.0,
+                    stream_error: None,
                 };
                 while let Some((command, reply)) = receiver.blocking_recv() {
                     let _ = reply.send(worker.run(command));
@@ -213,7 +236,14 @@ impl DesktopAudioBackend {
 impl PlaybackBackend for DesktopAudioBackend {
     async fn play_stream(&mut self, source: &StreamSource) -> Result<()> {
         let media = if source.url.starts_with("https://") || source.url.starts_with("http://") {
-            Media::Download(self.download(&source.url).await?)
+            if matches!(
+                source.mime_type.as_str(),
+                "application/vnd.apple.mpegurl" | "application/x-mpegURL"
+            ) {
+                Media::Hls(source.url.clone())
+            } else {
+                Media::Download(self.download(&source.url).await?)
+            }
         } else {
             Media::File(source.url.clone())
         };

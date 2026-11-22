@@ -1,5 +1,6 @@
 pub mod desktop;
 pub mod dsp;
+mod hls;
 
 pub use desktop::DesktopAudioBackend;
 pub use dsp::NativeDspAnalyzer;

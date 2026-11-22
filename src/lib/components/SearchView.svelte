@@ -90,7 +90,7 @@
           </div>
 
           <div class="flex items-center gap-2 flex-shrink-0">
-            <span class="text-xs font-mono text-text-muted mr-3">{player.formatTime(track.duration_secs)}</span>
+            <span class="text-xs font-mono text-text-muted mr-3">{track.duration_secs > 0 ? player.formatTime(track.duration_secs) : '—'}</span>
             <button
               onclick={() => player.addToQueue(track)}
               class="p-2 text-text-secondary hover:text-text-primary rounded hover:bg-surface-border transition"
