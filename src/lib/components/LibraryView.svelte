@@ -90,7 +90,7 @@
             </div>
 
             <div class="flex items-center gap-3">
-              <span class="text-xs font-mono text-text-muted">{player.formatTime(track.duration_secs)}</span>
+              <span class="text-xs font-mono text-text-muted">{track.duration_secs > 0 ? player.formatTime(track.duration_secs) : '—'}</span>
               <button
                 onclick={() => player.playTrack(track)}
                 disabled={player.isBusy}

@@ -3,7 +3,7 @@ use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 use std::time::Duration;
 use vibe_core::error::{Result, VibeError};
-use vibe_core::model::{Artist, ProviderType, StreamSource, Track};
+use vibe_core::model::{Album, Artist, ProviderType, StreamSource, Track};
 use vibe_core::traits::MusicProvider;
 
 pub struct YouTubeMusicProvider {
@@ -167,6 +167,25 @@ impl MusicProvider for YouTubeMusicProvider {
     }
 }
 
+fn parse_duration(text: &str) -> Option<u64> {
+    let parts: Vec<_> = text.trim().split(':').collect();
+    if !(2..=3).contains(&parts.len())
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()))
+        || parts[1..]
+            .iter()
+            .any(|part| part.len() != 2 || part.parse::<u64>().ok().is_none_or(|n| n >= 60))
+    {
+        return None;
+    }
+    parts.into_iter().try_fold(0u64, |total, part| {
+        total
+            .checked_mul(60)?
+            .checked_add(part.parse::<u64>().ok()?)
+    })
+}
+
 fn parse_search(json: &Value, limit: usize) -> Result<Vec<Track>> {
     let mut tracks = Vec::new();
     let mut supported = false;
@@ -204,6 +223,27 @@ fn parse_search(json: &Value, limit: usize) -> Result<Vec<Track>> {
                                 .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails/0/url")
                                 .and_then(|v| v.as_str());
 
+                            let runs = renderer
+                                .pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs")
+                                .and_then(Value::as_array);
+                            let duration_secs = runs.and_then(|runs| runs.iter().rev()
+                                .filter_map(|run| run.get("text").and_then(Value::as_str))
+                                .find_map(parse_duration)).unwrap_or(0);
+                            let album = runs.and_then(|runs| runs.windows(3).find_map(|group| {
+                                if group[0].get("text").and_then(Value::as_str)?.trim() != "•"
+                                    || group[2].get("text").and_then(Value::as_str)?.trim() != "•" {
+                                    return None;
+                                }
+                                let title = group[1].get("text")?.as_str()?.trim();
+                                if title.is_empty() || parse_duration(title).is_some() { return None; }
+                                Some(Album {
+                                    id: group[1].pointer("/navigationEndpoint/browseEndpoint/browseId")
+                                        .and_then(Value::as_str).unwrap_or_default().into(),
+                                    title: title.into(),
+                                    cover_url: None,
+                                })
+                            }));
+
                             if let (Some(id), Some(t)) = (video_id, title) {
                                 tracks.push(Track {
                                     id: id.to_string(),
@@ -213,8 +253,8 @@ fn parse_search(json: &Value, limit: usize) -> Result<Vec<Track>> {
                                         id: format!("art_{}", id),
                                         name: artist.to_string(),
                                     }],
-                                    album: None,
-                                    duration_secs: 180, // Default duration placeholder until stream inspection
+                                    album,
+                                    duration_secs,
                                     thumbnail_url: thumb.map(|s| s.to_string()),
                                     provider: ProviderType::YouTubeMusic,
                                     uri: None,
@@ -330,6 +370,11 @@ mod tests {
         assert_eq!(tracks[0].id, "lYBUbBu4W08");
         assert_eq!(tracks[0].title, "Never Gonna Give You Up");
         assert_eq!(tracks[0].artist, "Rick Astley");
+        assert_eq!(tracks[0].duration_secs, 214);
+        assert_eq!(
+            tracks[0].album.as_ref().unwrap().title,
+            "Whenever You Need Somebody"
+        );
         assert_eq!(tracks[0].provider, ProviderType::YouTubeMusic);
         assert!(parse_search(&root, 0).unwrap().is_empty());
         let contents = root.pointer_mut("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents").unwrap();
@@ -341,6 +386,55 @@ mod tests {
             .to_string()
             .contains("Unsupported search response shape"));
         assert!(parse_search(&json!({}), 20).is_err());
+    }
+
+    #[test]
+    fn duration_formats_are_strict_and_overflow_is_unknown() {
+        for (text, expected) in [
+            ("3:34", 214),
+            ("12:05", 725),
+            ("1:02:03", 3723),
+            (" 0:00 ", 0),
+        ] {
+            assert_eq!(parse_duration(text), Some(expected));
+        }
+        for text in [
+            "",
+            "Live",
+            "3:4",
+            "3:60",
+            "1:60:00",
+            "1:2:03",
+            "-1:00",
+            "1:02:03:04",
+            "18446744073709551615:00",
+        ] {
+            assert_eq!(parse_duration(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn search_duration_uses_last_matching_run_and_missing_is_unknown() {
+        let mut root: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/search-songs.json")).unwrap();
+        let path = "/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicShelfRenderer/contents/0/musicResponsiveListItemRenderer/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs";
+        root.pointer_mut(path)
+            .unwrap()
+            .as_array_mut()
+            .unwrap()
+            .extend([
+                json!({"text":" • "}),
+                json!({"text":"1:02:03"}),
+                json!({"text":"extra metadata"}),
+            ]);
+        assert_eq!(parse_search(&root, 20).unwrap()[0].duration_secs, 3723);
+        *root.pointer_mut(path).unwrap() =
+            json!([{"text":"Rick Astley"},{"text":" • "},{"text":"Live"}]);
+        let tracks = parse_search(&root, 20).unwrap();
+        assert_eq!(tracks[0].duration_secs, 0);
+        assert!(tracks[0].album.is_none());
+        *root.pointer_mut(path).unwrap() = json!([]);
+        assert_eq!(parse_search(&root, 20).unwrap()[0].duration_secs, 0);
     }
 
     async fn serve_player(
