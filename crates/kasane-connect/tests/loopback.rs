@@ -7,7 +7,7 @@ use kasane_connect::service::ConnectService;
 use kasane_connect::tls::TlsConfigs;
 use serde_json::{json, Map};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn track(id: &str) -> TrackMeta {
     TrackMeta {
@@ -84,7 +84,6 @@ fn raw_identity(dir: &tempfile::TempDir) -> (Identity, TlsConfigs) {
 
 #[tokio::test]
 async fn pairing_success_then_authorized_command() {
-    let _ = tracing_subscriber::fmt().with_env_filter("kasane_connect=debug").try_init();
     let da = tempfile::tempdir().unwrap();
     let db = tempfile::tempdir().unwrap();
     let (a, pa) = service(&da, "A").await;
@@ -222,7 +221,7 @@ async fn replayed_seq_and_duplicate_id() {
 
     // First command executes.
     raw.send(Frame::Command { id: "x".into(), seq: 1, action: "pause".into(), args: Map::new() });
-    assert_eq!(next_ack(&mut raw).await.1, true);
+    assert!(next_ack(&mut raw).await.1);
     // Replayed seq is rejected and not executed.
     raw.send(Frame::Command { id: "y".into(), seq: 1, action: "play".into(), args: Map::new() });
     let (_id, ok, err) = next_ack(&mut raw).await;
@@ -340,4 +339,52 @@ async fn handoff_starts_the_queue_and_failed_handoff_keeps_it() {
     assert_eq!(snap.track.as_ref().unwrap().id, "vid2");
     assert_eq!(snap.playback, "playing");
     assert_eq!(snap.position_ms, 1234);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn multi_thread_pairing_then_reconnect_with_stored_identity() {
+    let da = tempfile::tempdir().unwrap();
+    let db = tempfile::tempdir().unwrap();
+    let (a, pa) = service(&da, "A").await;
+    let (b, _pb) = service(&db, "B").await;
+    confirm_prompts(&a, true);
+    confirm_prompts(&b, true);
+
+    let addr = format!("127.0.0.1:{}", a.port());
+    let prompt = b.pair(&addr).await.unwrap();
+    assert!(prompt.is_some(), "expected a pairing prompt");
+    assert!(wait_until(|| b
+        .devices()
+        .borrow()
+        .iter()
+        .any(|d| d.trusted))
+    .await);
+
+    // Drop B entirely — like the pair CLI process exiting — then a fresh
+    // trusted raw client must still reach the server.
+    drop(b);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Reuse B's persisted identity, like a second CLI invocation with the
+    // same --data-dir.
+    let (identity, tls) = raw_identity(&db);
+    let mut raw = RawClient::connect(&addr, &identity, &tls).await.unwrap();
+    assert!(raw.authed);
+    raw.send(Frame::Command {
+        id: "mt1".into(),
+        seq: 1,
+        action: "pause".into(),
+        args: Map::new(),
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut ok = false;
+    while Instant::now() < deadline && !ok {
+        match raw.recv().await {
+            Some(Frame::Ack { id, ok: o, .. }) if id == "mt1" => ok = o,
+            Some(_) => continue,
+            None => break,
+        }
+    }
+    assert!(ok, "no ack on second connection");
+    assert!(wait_until(|| pa.executed.lock().unwrap().contains(&"pause".to_string())).await);
 }

@@ -39,7 +39,8 @@ async fn main() {
     std::fs::create_dir_all(&data_dir).expect("data dir");
 
     let player: Arc<dyn PlayerAdapter> = Arc::new(FakePlayer::new());
-    let svc = ConnectService::start(&data_dir, "kasane-cli", "linux", "cli", player, true)
+    let mdns = std::env::var("KC_MDNS").map(|v| v != "0").unwrap_or(true);
+    let svc = ConnectService::start(&data_dir, "kasane-cli", "linux", "cli", player, mdns)
         .await
         .expect("start connect service");
     let me = svc.local_device();
@@ -60,7 +61,12 @@ async fn main() {
                 let svc2 = svc.clone();
                 tokio::spawn(async move {
                     while prompts.changed().await.is_ok() {
-                        for p in prompts.borrow().iter() {
+                        // Bind the clone first: a `for` keeps temporaries of its
+                        // iterator expression alive for the whole loop, so
+                        // `for p in prompts.borrow().clone()` would still hold the
+                        // watch read lock while confirm_pairing() writes to it.
+                        let pending = prompts.borrow().clone();
+                        for p in pending {
                             if p.incoming {
                                 eprintln!("[cli] auto-accepting pairing with {}", p.peer_name);
                                 svc2.confirm_pairing(&p.prompt_id, true);

@@ -129,7 +129,23 @@ type DedupEntry = (String, bool, Option<FrameError>);
 
 struct PromptHandle {
     view: PairingPrompt,
-    reply: oneshot::Sender<bool>,
+    reply: PromptReply,
+}
+
+/// Where a user's pairing decision goes. Incoming prompts feed the server
+/// session's own decision channel directly.
+enum PromptReply {
+    Outgoing(oneshot::Sender<bool>),
+    Incoming(mpsc::UnboundedSender<bool>),
+}
+
+impl PromptReply {
+    fn send(self, accepted: bool) -> bool {
+        match self {
+            PromptReply::Outgoing(tx) => tx.send(accepted).is_ok(),
+            PromptReply::Incoming(tx) => tx.send(accepted).is_ok(),
+        }
+    }
 }
 
 struct Pairing {
@@ -257,7 +273,10 @@ impl ConnectService {
                 Ok(_discovery) => {
                     // The daemon must outlive this function.
                     std::mem::forget(_discovery);
-                    tokio::spawn(mdns_events(inner.clone(), rx));
+                    tokio::task::spawn_blocking({
+                        let inner = inner.clone();
+                        move || mdns_events(inner, rx)
+                    });
                 }
                 Err(e) => tracing::warn!("mDNS unavailable: {e}"),
             }
@@ -382,7 +401,7 @@ impl ConnectService {
             .prompts
             .lock()
             .unwrap()
-            .insert(prompt_id.clone(), PromptHandle { view, reply: reply_tx });
+            .insert(prompt_id.clone(), PromptHandle { view, reply: PromptReply::Outgoing(reply_tx) });
         self.push_prompts();
         // The caller resolves the prompt; a detached task completes the exchange.
         let inner = self.inner.clone();
@@ -427,7 +446,7 @@ impl ConnectService {
     pub fn confirm_pairing(&self, prompt_id: &str, accepted: bool) {
         let handle = self.inner.prompts.lock().unwrap().remove(prompt_id);
         if let Some(p) = handle {
-            let _ = p.reply.send(accepted);
+            p.reply.send(accepted);
             self.push_prompts();
         }
     }
@@ -1033,7 +1052,9 @@ async fn server_session(
         slot.release();
     }
     let mut published = inner.published.subscribe();
-    let mut pairing_task: Option<oneshot::Receiver<bool>> = None;
+    // The local user's decision for an incoming pairing arrives here.
+    let (decision_tx, mut decision_rx) = mpsc::unbounded_channel::<bool>();
+    let mut decision_fwd = false;
     let mut last_activity = Instant::now();
     loop {
         // Pairing deadline handling.
@@ -1050,13 +1071,24 @@ async fn server_session(
         let idle_fut = tokio::time::sleep_until(tokio::time::Instant::from_std(idle));
         tokio::pin!(idle_fut);
         tokio::select! {
+            biased;
+            decision = decision_rx.recv(), if decision_fwd => {
+                decision_fwd = false;
+                let accepted = decision.unwrap_or(false);
+                if let Some(p) = s.pairing.as_mut() {
+                    p.local = Some(accepted);
+                    let _ = link.send(Frame::PairConfirm { accepted });
+                    if finish_pairing(&inner, &mut s, &link, &peer).await == Flow::Close { break; }
+                    if s.authed { slot.release(); }
+                }
+            }
             inbound = link.rx.recv() => {
                 let Some(inbound) = inbound else { break };
                 last_activity = Instant::now();
                 match inbound {
                     Inbound::Closed => break,
                     Inbound::Frame(frame) => {
-                        if handle_frame(&inner, &mut s, &link, &peer, &fp_hex, frame, &mut pairing_task).await == Flow::Close {
+                        if handle_frame(&inner, &mut s, &link, &peer, &fp_hex, frame, &decision_tx, &mut decision_fwd).await == Flow::Close {
                             break;
                         }
                         if s.authed { slot.release(); }
@@ -1070,16 +1102,6 @@ async fn server_session(
                 if changed.is_err() { break; }
                 if s.subscribed {
                     maybe_push_state(&inner, &mut s, &link, &published, false);
-                }
-            }
-            decision = async { pairing_task.as_mut().unwrap().await }, if pairing_task.is_some() => {
-                pairing_task = None;
-                let accepted = decision.unwrap_or(false);
-                if let Some(p) = s.pairing.as_mut() {
-                    p.local = Some(accepted);
-                    let _ = link.send(Frame::PairConfirm { accepted });
-                    if finish_pairing(&inner, &mut s, &link, &peer).await == Flow::Close { break; }
-                    if s.authed { slot.release(); }
                 }
             }
             _ = deadline_fut, if s.pairing.is_some() => {
@@ -1166,7 +1188,6 @@ fn maybe_push_state(inner: &Inner, s: &mut ServerSession, link: &Link, published
 /// Decide whether a pairing can be finalized and send pairResult/authOk.
 async fn finish_pairing(inner: &Inner, s: &mut ServerSession, link: &Link, peer: &DeviceInfo) -> Flow {
     let Some(p) = s.pairing.as_ref() else { return Flow::Open };
-    tracing::debug!("finish_pairing local={:?} peer={:?}", p.local, p.peer);
     if p.local.is_none() || p.peer.is_none() {
         return Flow::Open;
     }
@@ -1196,6 +1217,7 @@ async fn finish_pairing(inner: &Inner, s: &mut ServerSession, link: &Link, peer:
     Flow::Open
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_frame(
     inner: &Arc<Inner>,
     s: &mut ServerSession,
@@ -1203,7 +1225,8 @@ async fn handle_frame(
     peer: &DeviceInfo,
     fp_hex: &str,
     frame: Frame,
-    pairing_task: &mut Option<oneshot::Receiver<bool>>,
+    decision_tx: &mpsc::UnboundedSender<bool>,
+    decision_fwd: &mut bool,
 ) -> Flow {
     // Frames allowed before auth: hello, pair*, ping/pong (handled in link).
     if !s.authed {
@@ -1284,7 +1307,6 @@ async fn handle_frame(
                 &nc_bytes,
             );
             let prompt_id = p.prompt_id.clone();
-            let (tx, rx) = oneshot::channel();
             inner.prompts.lock().unwrap().insert(
                 prompt_id,
                 PromptHandle {
@@ -1295,14 +1317,13 @@ async fn handle_frame(
                         code,
                         device_id: Some(peer.id.clone()),
                     },
-                    reply: tx,
+                    reply: PromptReply::Incoming(decision_tx.clone()),
                 },
             );
             push_prompts(inner);
-            *pairing_task = Some(rx);
+            *decision_fwd = true;
         }
         Frame::PairConfirm { accepted } => {
-            tracing::debug!("peer pairConfirm {accepted}");
             if let Some(p) = s.pairing.as_mut() {
                 p.peer = Some(accepted);
                 return finish_pairing(inner, s, link, peer).await;
@@ -1423,7 +1444,8 @@ async fn handle_command(
     let _ = link.send(Frame::Ack { id, ok, error });
 }
 
-async fn mdns_events(inner: Arc<Inner>, rx: std::sync::mpsc::Receiver<DiscoveryEvent>) {
+/// mdns-sd events arrive over a std channel; bridging must not park a worker.
+fn mdns_events(inner: Arc<Inner>, rx: std::sync::mpsc::Receiver<DiscoveryEvent>) {
     while let Ok(event) = rx.recv() {
         match event {
             DiscoveryEvent::Resolved(Discovered { id, name, platform, addr, .. }) => {
