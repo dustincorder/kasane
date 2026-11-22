@@ -431,7 +431,8 @@ private fun KasaneContent(app: KasaneApplication) {
                 }
             }
         ) { innerPadding ->
-          Column(Modifier.fillMaxSize().padding(innerPadding).background(MaterialTheme.colorScheme.background)) {
+          // consumeWindowInsets: the Scaffold already padded the status bar, so nested TopAppBars must not add it again.
+          Column(Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding).background(MaterialTheme.colorScheme.background)) {
             if (offlineOnly) Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.CloudOff, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)

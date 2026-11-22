@@ -23,7 +23,7 @@ import java.io.IOException
 /** Real Media3 caches on the JVM: proves eviction, pinning and cache-only reads behave as the offline library assumes. */
 @UnstableApi
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], application = android.app.Application::class)
 class OfflineCacheIntegrationTest {
     @get:Rule val folder = TemporaryFolder()
     private lateinit var temp: SimpleCache

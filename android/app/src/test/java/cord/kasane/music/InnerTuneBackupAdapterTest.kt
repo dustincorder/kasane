@@ -16,7 +16,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], application = android.app.Application::class)
 class InnerTuneBackupAdapterTest {
     @get:Rule val folder = TemporaryFolder()
     private val id1 = "dQw4w9WgXcQ"

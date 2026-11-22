@@ -63,16 +63,53 @@ import kotlin.math.roundToInt
  */
 @Stable
 class PlayerSheetState(private val scope: CoroutineScope) {
-    val progress = Animatable(0f)
+    /** Bounded: a spring or a fling can never push the sheet outside 0..1 (overshoot produced negative padding). */
+    val progress = Animatable(0f).apply { updateBounds(0f, 1f) }
     val isExpanded: Boolean get() = progress.targetValue >= 0.5f
     val isVisibleExpanded: Boolean get() = progress.value > 0.02f
-    private val spec = spring<Float>(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)
+    private val spec = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
     fun expand() { scope.launch { progress.animateTo(1f, spec) } }
     fun collapse() { scope.launch { progress.animateTo(0f, spec) } }
     internal suspend fun dragTo(value: Float) { progress.snapTo(value.coerceIn(0f, 1f)) }
     internal suspend fun settle(velocityFraction: Float) {
         val target = when { velocityFraction > 1.2f -> 1f; velocityFraction < -1.2f -> 0f; progress.value >= 0.5f -> 1f; else -> 0f }
         progress.animateTo(target, spec, initialVelocity = velocityFraction)
+    }
+}
+
+/**
+ * All sizes of the player at a given expansion. Every value is clamped, so no progress value (including spring
+ * overshoot or a hostile window size such as split screen) can produce a negative padding or size. Compose throws
+ * on negative padding, which crashed the whole process when the sheet settled at full screen.
+ */
+data class PlayerGeometry(
+    val progress: Float, val sheetHeight: Dp, val sidePadding: Dp, val bottomPadding: Dp, val corner: Dp,
+    val cover: Dp, val coverSize: Dp, val coverX: Dp, val coverY: Dp, val coverTop: Dp,
+) {
+    companion object {
+        val MiniHeight = 64.dp
+        val TopBar = 56.dp
+        private val MiniCover = 44.dp
+
+        fun of(rawProgress: Float, width: Dp, height: Dp, statusTop: Dp, navBottom: Dp, dockedBottom: Dp): PlayerGeometry {
+            val p = if (rawProgress.isNaN()) 0f else rawProgress.coerceIn(0f, 1f)
+            val w = width.coerceAtLeast(0.dp); val h = height.coerceAtLeast(MiniHeight)
+            val cover = minOf(w - 56.dp, (h - statusTop - TopBar - navBottom - 330.dp).coerceAtLeast(150.dp), 420.dp).coerceAtLeast(MiniCover)
+            val coverTop = statusTop.coerceAtLeast(0.dp) + TopBar + 8.dp
+            fun mix(a: Dp, b: Dp) = lerp(a.value, b.value, p).dp.coerceAtLeast(0.dp)
+            return PlayerGeometry(
+                progress = p,
+                sheetHeight = mix(MiniHeight, h),
+                sidePadding = mix(8.dp, 0.dp),
+                bottomPadding = mix(dockedBottom.coerceAtLeast(0.dp) + 6.dp, 0.dp),
+                corner = mix(16.dp, 0.dp),
+                cover = cover,
+                coverSize = mix(MiniCover, cover),
+                coverX = lerp(10f, ((w - cover) / 2).value, p).dp,
+                coverY = lerp(10f, coverTop.value, p).dp,
+                coverTop = coverTop,
+            )
+        }
     }
 }
 
@@ -106,49 +143,41 @@ fun PlayerSheet(
     val colors = MaterialTheme.colorScheme
     val density = LocalDensity.current
     BoxWithConstraints(modifier.fillMaxSize()) {
-        val width = maxWidth
-        val height = maxHeight
-        val p = sheet.progress.value
-        val miniHeight = 64.dp
         val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val topBar = 56.dp
-        val cover = minOf(width - 56.dp, (height - statusTop - topBar - navBottom - 330.dp).coerceAtLeast(150.dp), 420.dp)
-        val sheetHeight = lerp(miniHeight.value, height.value, p).dp
-        val sidePadding = lerp(8f, 0f, p).dp
-        val bottomPadding = lerp(dockedBottom.value + 6f, 0f, p).dp
-        val corner = lerp(16f, 0f, p).dp
+        val g = PlayerGeometry.of(sheet.progress.value, maxWidth, maxHeight, statusTop, navBottom, dockedBottom)
+        val p = g.progress
+        val miniHeight = PlayerGeometry.MiniHeight
+        val height = maxHeight
+        val cover = g.cover
         val travel = with(density) { (height - miniHeight - dockedBottom).toPx() }.coerceAtLeast(1f)
         val scope = rememberCoroutineScope()
         val drag = rememberDraggableState { delta -> scope.launch { sheet.dragTo(sheet.progress.value - delta / travel) } }
 
         Surface(
             color = lerpColor(colors.surfaceContainerHigh, colors.surface, p),
-            shape = RoundedCornerShape(corner),
+            shape = RoundedCornerShape(g.corner),
             tonalElevation = 0.dp, shadowElevation = lerp(3f, 0f, p).dp,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = sidePadding).padding(bottom = bottomPadding)
-                .fillMaxWidth().height(sheetHeight)
+            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = g.sidePadding).padding(bottom = g.bottomPadding)
+                .fillMaxWidth().height(g.sheetHeight)
                 .draggable(drag, Orientation.Vertical, onDragStopped = { velocity -> scope.launch { sheet.settle(-velocity / travel) } })
         ) {
             Box(Modifier.fillMaxSize()) {
                 if (p < 0.6f) MiniContent(state, track, actions, Modifier.graphicsLayer { alpha = (1f - p * 2.2f).coerceIn(0f, 1f) },
                     onOpen = sheet::expand, coverStart = 0.dp)
                 if (p > 0.02f) FullContent(state, track, actions, isFavorite, onCollapse = sheet::collapse,
-                    topInset = statusTop, bottomInset = navBottom, coverSize = cover, coverTop = statusTop + topBar + 8.dp,
+                    topInset = statusTop, bottomInset = navBottom, coverSize = cover, coverTop = g.coverTop,
                     modifier = Modifier.graphicsLayer { alpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) })
 
                 // One artwork element for both states: it grows and travels, it is never swapped.
-                val coverSize = lerp(44f, cover.value, p).dp
-                val x = lerp(10f, ((width - cover) / 2).value, p).dp
-                val y = lerp(10f, (statusTop + topBar + 8.dp).value, p).dp
                 val swipe = Modifier.pointerInput(track.id, p > 0.5f) {
                     if (p < 0.5f) return@pointerInput
                     var total = 0f
                     detectHorizontalDragGestures(onDragStart = { total = 0f }, onHorizontalDrag = { _, dx -> total += dx },
                         onDragEnd = { if (total < -90f) actions.next() else if (total > 90f) actions.previous() })
                 }
-                CoverArtwork(track, state.queueIndex, coverSize, state.isPlaying || state.isLoading, p,
-                    Modifier.offset(x, y).then(swipe), pixels = with(density) { cover.roundToPx() })
+                CoverArtwork(track, state.queueIndex, g.coverSize, state.isPlaying || state.isLoading, p,
+                    Modifier.offset(g.coverX, g.coverY).then(swipe), pixels = with(density) { cover.roundToPx() })
             }
         }
     }

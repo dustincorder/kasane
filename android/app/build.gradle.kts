@@ -41,6 +41,7 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
         managedDevices {
             devices {
                 create<com.android.build.api.dsl.ManagedVirtualDevice>("kasaneApi35") {
@@ -169,6 +170,10 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.14.1") // JVM tests of real Media3 cache classes need android.net.Uri
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+    // Compose UI regression tests run on the JVM under Robolectric (no device, no install)
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
 
 val verifierBundle = rootProject.file("../verifier/dist/kasane-verifier.js")
