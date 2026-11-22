@@ -30,6 +30,10 @@ class KasaneApplication : Application() {
     lateinit var playbackManager: PlaybackManager
         private set
 
+    @Volatile
+    var connect: cord.kasane.music.connect.ConnectService? = null
+        private set
+
     lateinit var ytProvider: YouTubeMusicProvider
         private set
 
@@ -93,5 +97,18 @@ class KasaneApplication : Application() {
             trackDao = database.trackDao(),
             ytProvider = ytProvider
         )
+
+        applicationScope.launch {
+            settings.connectEnabled.collect { enabled ->
+                if (enabled && connect == null) {
+                    connect = cord.kasane.music.connect.AndroidConnect
+                        .createService(applicationContext, playbackManager, BuildConfig.VERSION_NAME, applicationScope)
+                        .also { it.start() }
+                } else if (!enabled) {
+                    connect?.stop()
+                    connect = null
+                }
+            }
+        }
     }
 }

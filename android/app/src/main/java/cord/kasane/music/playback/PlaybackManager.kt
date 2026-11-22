@@ -173,6 +173,54 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
         player.play()
     }
 
+    /**
+     * Handoff target: replace the whole queue and start `tracks[index]` at
+     * `positionMs`. Resolves to true once the new item is ready; on failure
+     * (or timeout) the previous queue is restored so nothing is lost.
+     */
+    suspend fun handoffQueue(tracks: List<Track>, index: Int, positionMs: Long,
+        playing: Boolean, shuffle: Boolean, repeatMode: Int): Boolean =
+        kotlinx.coroutines.withTimeoutOrNull(15_000) {
+            kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                command { player ->
+                    if (index !in tracks.indices) {
+                        if (cont.isActive) cont.resume(false, {})
+                        return@command
+                    }
+                    val oldItems = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+                    val oldIndex = player.currentMediaItemIndex
+                    val oldPos = player.currentPosition
+                    val oldShuffle = player.shuffleModeEnabled
+                    val oldRepeat = player.repeatMode
+                    val listener = object : Player.Listener {
+                        private fun finish(ok: Boolean) {
+                            player.removeListener(this)
+                            if (cont.isActive) cont.resume(ok, {})
+                        }
+                        override fun onPlaybackStateChanged(state: Int) {
+                            if (state == Player.STATE_READY) finish(true)
+                        }
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            player.setMediaItems(oldItems, oldIndex.coerceAtLeast(0), oldPos)
+                            player.shuffleModeEnabled = oldShuffle
+                            player.repeatMode = oldRepeat
+                            player.prepare()
+                            finish(false)
+                        }
+                    }
+                    player.addListener(listener)
+                    val context = java.util.UUID.randomUUID().toString()
+                    player.setMediaItems(tracks.map {
+                        PlaybackService.trackToMediaItem(it, radioMode = "handoff", playContext = context)
+                    }, index, positionMs)
+                    player.shuffleModeEnabled = shuffle
+                    player.repeatMode = repeatMode
+                    player.prepare()
+                    if (playing) player.play() else player.pause()
+                }
+            }
+        } ?: false
+
     fun retryPlayback() = command { prepareAndPlay(it) }
     fun togglePlayPause() = command {
         if (it.mediaItemCount == 0) return@command
@@ -204,6 +252,10 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
         if (recover) prepareAndPlay(player)
     }
     fun seekTo(positionMs: Long) = command { it.seekTo(positionMs.coerceIn(0, it.duration.coerceAtLeast(0))) }
+    fun pause() = command { it.pause() }
+    fun resume() = command { if (it.mediaItemCount > 0) it.play() }
+    fun setShuffle(enabled: Boolean) = command { it.shuffleModeEnabled = enabled }
+    fun setRepeat(mode: Int) = command { it.repeatMode = mode }
     fun toggleShuffle() = command { it.shuffleModeEnabled = !it.shuffleModeEnabled }
     fun cycleRepeat() = command { it.repeatMode = when (it.repeatMode) {
         Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL

@@ -37,6 +37,7 @@ class AppSettings(context: Context) {
     private val location = MutableStateFlow(StorageLocation.fromKey(prefs.getString(CACHE_LOCATION, null)))
     private val wifiOnly = MutableStateFlow(prefs.getBoolean(WIFI_ONLY_DOWNLOADS, true))
     private val consent = MutableStateFlow(prefs.getBoolean(OFFLINE_NOTICE_ACCEPTED, false))
+    private val connect = MutableStateFlow(prefs.getBoolean(CONNECT_ENABLED, true))
 
     val themeMode: StateFlow<ThemeMode> = mode.asStateFlow()
     val accentSource: StateFlow<AccentSource> = accent.asStateFlow()
@@ -47,6 +48,8 @@ class AppSettings(context: Context) {
     val cacheLocation: StateFlow<StorageLocation> = location.asStateFlow()
     val wifiOnlyDownloads: StateFlow<Boolean> = wifiOnly.asStateFlow()
     val offlineNoticeAccepted: StateFlow<Boolean> = consent.asStateFlow()
+    /** LAN remote control and playback handoff (Kasane Connect). */
+    val connectEnabled: StateFlow<Boolean> = connect.asStateFlow()
 
     fun setThemeMode(value: ThemeMode) { prefs.edit().putString(THEME_MODE, value.key).apply(); mode.value = value }
     fun setAccentSource(value: AccentSource) { prefs.edit().putString(ACCENT_SOURCE, value.key).remove(DYNAMIC_COLOR).apply(); accent.value = value }
@@ -62,6 +65,7 @@ class AppSettings(context: Context) {
     }
     fun setWifiOnlyDownloads(value: Boolean) { prefs.edit().putBoolean(WIFI_ONLY_DOWNLOADS, value).apply(); wifiOnly.value = value }
     fun acceptOfflineNotice() { prefs.edit().putBoolean(OFFLINE_NOTICE_ACCEPTED, true).apply(); consent.value = true }
+    fun setConnectEnabled(value: Boolean) { prefs.edit().putBoolean(CONNECT_ENABLED, value).apply(); connect.value = value }
     fun setCacheLocation(value: StorageLocation) { prefs.edit().putString(CACHE_LOCATION, value.key).apply(); location.value = value }
 
     companion object {
@@ -79,5 +83,6 @@ class AppSettings(context: Context) {
         private const val CACHE_LOCATION = "cacheLocation"
         private const val WIFI_ONLY_DOWNLOADS = "wifiOnlyDownloads"
         private const val OFFLINE_NOTICE_ACCEPTED = "offlineNoticeAccepted"
+        private const val CONNECT_ENABLED = "connectEnabled"
     }
 }
