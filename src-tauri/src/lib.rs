@@ -78,9 +78,9 @@ mod commands {
 
     #[tauri::command]
     pub async fn play_track(state: State<'_, AppState>, track: Track) -> Result<(), String> {
-        state
+        let track = state
             .player
-            .play_track_now(track.clone())
+            .play_track_now(track)
             .await
             .map_err(|e| e.to_string())?;
         record_history(&state, Some(track));

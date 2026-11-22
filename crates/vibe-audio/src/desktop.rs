@@ -1,11 +1,6 @@
 use async_trait::async_trait;
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
-use std::{
-    fs::File,
-    io::{BufReader, Cursor, Read, Seek},
-    thread,
-    time::Duration,
-};
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
+use std::{fs::File, io::Cursor, thread, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use vibe_core::error::{Result, VibeError};
 use vibe_core::model::{PlaybackProgress, PlaybackState, StreamSource};
@@ -28,36 +23,35 @@ enum Command {
     Progress,
 }
 
-struct AudioOutput {
-    _stream: OutputStream,
-    handle: OutputStreamHandle,
-}
-
 struct AudioWorker {
-    output: Option<AudioOutput>,
     sink: Option<Sink>,
+    output: Option<OutputStream>,
     duration: Duration,
     volume: f32,
 }
 
 impl AudioWorker {
-    fn play(&mut self, input: impl Read + Seek + Send + Sync + 'static) -> Result<()> {
-        let decoder = Decoder::new(input)
-            .map_err(|_| VibeError::Playback("Unsupported or invalid audio file".into()))?;
-        let duration = decoder.total_duration().unwrap_or_default();
+    fn play(
+        &mut self,
+        source: std::result::Result<impl Source + Send + 'static, rodio::decoder::DecoderError>,
+    ) -> Result<()> {
+        let source =
+            source.map_err(|_| VibeError::Playback("Unsupported or invalid audio file".into()))?;
+        let duration = source.total_duration().unwrap_or_default();
         if self.output.is_none() {
-            let (_stream, handle) = OutputStream::try_default()
+            let output = OutputStreamBuilder::open_default_stream()
                 .map_err(|_| VibeError::Audio("No working audio output is available".into()))?;
-            self.output = Some(AudioOutput { _stream, handle });
+            self.output = Some(output);
         }
         let output = self.output.as_ref().ok_or_else(worker_closed)?;
-        let sink = Sink::try_new(&output.handle)
-            .map_err(|_| VibeError::Audio("Could not start audio output".into()))?;
+        let sink = Sink::connect_new(output.mixer());
         sink.set_volume(self.volume);
+        sink.pause();
+        sink.append(source);
         self.sink = Some(sink);
         self.duration = duration;
         if let Some(sink) = &self.sink {
-            sink.append(decoder);
+            sink.play();
         }
         Ok(())
     }
@@ -65,12 +59,19 @@ impl AudioWorker {
     fn progress(&self) -> PlaybackProgress {
         let (state, position) = match &self.sink {
             None => (PlaybackState::Stopped, Duration::ZERO),
-            Some(sink) if sink.empty() => (PlaybackState::Ended, self.duration.max(sink.get_pos())),
+            Some(sink) if sink.empty() => (PlaybackState::Ended, sink.get_pos()),
             Some(sink) if sink.is_paused() => (PlaybackState::Paused, sink.get_pos()),
             Some(sink) => (PlaybackState::Playing, sink.get_pos()),
         };
         PlaybackProgress {
-            position_secs: position.as_secs_f64(),
+            position_secs: if state == PlaybackState::Ended && !self.duration.is_zero() {
+                self.duration
+            } else if self.duration.is_zero() {
+                position
+            } else {
+                position.min(self.duration)
+            }
+            .as_secs_f64(),
             duration_secs: self.duration.as_secs_f64(),
             state,
             current_track: None,
@@ -83,9 +84,17 @@ impl AudioWorker {
                 if !std::fs::metadata(&path)?.is_file() {
                     return Err(VibeError::Playback("Choose a regular audio file".into()));
                 }
-                self.play(BufReader::new(File::open(path)?))?;
+                self.play(Decoder::try_from(File::open(path)?))?;
             }
-            Command::Play(Media::Download(bytes)) => self.play(Cursor::new(bytes))?,
+            Command::Play(Media::Download(bytes)) => {
+                let len = bytes.len() as u64;
+                let decoder = Decoder::builder()
+                    .with_data(Cursor::new(bytes))
+                    .with_byte_len(len)
+                    .with_seekable(true)
+                    .build();
+                self.play(decoder)?;
+            }
             Command::Pause => {
                 if let Some(sink) = &self.sink {
                     sink.pause();
@@ -102,6 +111,11 @@ impl AudioWorker {
             }
             Command::Seek(position) => {
                 if let Some(sink) = self.sink.as_ref().filter(|sink| !sink.empty()) {
+                    let position = if self.duration.is_zero() {
+                        position
+                    } else {
+                        position.min(self.duration.saturating_sub(Duration::from_millis(1)))
+                    };
                     sink.try_seek(position).map_err(|_| {
                         VibeError::Playback("Could not seek in this audio file".into())
                     })?;
@@ -249,6 +263,33 @@ impl PlaybackBackend for DesktopAudioBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pcm_duration_and_near_end_seek_match_the_audio() {
+        const RATE: u32 = 48_000;
+        const SECONDS: u32 = 45;
+        const DATA_BYTES: u32 = RATE * SECONDS * 2;
+        let mut wav = b"RIFF".to_vec();
+        wav.extend((36 + DATA_BYTES).to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16u32.to_le_bytes());
+        wav.extend(1u16.to_le_bytes());
+        wav.extend(1u16.to_le_bytes());
+        wav.extend(RATE.to_le_bytes());
+        wav.extend((RATE * 2).to_le_bytes());
+        wav.extend(2u16.to_le_bytes());
+        wav.extend(16u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend(DATA_BYTES.to_le_bytes());
+        wav.resize(44 + DATA_BYTES as usize, 0);
+        let mut decoder = Decoder::try_from(Cursor::new(wav)).unwrap();
+        let duration = Duration::from_secs(SECONDS.into());
+        assert_eq!(decoder.total_duration(), Some(duration));
+        decoder
+            .try_seek(duration - Duration::from_millis(1))
+            .unwrap();
+        assert!(decoder.next().is_some());
+    }
 
     #[tokio::test]
     async fn undecodable_media_does_not_start_playback() {
