@@ -84,7 +84,10 @@ Application ID: `cord.kasane.music`
   - `TrackRow.kt`: Строка элемента списка трека с обложкой.
   - `TrackArtwork.kt`: Оптимизированный компонент обложки (Coil).
   - `KasaneChoiceChip.kt`: Акцентные чипы выбора и категорий.
-- `theme/Theme.kt`: Палитра `KasaneRose` (`#EF5C7D`), `KasaneCrimson` (`#D52F58`), Sans-Serif шрифты.
+- `theme/Theme.kt`: `KasaneTheme` (Material 3, угольный фон, акцент `KasaneBlue`, опциональные динамические цвета), `KasaneShapes`, `KasaneTypography`.
+- `offline/`: офлайн-библиотека (`AudioStores` два кэша, `OfflineManager` очередь загрузок, `OfflinePolicy`, `OfflineGateInterceptor`); см. `docs/offline-library.md`.
+- `library/`: адаптер резервных копий InnerTune/OpenTune; общий парсинг/сопоставление/экспорт — `shared/.../library/`; см. `docs/kasane-export-format.md`.
+- `shared/.../mix/`: анализ ударов, equal-power кроссфейд, планировщик переходов (AutoMix, фундамент).
 
 ---
 

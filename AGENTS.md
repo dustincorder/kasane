@@ -7,7 +7,7 @@ This document establishes the collaboration contract between the lead developer 
 - **Name**: Kasane (カサネ)
 - **Android ID**: `cord.kasane.music` (Kotlin + Jetpack Compose + Media3)
 - **Desktop ID**: `cord.kasane.desktop` (Rust + Tauri 2 + Svelte 5)
-- **Palette**: Dark onyx/slate base with signature Kasane Rose (`#EF5C7D`), Crimson (`#D52F58`), and Wine (`#790F32`) accents.
+- **Palette**: Android uses dark charcoal surfaces with a cold-blue accent (`KasaneBlue` `#8AB6F9`, Material 3, optional dynamic accents; see `docs/design-system.md`). The Linux desktop still uses the legacy Kasane Rose palette until its redesign.
 
 ## Agents Directory
 
