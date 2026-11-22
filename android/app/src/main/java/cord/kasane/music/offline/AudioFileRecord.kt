@@ -79,6 +79,9 @@ interface AudioFileDao {
     @Query("UPDATE audio_files SET state = 'queued', failure = NULL WHERE state = 'downloading'")
     suspend fun resetInterrupted()
 
+    @Query("SELECT * FROM audio_files WHERE pinned = 0")
+    suspend fun unpinnedRecords(): List<AudioFileRecord>
+
     @Query("SELECT videoId FROM audio_files WHERE pinned = 0")
     suspend fun unpinnedIds(): List<String>
 }

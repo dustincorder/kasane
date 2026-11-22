@@ -47,6 +47,14 @@ class PlayerSheetRegressionTest {
         }
     }
 
+    @Test fun expandedCoverIsCenteredAndTitleBarHasNoHorizontalOffset() {
+        for (w in listOf(360.dp, 412.dp, 600.dp)) {
+            val g = PlayerGeometry.of(1f, w, 892.dp, statusTop = 32.dp, navBottom = 24.dp, dockedBottom = 80.dp)
+            assertTrue("cover must be centred at $w: x=${g.coverX} size=${g.coverSize}", kotlin.math.abs((g.coverX * 2 + g.coverSize - w).value) < 0.01f)
+            assertTrue(g.sidePadding.value == 0f)
+        }
+    }
+
     @Test fun openingClosingDraggingAndReopeningNowPlayingDoesNotCrash() {
         lateinit var sheet: PlayerSheetState
         compose.setContent {

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.outlined.QueueMusic
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -250,24 +251,44 @@ private fun FullContent(
 ) {
     val colors = MaterialTheme.colorScheme
     var menuOpen by remember { mutableStateOf(false) }
-    Column(modifier.fillMaxSize().padding(horizontal = 24.dp).padding(bottom = bottomInset + 12.dp)) {
-        Row(Modifier.fillMaxWidth().padding(top = topInset).height(56.dp).offset(x = (-12).dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onCollapse) { Icon(Icons.Default.KeyboardArrowDown, "Minimize player") }
-            Text("Now playing", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
-            IconButton(onClick = actions.openQueue) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "Open queue") }
-            Box {
-                IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "More options") }
-                TrackContextMenu(track, menuOpen, { menuOpen = false }, onPlay = { if (!state.isPlaying) actions.togglePlay() },
-                    onLocalFavorite = actions.toggleFavorite, localFavorite = isFavorite)
+    val navigation = LocalTrackNavigation.current
+    val allLinks by key(navigation) { (navigation?.links ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())).collectAsState() }
+    val links = allLinks[track.id]
+    Column(modifier.fillMaxSize().padding(bottom = bottomInset + 12.dp)) {
+        // Title is centred on the screen, independent of how wide the action group is.
+        Box(Modifier.fillMaxWidth().padding(top = topInset).height(56.dp).padding(horizontal = 4.dp)) {
+            IconButton(onClick = onCollapse, modifier = Modifier.align(Alignment.CenterStart)) { Icon(Icons.Default.KeyboardArrowDown, "Minimize player") }
+            Text("Now playing", Modifier.align(Alignment.Center), style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
+            Row(Modifier.align(Alignment.CenterEnd)) {
+                IconButton(onClick = actions.openQueue) { Icon(Icons.AutoMirrored.Outlined.QueueMusic, "Open queue") }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "More options") }
+                    TrackContextMenu(track, menuOpen, { menuOpen = false }, onPlay = { if (!state.isPlaying) actions.togglePlay() },
+                        onLocalFavorite = actions.toggleFavorite, localFavorite = isFavorite)
+                }
             }
         }
+        Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
         // The cover itself is drawn by PlayerSheet so it can travel from the mini-player; reserve its space here.
         Spacer(Modifier.height(gapTop + coverSize + gap).fillMaxWidth())
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             AnimatedContent(track.id, Modifier.weight(1f), transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "titles") { _ ->
                 Column {
                     Text(track.title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(track.artist, style = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurfaceVariant), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val artistLink = links?.artist
+                        Text(track.artist, style = MaterialTheme.typography.bodyLarge.copy(color = if (artistLink != null) colors.primary else colors.onSurfaceVariant),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).then(
+                                if (artistLink != null) Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(role = Role.Button, onClickLabel = "Open artist ${track.artist}") { navigation?.open?.invoke(artistLink) } else Modifier))
+                        val albumLink = links?.album
+                        val albumName = track.album?.takeIf { it.isNotBlank() } ?: albumLink?.title
+                        if (albumLink != null && albumName != null) {
+                            Text(" · ", style = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurfaceVariant))
+                            Text(albumName, style = MaterialTheme.typography.bodyLarge.copy(color = colors.primary), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false).clip(MaterialTheme.shapes.extraSmall)
+                                    .clickable(role = Role.Button, onClickLabel = "Open album $albumName") { navigation?.open?.invoke(albumLink) })
+                        }
+                    }
                 }
             }
             TrackLikeButton(track, isFavorite, actions.toggleFavorite, refreshOnEnter = true)
@@ -316,6 +337,7 @@ private fun FullContent(
         TextButton(onClick = actions.openQueue, modifier = Modifier.align(Alignment.CenterHorizontally)) {
             Icon(Icons.AutoMirrored.Filled.QueueMusic, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
             Text(if (state.queue.size > 1) "Up next · ${state.queue.size} tracks" else "Up next")
+        }
         }
     }
 }

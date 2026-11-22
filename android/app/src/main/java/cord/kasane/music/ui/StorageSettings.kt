@@ -46,7 +46,7 @@ fun StorageContent(
     SettingsSection("Storage") {
         ListItem(
             headlineContent = { Text("Saved music", style = MaterialTheme.typography.titleSmall) },
-            supportingContent = { Text("${usage.savedCount} ${if (usage.savedCount == 1) "song" else "songs"} · ${OfflinePolicy.formatBytes(usage.savedBytes)}") },
+            supportingContent = { Text("${plural(usage.savedCount, "song")} · ${OfflinePolicy.formatBytes(usage.savedBytes)}\nSongs you chose to keep. They stay until you remove them.") },
             trailingContent = { FilledTonalButton(onClick = onManageSaved, shape = MaterialTheme.shapes.small) { Text("Manage") } },
             colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent))
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -54,6 +54,11 @@ fun StorageContent(
                 Text("Temporary cache", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Text("${OfflinePolicy.formatBytes(usage.tempBytes)} of ${OfflinePolicy.limitLabel(limitMb)}", style = MaterialTheme.typography.bodySmallMuted)
             }
+            Text("Audio kept automatically from songs you streamed, so they replay without data. " +
+                (if (usage.replayableCount == 0) "No complete song is cached yet; partly played songs only replay once fully heard. "
+                else "${plural(usage.replayableCount, "song")} can replay offline now. ") +
+                "These are not in Saved music and are removed oldest-first when the cache is full.",
+                style = MaterialTheme.typography.bodySmallMuted)
             LinearProgressIndicator(progress = { if (usage.tempLimitBytes > 0) (usage.tempBytes.toFloat() / usage.tempLimitBytes).coerceIn(0f, 1f) else 0f },
                 modifier = Modifier.fillMaxWidth(), gapSize = 0.dp, drawStopIndicator = {})
             Text("Maximum size", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 6.dp))

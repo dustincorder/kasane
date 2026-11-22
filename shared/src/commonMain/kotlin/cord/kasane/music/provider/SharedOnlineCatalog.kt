@@ -52,7 +52,12 @@ class SharedOnlineCatalog(private val client: InnerTubeClient, private val sessi
     suspend fun radioPage(videoId: String, continuation: String? = null): RadioPage = withContext(Dispatchers.Default) {
         val body = buildJsonObject {
             if (continuation != null) put("continuation", continuation)
-            else { put("videoId", videoId); put("playlistId", "RDAMVM$videoId") }
+            else {
+                // The request YouTube Music's own "Start radio" sends: the seed's automix playlist with the radio
+                // params, audio only. Without them the response is a generic related mix.
+                put("videoId", videoId); put("playlistId", "RDAMVM$videoId"); put("params", "wAEB")
+                put("isAudioOnly", true); put("tunerSettingValue", "AUTOMIX_SETTING_NORMAL")
+            }
         }
         CatalogJsonParser.radio(request("next", body, session()))
     }

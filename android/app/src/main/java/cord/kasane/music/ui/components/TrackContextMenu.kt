@@ -5,8 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.Modifier
@@ -73,26 +75,26 @@ fun rememberTrackMenuEntries(
     val currentId = LocalCurrentTrackId.current
     val pb = MenuEntry.GROUP_PLAYBACK; val lib = MenuEntry.GROUP_LIBRARY; val go = MenuEntry.GROUP_GO
     return buildList {
-        if (track.id != currentId) add(MenuEntry("Play", icon = Icons.Default.PlayArrow, group = pb, action = onPlay))
-        (onNext ?: actions?.let { { it.next(track) } })?.let { add(MenuEntry("Play next", icon = Icons.Default.SkipNext, group = pb, action = it)) }
-        (onQueue ?: actions?.let { { it.queue(track) } })?.let { add(MenuEntry("Add to queue", icon = Icons.AutoMirrored.Filled.PlaylistAdd, group = pb, action = it)) }
-        if (actions != null && youtube) add(MenuEntry("Start radio", icon = Icons.Default.Radio, group = pb) { actions.radio(track) })
+        if (track.id != currentId) add(MenuEntry("Play", icon = Icons.Outlined.PlayArrow, group = pb, action = onPlay))
+        (onNext ?: actions?.let { { it.next(track) } })?.let { add(MenuEntry("Play next", icon = Icons.Outlined.SkipNext, group = pb, action = it)) }
+        (onQueue ?: actions?.let { { it.queue(track) } })?.let { add(MenuEntry("Add to queue", icon = Icons.AutoMirrored.Outlined.PlaylistAdd, group = pb, action = it)) }
+        if (actions != null && youtube) add(MenuEntry("Start radio", icon = Icons.Outlined.Radio, group = pb) { actions.radio(track) })
         addAll(extra)
         ratings.like?.let { add(MenuEntry(it, enabled = track.id !in pending && states[track.id] != CloudLikeState.LOADING,
-            icon = if (states[track.id] == CloudLikeState.LIKED) Icons.Default.Favorite else Icons.Default.FavoriteBorder, group = lib) { cloud?.toggle(track.id) }) }
-        ratings.dislike?.let { add(MenuEntry(it, enabled = track.id !in pending, icon = Icons.Default.ThumbDown, group = lib) { cloud?.toggleDislike(track.id) }) }
-        if (youtube && playlists != null) add(MenuEntry("Add to playlist", icon = Icons.AutoMirrored.Filled.PlaylistAdd, group = lib) { playlists.open(track) })
+            icon = if (states[track.id] == CloudLikeState.LIKED) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, group = lib) { cloud?.toggle(track.id) }) }
+        ratings.dislike?.let { add(MenuEntry(it, enabled = track.id !in pending, icon = Icons.Outlined.ThumbDown, group = lib) { cloud?.toggleDislike(track.id) }) }
+        if (youtube && playlists != null) add(MenuEntry("Add to playlist", icon = Icons.AutoMirrored.Outlined.PlaylistAdd, group = lib) { playlists.open(track) })
         if (offlineActions != null && cord.kasane.music.offline.OfflinePolicy.canRequestSave(track)) add(when (offlineBadge) {
-            OfflineBadge.SAVED -> MenuEntry("Remove from offline", icon = Icons.Default.DownloadDone, group = lib) { offlineActions.remove(track.id) }
-            OfflineBadge.DOWNLOADING -> MenuEntry("Cancel download", icon = Icons.Default.Close, group = lib) { offlineActions.remove(track.id) }
-            OfflineBadge.FAILED -> MenuEntry("Retry saving offline", icon = Icons.Default.Refresh, group = lib) { offlineActions.retry(track.id) }
-            else -> MenuEntry("Save offline", icon = Icons.Default.Download, group = lib) { offlineActions.save(listOf(track)) }
+            OfflineBadge.SAVED -> MenuEntry("Remove from offline", icon = Icons.Outlined.DownloadDone, group = lib) { offlineActions.remove(track.id) }
+            OfflineBadge.DOWNLOADING -> MenuEntry("Cancel download", icon = Icons.Outlined.Close, group = lib) { offlineActions.remove(track.id) }
+            OfflineBadge.FAILED -> MenuEntry("Retry saving offline", icon = Icons.Outlined.Refresh, group = lib) { offlineActions.retry(track.id) }
+            else -> MenuEntry("Save offline", icon = Icons.Outlined.Download, group = lib) { offlineActions.save(listOf(track)) }
         })
         if (onLocalFavorite != null) add(MenuEntry(if (localFavorite) "Remove local favorite" else "Save to local favorites",
-            icon = if (localFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder, group = lib, action = onLocalFavorite))
-        links?.album?.let { album -> add(MenuEntry("Go to album", icon = Icons.Default.Album, group = go) { navigation?.open?.invoke(album) }) }
-        links?.artist?.let { artist -> add(MenuEntry("Go to artist", icon = Icons.Default.Person, group = go) { navigation?.open?.invoke(artist) }) }
-        if (youtube) add(MenuEntry("Share", icon = Icons.Default.Share, group = go) {
+            icon = if (localFavorite) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, group = lib, action = onLocalFavorite))
+        links?.album?.let { album -> add(MenuEntry("Go to album", icon = Icons.Outlined.Album, group = go) { navigation?.open?.invoke(album) }) }
+        links?.artist?.let { artist -> add(MenuEntry("Go to artist", icon = Icons.Outlined.Person, group = go) { navigation?.open?.invoke(artist) }) }
+        if (youtube) add(MenuEntry("Share", icon = Icons.Outlined.Share, group = go) {
             val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, "https://music.youtube.com/watch?v=${track.id}")
             }
@@ -184,15 +186,15 @@ fun TrackActionsPreview() {
         Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
             val t = Track("wzpAehzNCU8", "A long track title that must wrap safely inside the sheet header", "Preview artist")
             TrackActions(t, listOf(
-                MenuEntry("Play next", icon = Icons.Default.SkipNext, group = MenuEntry.GROUP_PLAYBACK) {},
-                MenuEntry("Add to queue", icon = Icons.AutoMirrored.Filled.PlaylistAdd, group = MenuEntry.GROUP_PLAYBACK) {},
-                MenuEntry("Start radio", icon = Icons.Default.Radio, group = MenuEntry.GROUP_PLAYBACK) {},
-                MenuEntry("Like on YouTube Music", icon = Icons.Default.FavoriteBorder) {},
-                MenuEntry("Add to playlist", icon = Icons.AutoMirrored.Filled.PlaylistAdd) {},
-                MenuEntry("Save offline", icon = Icons.Default.Download) {},
-                MenuEntry("Go to album", icon = Icons.Default.Album, group = MenuEntry.GROUP_GO) {},
-                MenuEntry("Go to artist", icon = Icons.Default.Person, group = MenuEntry.GROUP_GO) {},
-                MenuEntry("Share", icon = Icons.Default.Share, group = MenuEntry.GROUP_GO) {}), {})
+                MenuEntry("Play next", icon = Icons.Outlined.SkipNext, group = MenuEntry.GROUP_PLAYBACK) {},
+                MenuEntry("Add to queue", icon = Icons.AutoMirrored.Outlined.PlaylistAdd, group = MenuEntry.GROUP_PLAYBACK) {},
+                MenuEntry("Start radio", icon = Icons.Outlined.Radio, group = MenuEntry.GROUP_PLAYBACK) {},
+                MenuEntry("Like on YouTube Music", icon = Icons.Outlined.FavoriteBorder) {},
+                MenuEntry("Add to playlist", icon = Icons.AutoMirrored.Outlined.PlaylistAdd) {},
+                MenuEntry("Save offline", icon = Icons.Outlined.Download) {},
+                MenuEntry("Go to album", icon = Icons.Outlined.Album, group = MenuEntry.GROUP_GO) {},
+                MenuEntry("Go to artist", icon = Icons.Outlined.Person, group = MenuEntry.GROUP_GO) {},
+                MenuEntry("Share", icon = Icons.Outlined.Share, group = MenuEntry.GROUP_GO) {}), {})
         }
     }
 }

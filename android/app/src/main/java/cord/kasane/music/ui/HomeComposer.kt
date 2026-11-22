@@ -16,6 +16,8 @@ sealed interface HomeSection {
     data class QuickPicks(override val title: String, val tracks: List<Track>) : HomeSection { override val key = "quick-picks" }
     /** A song shelf as compact rows, four per column, paged horizontally. */
     data class SongRows(override val key: String, override val title: String, val tracks: List<Track>, val more: String? = null) : HomeSection
+    /** A shelf YouTube Music fills with several kinds at once ("Listen again"): each item keeps its own shape. */
+    data class Mixed(override val key: String, override val title: String, val items: List<CatalogItem>, val more: String? = null) : HomeSection
     data class RecentTracks(override val title: String, val tracks: List<Track>) : HomeSection { override val key = "recent" }
     /** Albums, playlists and mixes: square covers. */
     data class Collections(override val key: String, override val title: String, val items: List<CatalogItem>, val more: String? = null) : HomeSection
@@ -54,6 +56,8 @@ internal object HomeComposer {
         val out = mutableListOf<HomeSection>()
 
         val remoteShelves = if (offlineOnly) emptyList() else remote.filter { it.items.isNotEmpty() }
+        // YouTube Music orders its feed by personal relevance, so that order is kept exactly. The first all-songs
+        // shelf is the Quick picks source and is drawn as the grid in its own position.
         val firstSongShelf = remoteShelves.indexOfFirst { shelf -> shelf.items.all { it.kind == CatalogKind.SONG } }
         val picks = mutableListOf<Track>()
         if (firstSongShelf >= 0) picks += remoteShelves[firstSongShelf].items.mapNotNull { it.track() }.distinctBy { it.id }.take(PAGE_SIZE)
@@ -63,37 +67,41 @@ internal object HomeComposer {
             picks += favorites
         }
         val quick = picks.distinctBy { it.id }.take(MAX_QUICK_PICKS)
-        if (quick.size >= MIN_ROW_ITEMS) {
+        val quickSection = if (quick.size >= MIN_ROW_ITEMS) {
             val title = if (firstSongShelf >= 0) remoteShelves[firstSongShelf].title.ifBlank { "Quick picks" } else "Quick picks"
-            out += HomeSection.QuickPicks(title, claim(quick))
-        }
-
-        if (local) {
-            val recent = fresh(history.sortedByDescending { it.playedAt }
-                .map { Track(it.trackId, it.title, it.artist, it.album, thumbnailUri = it.thumbnailUri) }).take(12)
-            if (recent.size >= MIN_ROW_ITEMS) out += HomeSection.RecentTracks("Recently played", claim(recent))
-        }
+            HomeSection.QuickPicks(title, quick)
+        } else null
+        // Songs claimed by an earlier section are not repeated: Quick picks wins over later shelves.
+        if (quickSection != null) claim(quickSection.tracks)
+        val recent = if (!local) emptyList() else fresh(history.sortedByDescending { it.playedAt }
+            .map { Track(it.trackId, it.title, it.artist, it.album, thumbnailUri = it.thumbnailUri) }).take(12)
+            .takeIf { it.size >= MIN_ROW_ITEMS }.orEmpty()
+        val recentSection = if (recent.isNotEmpty()) HomeSection.RecentTracks("Recently played", recent) else null
+        if (recentSection != null && remoteShelves.isEmpty()) claim(recent)
 
         val seedPool = if (local) topPlayed.map(PlayStat::track).filter { it.artist.isNotBlank() }.distinctBy { it.artist.lowercase() } else emptyList()
         val seeds = (seedPool.filter { it.id !in shown } + seedPool).distinctBy { it.id }.take(4)
         val radio = if (seeds.size >= 2 && !offlineOnly) HomeSection.RadioSeeds("Radio from your listening", seeds) else null
         val savedSection = if (!local) null else fresh(saved).take(12).takeIf { it.size >= 2 || (offlineOnly && it.isNotEmpty()) }
-            ?.let { HomeSection.SavedOffline("Saved for offline", claim(it)) }
+            ?.let { HomeSection.SavedOffline("Saved for offline", it) }
 
-        var remoteAdded = 0
+        // Local sections go after the first remote shelves so YouTube Music's personalised opening is not buried,
+        // and lead only when there is nothing remote (guest offline, Offline Only).
+        val localBlock = listOfNotNull(recentSection, radio, savedSection)
+        var remoteSections = 0
+        var localInserted = false
+        fun insertLocal() { if (!localInserted) { localInserted = true; localBlock.forEach { if (it is HomeSection.RecentTracks) claim(it.tracks); out += it } } }
+        if (offlineOnly) { savedSection?.let { out += it; claim(it.tracks) }; return out + listOfNotNull(recentSection) }
+        if (remoteShelves.isEmpty()) { quickSection?.let { out += it }; insertLocal(); return out }
         remoteShelves.forEachIndexed { index, shelf ->
-            if (index == firstSongShelf) return@forEachIndexed
-            classify(index, shelf, ::fresh)?.let { section ->
-                when (section) {
-                    is HomeSection.SongRows -> claim(section.tracks)
-                    else -> Unit
-                }
-                out += section; remoteAdded++
-                if (remoteAdded == 2 && radio != null) out += radio
+            val section = if (index == firstSongShelf) quickSection else classify(index, shelf, ::fresh)
+            if (section != null) {
+                if (section is HomeSection.SongRows) claim(section.tracks)
+                out += section; remoteSections++
+                if (remoteSections == 2) insertLocal()
             }
         }
-        if (radio != null && radio !in out) out += radio
-        if (offlineOnly && savedSection != null) out.add(0, savedSection) else if (savedSection != null) out += savedSection
+        insertLocal()
         return out
     }
 
@@ -102,6 +110,10 @@ internal object HomeComposer {
         val title = shelf.title.ifBlank { return null }
         val key = "remote:$index"
         val dominant = items.groupingBy { it.kind }.eachCount().maxByOrNull { it.value }?.key ?: return null
+        val tracks = items.count { it.kind == CatalogKind.SONG || it.kind == CatalogKind.VIDEO }
+        val mixed = tracks > 0 && tracks < items.size && items.size - tracks > 0 &&
+            items.groupingBy { it.kind }.eachCount().values.max() < items.size * 0.8
+        if (mixed && items.size >= 3) return HomeSection.Mixed(key, title, items, shelf.moreBrowseId)
         return when (dominant) {
             CatalogKind.SONG -> fresh(items.mapNotNull { it.track() }).takeIf { it.size >= MIN_ROW_ITEMS }
                 ?.let { HomeSection.SongRows(key, title, it.take(20), shelf.moreBrowseId) }

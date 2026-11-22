@@ -112,7 +112,9 @@ class PlaybackService : MediaSessionService() {
                 radioFailures.remove(key)
                 radioContinuation = page.continuation
                 val existing = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.toSet()
-                val next = QueuePolicy.radioAppend(existing, page.tracks, QueuePolicy.LIMIT - player.mediaItemCount)
+                val seedTrack = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }.firstOrNull { it.mediaId == seed }?.let(::mediaItemToTrack)
+                val next = QueuePolicy.radioAppend(existing, QueuePolicy.dropSeedAliases(page.tracks, seedTrack), QueuePolicy.LIMIT - player.mediaItemCount)
+                if (page.tracks.isEmpty() && token == null) cord.kasane.music.provider.PlaybackNotices.shared.post(seed, "YouTube Music returned no radio for this track. Nothing was added to the queue.")
                 player.addMediaItems(next.map { trackToMediaItem(it, radioMode = "radio", playContext = radioContext) })
                 android.util.Log.i("KasanePlayback", "videoId=$seed event=radio_page added=${next.size} continuation=${page.continuation != null}")
                 if (player.playbackState == Player.STATE_ENDED && player.hasNextMediaItem() && player.playWhenReady) {
@@ -123,6 +125,7 @@ class PlaybackService : MediaSessionService() {
                 if (generation != radioGeneration) return@launch
                 val attempts = (radioFailures[key] ?: 0) + 1
                 radioFailures[key] = attempts; requestedRadioPages.remove(key)
+                if (attempts >= 2) cord.kasane.music.provider.PlaybackNotices.shared.post(seed, "Couldn't load radio for this track. Check your connection and use Start radio to retry.")
                 android.util.Log.w("KasanePlayback", "videoId=$seed event=radio_failed attempt=$attempts")
                 if (attempts < 2) scope.launch {
                     delay(1500)

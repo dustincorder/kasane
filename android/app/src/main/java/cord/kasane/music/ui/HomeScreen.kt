@@ -115,6 +115,13 @@ fun HomeScreen(
                                 ArtworkTile(track, 132.dp, currentTrackId == track.id) { actions.playList(section.tracks, section.tracks.indexOf(track)) }
                             }
                         }
+                        is HomeSection.Mixed -> Shelf(section.title, more = section.more, onMore = { actions.openShelf(section.title, it) }) {
+                            items(section.items, key = { "${it.kind}:${it.id}" }) { item ->
+                                val track = item.track()
+                                if (track != null) ArtworkTile(track, 132.dp, currentTrackId == track.id) { actions.playTrack(track) }
+                                else CollectionCard(item, 132.dp) { actions.open(item) }
+                            }
+                        }
                         is HomeSection.Collections -> Shelf(section.title, more = section.more, onMore = { actions.openShelf(section.title, it) }) {
                             items(section.items, key = { "${it.kind}:${it.id}" }) { CollectionCard(it, 148.dp) { actions.open(it) } }
                         }

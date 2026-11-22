@@ -46,7 +46,9 @@ data class DownloadProgress(val bytes: Long, val total: Long) {
     val fraction: Float get() = if (total > 0) (bytes.toFloat() / total).coerceIn(0f, 1f) else 0f
 }
 
-data class StorageUsage(val savedBytes: Long = 0, val tempBytes: Long = 0, val tempLimitBytes: Long = 0, val savedCount: Int = 0)
+data class StorageUsage(val savedBytes: Long = 0, val tempBytes: Long = 0, val tempLimitBytes: Long = 0, val savedCount: Int = 0,
+    /** Streamed songs whose whole file is in the temporary cache: they replay offline but are not "saved". */
+    val replayableCount: Int = 0)
 
 data class SaveSummary(val queued: Int, val alreadySaved: Int, val rejected: Int, val blockedBy: String? = null)
 
@@ -167,8 +169,11 @@ class OfflineManager(
     fun locationApplied(selected: cord.kasane.music.settings.StorageLocation): Boolean = stores.locationApplied(selected)
 
     fun refreshUsage() { scope.launch(Dispatchers.IO) {
+        val replayable = dao.unpinnedRecords().count { r ->
+            OfflinePolicy.playableFromCache(r, stores.temp.getCachedBytes(r.cacheKey.ifEmpty { "-" }, 0, r.contentLength.coerceAtLeast(0)))
+        }
         mutableUsage.value = StorageUsage(stores.saved.cacheSpace, stores.temp.cacheSpace,
-            settings.cacheLimitMb.value * 1024L * 1024L, dao.pinnedCount())
+            settings.cacheLimitMb.value * 1024L * 1024L, dao.pinnedCount(), replayable)
     } }
 
     // ---- Download queue -------------------------------------------------------------------------------

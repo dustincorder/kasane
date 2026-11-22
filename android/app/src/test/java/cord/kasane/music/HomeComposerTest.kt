@@ -91,6 +91,42 @@ class HomeComposerTest {
     }
 }
 
+class HomeOrderingTest {
+    private fun song(id: String) = CatalogItem(id, CatalogKind.SONG, "Song $id", "A")
+    private fun album(id: String) = CatalogItem(id, CatalogKind.ALBUM, "Album $id", "A")
+    private fun video(id: String) = CatalogItem(id, CatalogKind.VIDEO, "Video $id", "A")
+
+    @Test fun youtubeMusicsOrderIsPreservedAndLocalSectionsDoNotBuryIt() {
+        val remote = listOf(
+            CatalogShelf("Listen again", listOf(song("a"), song("b"), album("m"), album("n"), song("c"))),
+            CatalogShelf("Quick picks", listOf("q1", "q2", "q3").map(::song)),
+            CatalogShelf("Albums for you", listOf(album("x"), album("y"))),
+            CatalogShelf("Music videos for you", listOf(video("v1"), video("v2"))))
+        val history = (1..4).map { HistoryEntity(trackId = "h$it", title = "H$it", artist = "X", playedAt = it.toLong()) }
+        val titles = HomeComposer.build(remote, emptyList(), history, emptyList(), false).map { it.title }
+        assertEquals(listOf("Listen again", "Quick picks", "Recently played", "Albums for you", "Music videos for you"), titles)
+    }
+
+    @Test fun aShelfOfMixedKindsKeepsEachItemsOwnShape() {
+        val shelf = CatalogShelf("Listen again", listOf(song("a"), song("b"), album("m"), album("n"), song("c")))
+        // Not an all-songs shelf, so it is not turned into Quick picks.
+        val sections = HomeComposer.build(listOf(shelf), emptyList(), emptyList(), emptyList(), false)
+        val mixed = sections.single() as HomeSection.Mixed
+        assertEquals(5, mixed.items.size)
+    }
+
+    @Test fun switchingMoodNeverReusesTheMainFeed() {
+        val main = listOf(CatalogShelf("Quick picks", listOf("a", "b", "c").map(::song)))
+        val mood = listOf(CatalogShelf("Energize", listOf("e1", "e2", "e3").map(::song)))
+        val stats = listOf(PlayStat("t1", "T", "Ar", null, null, 9, 1), PlayStat("t2", "T2", "Ar2", null, null, 8, 1), PlayStat("t3", "T3", "Ar3", null, null, 7, 1))
+        val moodSections = HomeComposer.build(mood, stats, emptyList(), emptyList(), false, local = false)
+        val ids = moodSections.flatMap { (it as? HomeSection.QuickPicks)?.tracks.orEmpty() }.map { it.id }
+        assertEquals(listOf("e1", "e2", "e3"), ids)
+        assertTrue(ids.none { it in setOf("a", "b", "c", "t1") })
+        assertEquals(listOf("a", "b", "c", "t1", "t2", "t3"), (HomeComposer.build(main, stats, emptyList(), emptyList(), false).first() as HomeSection.QuickPicks).tracks.map { it.id })
+    }
+}
+
 class SearchHistoryPolicyTest {
     @Test fun recentSearchesAreNewestFirstDeduplicatedAndBounded() {
         val p = cord.kasane.music.settings.SearchHistoryPolicy

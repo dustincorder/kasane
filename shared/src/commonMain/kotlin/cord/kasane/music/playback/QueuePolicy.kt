@@ -13,6 +13,16 @@ object QueuePolicy {
         !repeat && (autoplay || forced) && (nearEnd || (initial && !collection))
     fun radioAppend(existingIds: Set<String>, candidates: List<Track>, capacity: Int): List<Track> =
         prepare(candidates).filter { it.id !in existingIds }.take(capacity.coerceAtLeast(0))
+    /**
+     * A radio's first entry is usually the seed itself, sometimes under another video id (audio vs music video).
+     * The user's selected track stays the anchor, so any entry that is the seed or the same recording is dropped.
+     */
+    fun dropSeedAliases(tracks: List<Track>, seed: Track?): List<Track> {
+        if (seed == null) return tracks
+        fun norm(v: String) = v.lowercase().replace(Regex("\\s*[\\(\\[].*?[\\)\\]]"), "").replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
+        fun artist(v: String) = norm(v.substringBefore('•').substringBefore(','))
+        return tracks.filterNot { it.id == seed.id || (norm(it.title) == norm(seed.title) && artist(it.artist) == artist(seed.artist) && norm(seed.title).isNotEmpty()) }
+    }
     fun prepare(tracks: List<Track>): List<Track> =
         tracks.filter { it.id.isNotBlank() }.distinctBy { it.id }.take(LIMIT)
 
