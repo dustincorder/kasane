@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tauri::{Manager, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 use vibe_audio::{DesktopAudioBackend, PlayerManager};
+use vibe_core::error::VibeError;
 use vibe_core::model::{PlaybackProgress, ProviderType, QueueState, Track};
 use vibe_core::traits::MusicProvider;
 use vibe_db::Database;
@@ -197,14 +198,25 @@ mod commands {
     }
 }
 
+fn open_library_database(app_dir: tauri::Result<PathBuf>) -> vibe_core::error::Result<Database> {
+    let persistent = app_dir
+        .map_err(|error| VibeError::Database(error.to_string()))
+        .and_then(|dir| {
+            std::fs::create_dir_all(&dir)?;
+            Database::open(dir.join("vibeplayer.db"))
+        });
+    persistent.or_else(|error| {
+        eprintln!("Kasane could not open the library database: {error}. Favorites and listening history will not be saved for this session.");
+        Database::in_memory()
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let app_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&app_dir)?;
-            let db = Arc::new(Database::open(app_dir.join("vibeplayer.db"))?);
+            let db = Arc::new(open_library_database(app.path().app_data_dir())?);
             let yt_provider = Arc::new(YouTubeMusicProvider::new());
             let player = Arc::new(PlayerManager::new(
                 Box::new(DesktopAudioBackend::new()?),
@@ -236,4 +248,42 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn database_uses_memory_when_the_app_data_path_is_unavailable() {
+        let missing_path = open_library_database(Err(tauri::Error::UnknownPath)).unwrap();
+        assert!(missing_path.get_favorites().unwrap().is_empty());
+
+        let file = std::env::current_exe().unwrap();
+        let blocked_path = open_library_database(Ok(file.join("kasane"))).unwrap();
+        assert!(blocked_path.get_recent_history(1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn database_fallback_leaves_an_invalid_persistent_file_untouched() {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("kasane-db-{}-{timestamp}", std::process::id()));
+        let path = dir.join("vibeplayer.db");
+        drop(open_library_database(Ok(dir.clone())).unwrap());
+        assert!(path.is_file());
+
+        let invalid = b"not a SQLite database";
+        std::fs::write(&path, invalid).unwrap();
+        let db = open_library_database(Ok(dir.clone())).unwrap();
+        let favorites = db.get_favorites();
+        let data = std::fs::read(&path);
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        assert!(favorites.unwrap().is_empty());
+        assert_eq!(data.unwrap(), invalid);
+    }
 }
