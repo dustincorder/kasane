@@ -11,5 +11,9 @@ tokio.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
 symphonia = { version = "0.5", features = ["all"] }
+m3u8-rs = "6"
+
+[dev-dependencies]
+vibe-providers = { path = "../vibe-providers" }
