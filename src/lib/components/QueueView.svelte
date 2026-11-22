@@ -47,7 +47,8 @@
           <div class="flex items-center gap-3">
             <span class="text-xs font-mono text-text-muted">{player.formatTime(track.duration_secs)}</span>
             <button
-              onclick={() => player.playTrack(track)}
+              onclick={() => player.playQueueItem(index)}
+              disabled={player.isBusy}
               class="p-1.5 text-text-secondary hover:text-text-primary rounded hover:bg-surface-border transition"
               title="Play now"
             >

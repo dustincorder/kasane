@@ -19,9 +19,9 @@
 
 <footer class="h-20 bg-surface-elevated border-t border-surface-border px-4 flex items-center justify-between z-30 select-none">
   <!-- Track Info -->
-  <div class="flex items-center gap-3 w-1/4 min-w-[200px]">
+  <div class="flex items-center gap-2 w-1/4 min-w-0">
     {#if track}
-      <div class="w-12 h-12 rounded bg-surface-hover flex-shrink-0 overflow-hidden relative group">
+      <div class="hidden sm:block w-12 h-12 rounded bg-surface-hover flex-shrink-0 overflow-hidden relative group">
         {#if track.thumbnail_url}
           <img src={track.thumbnail_url} alt={track.title} class="w-full h-full object-cover" />
         {:else}
@@ -53,7 +53,7 @@
         onclick={() => player.previous()}
         class="text-text-secondary hover:text-text-primary transition-colors p-1 disabled:opacity-30"
         aria-label="Previous"
-        disabled={!track}
+        disabled={!player.canPrevious}
       >
         <SkipBack size={18} />
       </button>
@@ -62,7 +62,7 @@
         onclick={() => player.togglePlay()}
         class="w-9 h-9 rounded-full bg-text-primary text-surface-base flex items-center justify-center hover:opacity-90 active:scale-95 transition disabled:opacity-30"
         aria-label={isPlaying ? 'Pause' : 'Play'}
-        disabled={!track}
+        disabled={!player.canPlay}
       >
         {#if isPlaying}
           <Pause size={18} fill="currentColor" />
@@ -75,31 +75,32 @@
         onclick={() => player.next()}
         class="text-text-secondary hover:text-text-primary transition-colors p-1 disabled:opacity-30"
         aria-label="Next"
-        disabled={!track}
+        disabled={!player.canNext}
       >
         <SkipForward size={18} />
       </button>
     </div>
 
     <!-- Scrubber -->
-    <div class="w-full flex items-center gap-2 text-[11px] font-mono text-text-muted">
+    <div class="w-full flex items-center gap-2 text-[11px] tabular-nums text-text-muted">
       <span>{player.formatTime(player.positionSecs)}</span>
       <input
         type="range"
         min="0"
         max={player.durationSecs || 100}
         value={player.positionSecs}
-        oninput={handleSeek}
+        onchange={handleSeek}
+        aria-label="Seek"
         class="w-full h-1 bg-surface-border rounded-lg appearance-none cursor-pointer accent-accent-highlight"
-        disabled={!track}
+        disabled={!player.canSeek}
       />
       <span>{player.formatTime(player.durationSecs)}</span>
     </div>
   </div>
 
   <!-- Volume & Modal Expand -->
-  <div class="flex items-center justify-end gap-3 w-1/4 min-w-[200px]">
-    <Volume2 size={16} class="text-text-muted flex-shrink-0" />
+  <div class="flex items-center justify-end gap-2 w-1/4 min-w-0">
+    <Volume2 size={16} class="hidden sm:block text-text-muted flex-shrink-0" />
     <input
       type="range"
       min="0"
@@ -107,7 +108,8 @@
       step="0.01"
       value={player.volume}
       oninput={handleVolume}
-      class="w-20 h-1 bg-surface-border rounded-lg appearance-none cursor-pointer accent-accent-highlight"
+      aria-label="Volume"
+      class="w-20 min-w-0 h-1 bg-surface-border rounded-lg appearance-none cursor-pointer accent-accent-highlight"
     />
     <button
       onclick={() => (player.showNowPlayingModal = true)}

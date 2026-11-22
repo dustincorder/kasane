@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
+use std::time::Duration;
 use vibe_core::error::{Result, VibeError};
 use vibe_core::model::{Artist, ProviderType, StreamSource, Track};
 use vibe_core::traits::MusicProvider;
@@ -29,6 +30,7 @@ impl YouTubeMusicProvider {
 
         let client = reqwest::Client::builder()
             .default_headers(headers)
+            .timeout(Duration::from_secs(15))
             .build()
             .unwrap_or_default();
 
@@ -183,38 +185,75 @@ impl MusicProvider for YouTubeMusicProvider {
                 message: format!("Player request failed: {e}"),
             })?;
 
+        if !resp.status().is_success() {
+            return Err(VibeError::Provider {
+                provider: "YouTubeMusic".into(),
+                message: format!("Player request returned HTTP {}", resp.status()),
+            });
+        }
+
         let json: Value = resp.json().await.map_err(|e| VibeError::Provider {
             provider: "YouTubeMusic".into(),
             message: format!("Player JSON parsing failed: {e}"),
         })?;
 
-        // Locate optimal audio/webm or audio/mp4 stream from adaptiveFormats
-        if let Some(formats) = json
-            .pointer("/streamingData/adaptiveFormats")
-            .and_then(|v| v.as_array())
-        {
-            for fmt in formats {
-                let mime = fmt.get("mimeType").and_then(|v| v.as_str()).unwrap_or("");
-                if mime.starts_with("audio/") {
-                    if let Some(stream_url) = fmt.get("url").and_then(|v| v.as_str()) {
-                        let bitrate = fmt.get("bitrate").and_then(|v| v.as_u64()).map(|b| (b / 1000) as u32);
-                        return Ok(StreamSource {
-                            url: stream_url.to_string(),
-                            mime_type: mime.to_string(),
-                            bitrate_kbps: bitrate,
-                            expires_at: None,
-                        });
-                    }
-                }
-            }
-        }
-
-        // Return fallback stream source if direct extraction requires client fallback
-        Ok(StreamSource {
-            url: format!("https://music.youtube.com/watch?v={}", track.id),
-            mime_type: "audio/webm".to_string(),
-            bitrate_kbps: Some(160),
-            expires_at: None,
+        direct_audio_source(&json).ok_or_else(|| VibeError::Provider {
+            provider: "YouTubeMusic".into(),
+            message: "No desktop-compatible audio stream is available for this track".into(),
         })
+    }
+}
+
+fn direct_audio_source(json: &Value) -> Option<StreamSource> {
+    json.pointer("/streamingData/adaptiveFormats")?
+        .as_array()?
+        .iter()
+        .filter_map(|format| {
+            let mime = format.get("mimeType")?.as_str()?;
+            let url = reqwest::Url::parse(format.get("url")?.as_str()?).ok()?;
+            // Symphonia can decode AAC/MP4, but not the provider's WebM/Opus tracks.
+            if !mime.starts_with("audio/mp4;")
+                || !mime.contains("mp4a.40.")
+                || url.scheme() != "https"
+            {
+                return None;
+            }
+            Some(StreamSource {
+                url: url.into(),
+                mime_type: mime.into(),
+                bitrate_kbps: format
+                    .get("bitrate")
+                    .and_then(Value::as_u64)
+                    .map(|bitrate| (bitrate / 1000) as u32),
+                expires_at: None,
+            })
+        })
+        .max_by_key(|source| source.bitrate_kbps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn selects_direct_aac_over_unsupported_opus() {
+        let player = json!({ "streamingData": { "adaptiveFormats": [
+            { "mimeType": "audio/webm; codecs=\"opus\"", "url": "https://example.com/opus" },
+            { "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "url": "https://example.com/aac" }
+        ]}});
+        assert_eq!(
+            direct_audio_source(&player).unwrap().url,
+            "https://example.com/aac"
+        );
+    }
+
+    #[test]
+    fn unsupported_transport_does_not_become_a_watch_url() {
+        assert!(direct_audio_source(&json!({ "streamingData": {
+            "serverAbrStreamingUrl": "https://example.com/sabr",
+            "hlsManifestUrl": "https://example.com/manifest.m3u8"
+        }}))
+        .is_none());
     }
 }

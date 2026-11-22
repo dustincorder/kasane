@@ -22,6 +22,9 @@ data class PlaybackUiState(
     val canSkipNext: Boolean = false, val canSkipPrevious: Boolean = false
 )
 
+internal fun shouldPauseOnToggle(playWhenReady: Boolean, state: Int, hasError: Boolean): Boolean =
+    playWhenReady && state != Player.STATE_IDLE && state != Player.STATE_ENDED && !hasError
+
 /** A projection of MediaController: no second queue, resolver job, or playback engine. */
 class PlaybackManager(context: Context, private val trackDao: TrackDao,
     @Suppress("UNUSED_PARAMETER") ytProvider: MusicProvider = YouTubeMusicProvider()) {
@@ -134,19 +137,42 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
             if (existing != player.currentMediaItemIndex) player.moveMediaItem(existing, target.coerceAtMost(player.mediaItemCount - 1))
         } else if (player.mediaItemCount < QueuePolicy.LIMIT) player.addMediaItem(target, PlaybackService.trackToMediaItem(track))
     }
-    fun retryPlayback() = command { dismissedError = null; it.prepare(); it.play() }
+    private fun prepareAndPlay(player: Player) {
+        dismissedError = null
+        player.prepare()
+        player.play()
+    }
+
+    fun retryPlayback() = command { prepareAndPlay(it) }
     fun togglePlayPause() = command {
-        if (it.playWhenReady && it.playbackState != Player.STATE_ENDED) it.pause()
+        if (it.mediaItemCount == 0) return@command
+        if (shouldPauseOnToggle(it.playWhenReady, it.playbackState, it.playerError != null)) it.pause()
         else {
+            val needsPrepare = it.playerError != null || it.playbackState == Player.STATE_IDLE ||
+                it.playbackState == Player.STATE_ENDED
             if (it.playbackState == Player.STATE_ENDED) {
                 if (it.hasNextMediaItem()) it.seekToNextMediaItem() else it.seekToDefaultPosition()
             }
-            if (it.playbackState == Player.STATE_IDLE || it.playbackState == Player.STATE_ENDED) it.prepare()
-            it.play()
+            if (needsPrepare) prepareAndPlay(it) else it.play()
         }
     }
-    fun playNext() = command { if (it.hasNextMediaItem()) it.seekToNextMediaItem() }
-    fun playPrevious() = command { it.seekToPrevious() }
+    fun playNext() = command { player ->
+        if (!player.hasNextMediaItem()) return@command
+        skip(player) { player.seekToNextMediaItem() }
+    }
+    fun playPrevious() = command { player ->
+        if (player.mediaItemCount == 0) return@command
+        skip(player) {
+            if (player.playerError != null && player.hasPreviousMediaItem()) player.seekToPreviousMediaItem()
+            else player.seekToPrevious()
+        }
+    }
+
+    private inline fun skip(player: Player, seek: () -> Unit) {
+        val recover = player.playerError != null || player.playbackState == Player.STATE_ENDED
+        seek()
+        if (recover) prepareAndPlay(player)
+    }
     fun seekTo(positionMs: Long) = command { it.seekTo(positionMs.coerceIn(0, it.duration.coerceAtLeast(0))) }
     fun toggleShuffle() = command { it.shuffleModeEnabled = !it.shuffleModeEnabled }
     fun cycleRepeat() = command { it.repeatMode = when (it.repeatMode) {
