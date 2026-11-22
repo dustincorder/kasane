@@ -85,6 +85,8 @@ class PlayerSheetState(private val scope: CoroutineScope) {
 data class PlayerGeometry(
     val progress: Float, val sheetHeight: Dp, val sidePadding: Dp, val bottomPadding: Dp, val corner: Dp,
     val cover: Dp, val coverSize: Dp, val coverX: Dp, val coverY: Dp, val coverTop: Dp,
+    /** Spare height in the expanded layout is spread over the gaps instead of left as one hole. */
+    val gapTop: Dp, val gap: Dp,
 ) {
     companion object {
         val MiniHeight = 64.dp
@@ -94,8 +96,13 @@ data class PlayerGeometry(
         fun of(rawProgress: Float, width: Dp, height: Dp, statusTop: Dp, navBottom: Dp, dockedBottom: Dp): PlayerGeometry {
             val p = if (rawProgress.isNaN()) 0f else rawProgress.coerceIn(0f, 1f)
             val w = width.coerceAtLeast(0.dp); val h = height.coerceAtLeast(MiniHeight)
-            val cover = minOf(w - 56.dp, (h - statusTop - TopBar - navBottom - 330.dp).coerceAtLeast(150.dp), 420.dp).coerceAtLeast(MiniCover)
-            val coverTop = statusTop.coerceAtLeast(0.dp) + TopBar + 8.dp
+            // Fixed chrome below the cover: title 64 + seek 56 + controls 72 + queue 40 + padding 12 + gaps.
+            val available = h - statusTop.coerceAtLeast(0.dp) - TopBar - navBottom.coerceAtLeast(0.dp)
+            val cover = minOf(w - 48.dp, available - 310.dp - 8.dp, 480.dp).coerceAtLeast(150.dp)
+            val extra = (available - 310.dp - 8.dp - cover).coerceAtLeast(0.dp)
+            val gapTop = 8.dp + (extra * 0.3f).coerceAtMost(56.dp)
+            val gap = 12.dp + (extra * 0.7f / 4f).coerceAtMost(36.dp)
+            val coverTop = statusTop.coerceAtLeast(0.dp) + TopBar + gapTop
             fun mix(a: Dp, b: Dp) = lerp(a.value, b.value, p).dp.coerceAtLeast(0.dp)
             return PlayerGeometry(
                 progress = p,
@@ -107,7 +114,7 @@ data class PlayerGeometry(
                 coverSize = mix(MiniCover, cover),
                 coverX = lerp(10f, ((w - cover) / 2).value, p).dp,
                 coverY = lerp(10f, coverTop.value, p).dp,
-                coverTop = coverTop,
+                coverTop = coverTop, gapTop = gapTop, gap = gap,
             )
         }
     }
@@ -166,7 +173,7 @@ fun PlayerSheet(
                 if (p < 0.6f) MiniContent(state, track, actions, Modifier.graphicsLayer { alpha = (1f - p * 2.2f).coerceIn(0f, 1f) },
                     onOpen = sheet::expand, coverStart = 0.dp)
                 if (p > 0.02f) FullContent(state, track, actions, isFavorite, onCollapse = sheet::collapse,
-                    topInset = statusTop, bottomInset = navBottom, coverSize = cover, coverTop = g.coverTop,
+                    topInset = statusTop, bottomInset = navBottom, coverSize = cover, gapTop = g.gapTop, gap = g.gap,
                     modifier = Modifier.graphicsLayer { alpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) })
 
                 // One artwork element for both states: it grows and travels, it is never swapped.
@@ -239,7 +246,7 @@ private fun MiniContent(state: PlaybackUiState, track: Track, actions: PlayerAct
 @Composable
 private fun FullContent(
     state: PlaybackUiState, track: Track, actions: PlayerActions, isFavorite: Boolean, onCollapse: () -> Unit,
-    topInset: Dp, bottomInset: Dp, coverSize: Dp, coverTop: Dp, modifier: Modifier,
+    topInset: Dp, bottomInset: Dp, coverSize: Dp, gapTop: Dp, gap: Dp, modifier: Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
     var menuOpen by remember { mutableStateOf(false) }
@@ -255,11 +262,11 @@ private fun FullContent(
             }
         }
         // The cover itself is drawn by PlayerSheet so it can travel from the mini-player; reserve its space here.
-        Spacer(Modifier.height(coverTop - topInset - 56.dp + coverSize + 20.dp).fillMaxWidth())
+        Spacer(Modifier.height(gapTop + coverSize + gap).fillMaxWidth())
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             AnimatedContent(track.id, Modifier.weight(1f), transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "titles") { _ ->
                 Column {
-                    Text(track.title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, modifier = Modifier.basicMarquee())
+                    Text(track.title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(track.artist, style = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurfaceVariant), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -275,7 +282,7 @@ private fun FullContent(
                 Text(it, style = MaterialTheme.typography.bodySmall, color = colors.onSecondaryContainer, modifier = Modifier.padding(12.dp))
             }
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(gap))
         val duration = state.durationMs
         val position = state.currentPositionMs.coerceIn(0, duration.coerceAtLeast(1))
         var scrub by remember(track.id) { mutableStateOf<Float?>(null) }
@@ -288,7 +295,7 @@ private fun FullContent(
             Text(formatDuration(shown / 1000.0), style = MaterialTheme.typography.labelMediumMuted)
             Text(if (state.isLoading && duration == 0L) "Buffering…" else formatDuration(duration / 1000.0), style = MaterialTheme.typography.labelMediumMuted)
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(gap / 2))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = actions.shuffle, modifier = Modifier.semantics { stateDescription = if (state.shuffleEnabled) "On" else "Off" }) {
                 Icon(Icons.Default.Shuffle, "Shuffle", tint = if (state.shuffleEnabled) colors.primary else colors.onSurfaceVariant)
@@ -305,7 +312,7 @@ private fun FullContent(
                     tint = if (state.repeatMode != 0) colors.primary else colors.onSurfaceVariant)
             }
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(gap / 2))
         TextButton(onClick = actions.openQueue, modifier = Modifier.align(Alignment.CenterHorizontally)) {
             Icon(Icons.AutoMirrored.Filled.QueueMusic, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
             Text(if (state.queue.size > 1) "Up next · ${state.queue.size} tracks" else "Up next")
@@ -313,7 +320,7 @@ private fun FullContent(
     }
 }
 
-@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Preview(showBackground = true, widthDp = 412, heightDp = 892)
 @Composable
 fun PlayerSheetCollapsedPreview() {
     KasaneTheme(dynamicColor = false) {
@@ -324,7 +331,7 @@ fun PlayerSheetCollapsedPreview() {
     }
 }
 
-@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Preview(showBackground = true, widthDp = 412, heightDp = 892)
 @Composable
 fun PlayerSheetExpandedPreview() {
     KasaneTheme(dynamicColor = false) {

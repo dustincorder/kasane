@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -75,12 +76,22 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val requester = remember { FocusRequester() }
+    var focused by remember { mutableStateOf(false) }
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
     val focus = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     var loadingMore by remember { mutableStateOf(false) }
     var generation by remember { mutableIntStateOf(0) }
     var handledRevision by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { requester.requestFocus() }
+    // Suggestions are debounced and cancelled by the next keystroke; failures simply show none.
+    LaunchedEffect(query) {
+        suggestions = emptyList()
+        if (query.trim().length < 2) return@LaunchedEffect
+        kotlinx.coroutines.delay(250)
+        suggestions = catalog.suggestions(query)
+    }
     LaunchedEffect(query, category, revision, cachedCatalog, cacheScope) {
         generation++
         continuation = null; error = null; loading = false
@@ -101,7 +112,7 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
         } finally { loading = false; handledRevision = revision }
     }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        TextField(query, { query = it }, singleLine = true, shape = MaterialTheme.shapes.medium,
+        TextField(query, { query = it; submitted = false }, singleLine = true, shape = MaterialTheme.shapes.medium,
             placeholder = { Text("Search songs, albums, artists") }, leadingIcon = { Icon(Icons.Default.Search, null) },
             trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Clear, "Clear search") } },
             colors = TextFieldDefaults.colors(
@@ -110,38 +121,48 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
                 focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                 unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                 disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).focusRequester(requester),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).focusRequester(requester).onFocusChanged { focused = it.isFocused },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { onCommitSearch(query); revision++; focus.clearFocus() }))
+            keyboardActions = KeyboardActions(onSearch = { onCommitSearch(query); submitted = true; revision++; focus.clearFocus() }))
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(CatalogKind.entries) { kind ->
                 KasaneChoiceChip(kind.label, category == kind, { category = kind })
             }
         }
         Spacer(Modifier.height(4.dp))
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.primary)
-        if (query.isBlank() && recentSearches.isEmpty()) Text("Songs, albums, artists and playlists. Find your next listen.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
-        if (query.isBlank() && recentSearches.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Recent searches", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                TextButton(onClick = onClearRecent) { Text("Clear") }
+        val showSuggestions = query.isNotBlank() && focused && !submitted && suggestions.isNotEmpty()
+        when {
+            query.isBlank() && recentSearches.isEmpty() -> SearchHint("Search YouTube Music", "Songs, albums, artists, playlists and videos.")
+            query.isBlank() -> {
+                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Recent searches", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onClearRecent) { Text("Clear") }
+                }
+                recentSearches.forEach { recent ->
+                    ListItem(
+                        headlineContent = { Text(recent, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingContent = { Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                        trailingContent = { IconButton(onClick = { onRemoveRecent(recent) }) { Icon(Icons.Default.Close, "Remove $recent from recent searches", Modifier.size(20.dp)) } },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        modifier = Modifier.clickable(onClickLabel = "Search for $recent") { query = recent; submitted = true; onCommitSearch(recent); focus.clearFocus() })
+                }
             }
-            recentSearches.forEach { recent ->
+            showSuggestions -> suggestions.forEach { suggestion ->
                 ListItem(
-                    headlineContent = { Text(recent, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    leadingContent = { Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    trailingContent = { IconButton(onClick = { onRemoveRecent(recent) }) { Icon(Icons.Default.Close, "Remove $recent from recent searches", Modifier.size(20.dp)) } },
+                    headlineContent = { Text(suggestion, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    leadingContent = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                     colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                    modifier = Modifier.clickable(onClickLabel = "Search for $recent") { query = recent; onCommitSearch(recent); focus.clearFocus() })
+                    modifier = Modifier.clickable(onClickLabel = "Search for $suggestion") { query = suggestion; submitted = true; onCommitSearch(suggestion); focus.clearFocus() })
             }
+            loading && items.isEmpty() -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp))
+            error != null -> {
+                Text(error!!, style = MaterialTheme.typography.bodyMediumMuted, modifier = Modifier.padding(16.dp))
+                TextButton(onClick = { revision++ }, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Retry search") }
+            }
+            items.isEmpty() -> SearchHint("No results for “${query.trim()}”", "Check the spelling or try a different ${category.label.lowercase().removeSuffix("s")} search.")
         }
-        else if (!loading && error == null && items.isEmpty()) Text("No results for “$query”. Try another search.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
-        error?.let { message ->
-            Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
-            TextButton(onClick = { revision++ }) { Text("Retry search") }
-        }
-        LazyColumn(Modifier.weight(1f)) {
+        if (loading && items.isNotEmpty() && !showSuggestions) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (!showSuggestions && query.isNotBlank()) LazyColumn(Modifier.weight(1f)) {
             // Continuation pages can repeat items; duplicate keys would crash the list.
             items(items.distinctBy { it.kind to it.id }, key = { "${it.kind}:${it.id}" }) { item ->
                 val track = item.track()
@@ -174,6 +195,15 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
                 }) { Text(if (loadingMore) "Loading…" else "More results") }
             }
         }
+    }
+}
+
+@Composable
+private fun SearchHint(title: String, body: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(Icons.Default.Search, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 12.dp))
+        Text(body, style = MaterialTheme.typography.bodyMediumMuted, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
     }
 }
 

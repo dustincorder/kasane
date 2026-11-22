@@ -12,28 +12,31 @@ sealed interface HomeSection {
     val key: String
     val title: String
 
-    /** Most-played tracks of the last 30 days: one tap to the music this person actually returns to. */
-    data class SpeedDial(override val title: String, val tracks: List<Track>) : HomeSection { override val key = "speed-dial" }
-    /** A song shelf (YouTube Music "Quick picks" style): compact rows, four per column, paged horizontally. */
-    data class SongGrid(override val key: String, override val title: String, val tracks: List<Track>) : HomeSection
+    /** A 3-column grid of large covers, paged horizontally: the first thing Home offers to play. */
+    data class QuickPicks(override val title: String, val tracks: List<Track>) : HomeSection { override val key = "quick-picks" }
+    /** A song shelf as compact rows, four per column, paged horizontally. */
+    data class SongRows(override val key: String, override val title: String, val tracks: List<Track>, val more: String? = null) : HomeSection
     data class RecentTracks(override val title: String, val tracks: List<Track>) : HomeSection { override val key = "recent" }
     /** Albums, playlists and mixes: square covers. */
-    data class Collections(override val key: String, override val title: String, val items: List<CatalogItem>) : HomeSection
-    data class Artists(override val key: String, override val title: String, val items: List<CatalogItem>) : HomeSection
-    /** Music videos keep their 16:9 frame instead of being cropped square. */
-    data class Videos(override val key: String, override val title: String, val items: List<CatalogItem>) : HomeSection
+    data class Collections(override val key: String, override val title: String, val items: List<CatalogItem>, val more: String? = null) : HomeSection
+    data class Artists(override val key: String, override val title: String, val items: List<CatalogItem>, val more: String? = null) : HomeSection
+    /** Music videos and live stations keep their 16:9 frame, drawn large. */
+    data class Videos(override val key: String, override val title: String, val items: List<CatalogItem>, val more: String? = null) : HomeSection
     /** Radios seeded from favourite artists in the history; each starts a fresh YouTube Music radio. */
     data class RadioSeeds(override val title: String, val seeds: List<Track>) : HomeSection { override val key = "radio-seeds" }
     data class SavedOffline(override val title: String, val tracks: List<Track>) : HomeSection { override val key = "saved" }
 }
 
 /**
- * Builds Home from what is available, in a stable order, without repeating a song across sections:
- * personal shortcuts first, then the first YouTube Music song shelf, then the rest of the feed with local
- * radio and saved-music sections slotted between remote shelves. Sections too small to be useful are dropped.
+ * Builds Home from what is available, in a stable order, without repeating a song across sections.
+ * Quick picks come first (YouTube Music's personalised picks topped up with what this device plays most and
+ * the favourites), then recently played, then the rest of the YouTube Music feed with the local radio and
+ * saved-music sections slotted between remote shelves. Sections too small to be useful are dropped.
+ * With [local] false (a mood chip is active) only the remote feed for that mood is shown.
  */
 internal object HomeComposer {
-    const val SPEED_DIAL_SIZE = 6
+    const val PAGE_SIZE = 9
+    const val MAX_QUICK_PICKS = 18
     private const val MIN_ROW_ITEMS = 3
 
     fun build(
@@ -42,39 +45,49 @@ internal object HomeComposer {
         history: List<HistoryEntity>,
         saved: List<Track>,
         offlineOnly: Boolean,
+        favorites: List<Track> = emptyList(),
+        local: Boolean = true,
     ): List<HomeSection> {
-        val shownSongs = mutableSetOf<String>()
-        fun fresh(tracks: List<Track>) = tracks.distinctBy { it.id }.filter { it.id !in shownSongs }
-        fun claim(tracks: List<Track>) = tracks.also { list -> list.forEach { shownSongs += it.id } }
+        val shown = mutableSetOf<String>()
+        fun fresh(tracks: List<Track>) = tracks.distinctBy { it.id }.filter { it.id !in shown }
+        fun claim(tracks: List<Track>) = tracks.also { list -> list.forEach { shown += it.id } }
         val out = mutableListOf<HomeSection>()
-
-        // Repeat listens only: a single play is not yet a habit worth a shortcut.
-        val dial = topPlayed.filter { it.plays >= 2 }.map(PlayStat::track).distinctBy { it.id }.take(SPEED_DIAL_SIZE)
-        if (dial.size >= 4) out += HomeSection.SpeedDial("Speed dial", claim(dial))
 
         val remoteShelves = if (offlineOnly) emptyList() else remote.filter { it.items.isNotEmpty() }
         val firstSongShelf = remoteShelves.indexOfFirst { shelf -> shelf.items.all { it.kind == CatalogKind.SONG } }
-        if (firstSongShelf >= 0) {
-            val shelf = remoteShelves[firstSongShelf]
-            val tracks = fresh(shelf.items.mapNotNull { it.track() })
-            if (tracks.size >= MIN_ROW_ITEMS) out += HomeSection.SongGrid("remote:$firstSongShelf", shelf.title.ifBlank { "Quick picks" }, claim(tracks.take(20)))
+        val picks = mutableListOf<Track>()
+        if (firstSongShelf >= 0) picks += remoteShelves[firstSongShelf].items.mapNotNull { it.track() }.distinctBy { it.id }.take(PAGE_SIZE)
+        if (local) {
+            // Habits first (played more than once), then favourites; a single play is not yet a preference.
+            picks += topPlayed.filter { it.plays >= 2 }.map(PlayStat::track)
+            picks += favorites
+        }
+        val quick = picks.distinctBy { it.id }.take(MAX_QUICK_PICKS)
+        if (quick.size >= MIN_ROW_ITEMS) {
+            val title = if (firstSongShelf >= 0) remoteShelves[firstSongShelf].title.ifBlank { "Quick picks" } else "Quick picks"
+            out += HomeSection.QuickPicks(title, claim(quick))
         }
 
-        val recent = fresh(history.sortedByDescending { it.playedAt }.map { Track(it.trackId, it.title, it.artist, it.album, thumbnailUri = it.thumbnailUri) }).take(12)
-        if (recent.size >= MIN_ROW_ITEMS) out += HomeSection.RecentTracks("Recently played", claim(recent))
+        if (local) {
+            val recent = fresh(history.sortedByDescending { it.playedAt }
+                .map { Track(it.trackId, it.title, it.artist, it.album, thumbnailUri = it.thumbnailUri) }).take(12)
+            if (recent.size >= MIN_ROW_ITEMS) out += HomeSection.RecentTracks("Recently played", claim(recent))
+        }
 
-        // One radio per artist, preferring artists not already represented on screen.
-        val seedPool = topPlayed.map(PlayStat::track).filter { it.artist.isNotBlank() }.distinctBy { it.artist.lowercase() }
-        val seeds = (seedPool.filter { it.id !in shownSongs } + seedPool).distinctBy { it.id }.take(4)
-        val radio = if (seeds.size >= 2) HomeSection.RadioSeeds("Radio from your listening", seeds) else null
-        val savedSection = fresh(saved).take(12).takeIf { it.size >= 2 || (offlineOnly && it.isNotEmpty()) }
+        val seedPool = if (local) topPlayed.map(PlayStat::track).filter { it.artist.isNotBlank() }.distinctBy { it.artist.lowercase() } else emptyList()
+        val seeds = (seedPool.filter { it.id !in shown } + seedPool).distinctBy { it.id }.take(4)
+        val radio = if (seeds.size >= 2 && !offlineOnly) HomeSection.RadioSeeds("Radio from your listening", seeds) else null
+        val savedSection = if (!local) null else fresh(saved).take(12).takeIf { it.size >= 2 || (offlineOnly && it.isNotEmpty()) }
             ?.let { HomeSection.SavedOffline("Saved for offline", claim(it)) }
 
         var remoteAdded = 0
         remoteShelves.forEachIndexed { index, shelf ->
             if (index == firstSongShelf) return@forEachIndexed
             classify(index, shelf, ::fresh)?.let { section ->
-                if (section is HomeSection.SongGrid) claim(section.tracks)
+                when (section) {
+                    is HomeSection.SongRows -> claim(section.tracks)
+                    else -> Unit
+                }
                 out += section; remoteAdded++
                 if (remoteAdded == 2 && radio != null) out += radio
             }
@@ -90,12 +103,13 @@ internal object HomeComposer {
         val key = "remote:$index"
         val dominant = items.groupingBy { it.kind }.eachCount().maxByOrNull { it.value }?.key ?: return null
         return when (dominant) {
-            CatalogKind.SONG -> fresh(items.mapNotNull { it.track() }).takeIf { it.size >= MIN_ROW_ITEMS }?.let { HomeSection.SongGrid(key, title, it.take(20)) }
-            CatalogKind.ARTIST -> items.filter { it.kind == CatalogKind.ARTIST }.takeIf { it.size >= 2 }?.let { HomeSection.Artists(key, title, it) }
+            CatalogKind.SONG -> fresh(items.mapNotNull { it.track() }).takeIf { it.size >= MIN_ROW_ITEMS }
+                ?.let { HomeSection.SongRows(key, title, it.take(20), shelf.moreBrowseId) }
+            CatalogKind.ARTIST -> items.filter { it.kind == CatalogKind.ARTIST }.takeIf { it.size >= 2 }?.let { HomeSection.Artists(key, title, it, shelf.moreBrowseId) }
             CatalogKind.VIDEO -> items.filter { it.kind == CatalogKind.VIDEO }.filter { v -> fresh(listOfNotNull(v.track())).isNotEmpty() }
-                .takeIf { it.size >= 2 }?.let { HomeSection.Videos(key, title, it) }
+                .takeIf { it.size >= 2 }?.let { HomeSection.Videos(key, title, it, shelf.moreBrowseId) }
             CatalogKind.ALBUM, CatalogKind.PLAYLIST -> items.filter { it.kind == CatalogKind.ALBUM || it.kind == CatalogKind.PLAYLIST }
-                .takeIf { it.size >= 2 }?.let { HomeSection.Collections(key, title, it) }
+                .takeIf { it.size >= 2 }?.let { HomeSection.Collections(key, title, it, shelf.moreBrowseId) }
         }
     }
 }

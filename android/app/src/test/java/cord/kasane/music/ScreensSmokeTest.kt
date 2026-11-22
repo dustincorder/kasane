@@ -42,7 +42,7 @@ class ScreensSmokeTest {
             history = (1..6).map { cord.kasane.music.model.HistoryEntity(trackId = "h$it", title = "H$it", artist = "X", playedAt = it.toLong()) },
             saved = listOf(t(50), t(51)), offlineOnly = false)
         compose.setContent { KasaneTheme(dynamicColor = false) { Surface { HomeScreen(sections, false, false, null, false, "id2", actions) } } }
-        compose.onNodeWithText("Speed dial").assertExists()
+        compose.onNodeWithText("Quick picks").assertExists()
         compose.onRoot().performTouchInput { swipeUp() }
         compose.waitForIdle()
     }

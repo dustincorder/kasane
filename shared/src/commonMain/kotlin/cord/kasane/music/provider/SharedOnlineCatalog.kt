@@ -34,6 +34,21 @@ class SharedOnlineCatalog(private val client: InnerTubeClient, private val sessi
     override suspend fun home(account: AccountSession?): CatalogPage = withContext(Dispatchers.Default) {
         CatalogJsonParser.page(request("browse", buildJsonObject { put("browseId", "FEmusic_home") }, account))
     }
+    /** Home filtered by a mood/activity chip. The response is a full Home feed for that mood. */
+    suspend fun homeFiltered(account: AccountSession?, params: String): CatalogPage = withContext(Dispatchers.Default) {
+        require(params.isNotBlank())
+        CatalogJsonParser.page(request("browse", buildJsonObject { put("browseId", "FEmusic_home"); put("params", params) }, account))
+    }
+    /** Typing suggestions from YouTube Music. Empty on any failure: suggestions are a convenience, never an error. */
+    suspend fun suggestions(query: String): List<String> = withContext(Dispatchers.Default) {
+        if (query.isBlank()) return@withContext emptyList()
+        runCatching {
+            val root = request("music/get_search_suggestions", buildJsonObject { put("input", query.trim().take(100)) }, session())
+            CatalogJsonParser.objects(root, "searchSuggestionRenderer").mapNotNull {
+                CatalogJsonParser.text(it.optJsonObject("suggestion")).takeIf { s -> s.isNotBlank() }
+            }.distinct().take(8)
+        }.getOrDefault(emptyList())
+    }
     suspend fun radioPage(videoId: String, continuation: String? = null): RadioPage = withContext(Dispatchers.Default) {
         val body = buildJsonObject {
             if (continuation != null) put("continuation", continuation)

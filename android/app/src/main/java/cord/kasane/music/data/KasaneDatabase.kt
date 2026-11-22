@@ -28,10 +28,12 @@ data class CachedCatalogPageRecord(
     val continuation: String?,
     val description: String,
     val updatedAt: Long = System.currentTimeMillis(),
+    /** Home mood chips as `title<TAB>params` lines; null for pages without chips. */
+    val chips: String? = null,
 )
 
 @Entity(tableName = "catalog_cache_shelf", primaryKeys = ["scopeKey", "cacheKey", "shelfIndex"])
-data class CachedCatalogShelfRecord(val scopeKey: String, val cacheKey: String, val shelfIndex: Int, val title: String)
+data class CachedCatalogShelfRecord(val scopeKey: String, val cacheKey: String, val shelfIndex: Int, val title: String, val moreBrowseId: String? = null)
 
 @Entity(tableName = "catalog_cache_item", primaryKeys = ["itemKey"], indices = [Index("scopeKey")])
 data class CachedCatalogItemEntity(
@@ -124,7 +126,7 @@ interface TrackDao {
     entities = [TrackRecord::class, FavoriteEntity::class, HistoryEntity::class, CachedCatalogPageRecord::class,
         CachedCatalogShelfRecord::class, CachedCatalogItemEntity::class, CachedCatalogShelfItemRecord::class,
         cord.kasane.music.offline.AudioFileRecord::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class KasaneDatabase : RoomDatabase() {
@@ -196,11 +198,12 @@ abstract class KasaneDatabase : RoomDatabase() {
         @Transaction
         suspend fun save(scopeKey: String, cacheKey: String, page: CatalogPage, now: Long) {
             putPage(CachedCatalogPageRecord(scopeKey, cacheKey, page.title, page.subtitle, page.artwork,
-                page.continuation, page.description, now))
+                page.continuation, page.description, now,
+                page.chips.takeIf { it.isNotEmpty() }?.joinToString("\n") { it.title.replace('\t', ' ').replace('\n', ' ') + "\t" + it.params }))
             deleteShelfItems(scopeKey, cacheKey)
             deleteShelves(scopeKey, cacheKey)
             val itemRows = linkedMapOf<String, CachedCatalogItemEntity>()
-            val shelfRows = page.shelves.mapIndexed { index, shelf -> CachedCatalogShelfRecord(scopeKey, cacheKey, index, shelf.title) }
+            val shelfRows = page.shelves.mapIndexed { index, shelf -> CachedCatalogShelfRecord(scopeKey, cacheKey, index, shelf.title, shelf.moreBrowseId) }
             val linkRows = buildList {
                 page.shelves.forEachIndexed { shelfIndex, shelf ->
                     shelf.items.forEachIndexed { position, item ->
@@ -237,6 +240,13 @@ abstract class KasaneDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_catalog_cache_updatedAt ON catalog_cache(updatedAt)")
             }
         }
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `catalog_cache_shelf` ADD COLUMN `moreBrowseId` TEXT")
+                db.execSQL("ALTER TABLE `catalog_cache_page` ADD COLUMN `chips` TEXT")
+            }
+        }
+
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(cord.kasane.music.offline.AudioFileRecord.CREATE_TABLE_SQL)

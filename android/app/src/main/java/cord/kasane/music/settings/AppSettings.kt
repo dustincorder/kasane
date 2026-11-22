@@ -68,7 +68,7 @@ class AppSettings(context: Context) {
         const val DEFAULT_ACCENT = 0xFF4F8BE8.toInt()
         const val DEFAULT_CACHE_MB = 1024
         const val MIN_CACHE_MB = 128
-        const val MAX_CACHE_MB = 16384
+        const val MAX_CACHE_MB = 65536
         private const val DYNAMIC_COLOR = "dynamicColor"
         private const val THEME_MODE = "themeMode"
         private const val ACCENT_SOURCE = "accentSource"

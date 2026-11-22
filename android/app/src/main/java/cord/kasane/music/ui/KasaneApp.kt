@@ -225,8 +225,25 @@ private fun KasaneContent(app: KasaneApplication) {
             if (accountState is AccountState.SignedIn) libraryOnline = true
         }
         var activeHomeScope by remember { mutableStateOf<String?>(null) }
-        val homeSections = remember(homeShelves, topPlayed, history, recentlySaved, offlineOnly) {
-            HomeComposer.build(homeShelves, topPlayed, history, recentlySaved, offlineOnly)
+        var homeChips by remember { mutableStateOf<List<cord.kasane.music.model.CatalogChip>>(emptyList()) }
+        var selectedChip by remember { mutableStateOf<String?>(null) }
+        var chipShelves by remember { mutableStateOf<List<CatalogShelf>>(emptyList()) }
+        var chipLoading by remember { mutableStateOf(false) }
+        var chipError by remember { mutableStateOf<String?>(null) }
+        val homeSections = remember(homeShelves, chipShelves, selectedChip, topPlayed, history, recentlySaved, favorites, offlineOnly) {
+            if (selectedChip != null) HomeComposer.build(chipShelves, emptyList(), emptyList(), emptyList(), false, local = false)
+            else HomeComposer.build(homeShelves, topPlayed, history, recentlySaved, offlineOnly, favorites)
+        }
+        // A mood chip is a real YouTube Music request: the feed for that mood replaces Home until it is cleared.
+        LaunchedEffect(selectedChip, accountState, offlineOnly) {
+            val params = selectedChip
+            chipShelves = emptyList(); chipError = null
+            if (params == null || offlineOnly) { chipLoading = false; return@LaunchedEffect }
+            chipLoading = true
+            try { chipShelves = app.ytProvider.catalog.homeFiltered(app.accountRepository.session(), params).shelves }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { chipError = "Couldn't load this mood. Check your connection and try again." }
+            finally { chipLoading = false }
         }
         LaunchedEffect(homeRevision, accountState, catalogScope, offlineOnly) {
             if (activeHomeScope != catalogScope) {
@@ -238,6 +255,7 @@ private fun KasaneContent(app: KasaneApplication) {
             if (saved != null) {
                 homeShelves = saved.page.shelves
                 homeRecommendations = saved.page.tracks
+                if (saved.page.chips.isNotEmpty()) homeChips = saved.page.chips
             }
             // Offline Only: the saved feed and local sections are all Home shows; never touch the network.
             if (offlineOnly) { isHomeLoading = false; isHomeRefreshing = false; homeError = null; handledHomeRevision = homeRevision; return@LaunchedEffect }
@@ -255,6 +273,7 @@ private fun KasaneContent(app: KasaneApplication) {
                 ) ?: return@LaunchedEffect
                 homeShelves = homePage.shelves
                 homeRecommendations = homePage.tracks
+                if (homePage.chips.isNotEmpty()) homeChips = homePage.chips
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
                 homeError = "Recommendations unavailable. Check your connection and try again."
@@ -363,6 +382,7 @@ private fun KasaneContent(app: KasaneApplication) {
         CompositionLocalProvider(cord.kasane.music.ui.components.LocalTrackNavigation provides
             cord.kasane.music.ui.components.TrackNavigation(app.ytProvider.catalog.trackLinks, openCatalog),
             cord.kasane.music.ui.components.LocalOfflineBadges provides offlineBadges,
+            cord.kasane.music.ui.components.LocalCurrentTrackId provides playbackState.currentTrack?.id,
             cord.kasane.music.ui.components.LocalOfflineActions provides offlineActions) {
         Box(Modifier.fillMaxSize()) {
         Scaffold(
@@ -479,14 +499,18 @@ private fun KasaneContent(app: KasaneApplication) {
                 } else screenState.SaveableStateProvider(selectedTab) {
                 when (selectedTab) {
                     0 -> HomeScreen(
-                        sections = homeSections, loading = isHomeLoading, refreshing = isHomeRefreshing, error = homeError,
+                        sections = homeSections, loading = if (selectedChip != null) chipLoading else isHomeLoading,
+                        refreshing = isHomeRefreshing, error = if (selectedChip != null) chipError else homeError,
+                        chips = if (offlineOnly) emptyList() else homeChips, selectedChip = selectedChip,
+                        onChip = { selectedChip = it?.params },
                         offlineOnly = offlineOnly, currentTrackId = playbackState.currentTrack?.id,
                         actions = HomeActions(
                             playTrack = { app.playbackManager.playTrack(it) },
                             playList = { tracks, index -> app.playbackManager.playTracks(tracks.drop(index.coerceAtLeast(0))) },
                             startRadio = { app.playbackManager.startRadio(it) },
                             open = openCatalog, openSearch = { selectedTab = 1 }, openSettings = { showSettings = true },
-                            openSaved = { showDownloads = true }, refresh = { homeRevision++ }))
+                            openSaved = { showDownloads = true }, refresh = { homeRevision++ },
+                            openShelf = { title, id -> openCatalog(CatalogItem(id, cord.kasane.music.model.CatalogKind.PLAYLIST, title)) }))
                     1 -> if (offlineOnly) OfflineSearchScreen(app.database.trackDao(), playbackState.currentTrack?.id) { app.playbackManager.playTrack(it) }
                     else CatalogSearchScreen(
                         app.ytProvider.catalog, openCatalog, playbackState.currentTrack?.id, favoriteIds,
@@ -609,9 +633,9 @@ fun LibraryScreen(
         }
         when (filter) {
             "Songs" -> {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (showingHistory) "Recently played" else "Favorites", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    Text("On this device", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMediumMuted)
+                Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    cord.kasane.music.ui.components.KasaneChoiceChip("Favorites · $favoritesCount", !showingHistory, { onSelectHistory(false) })
+                    cord.kasane.music.ui.components.KasaneChoiceChip("History", showingHistory, { onSelectHistory(true) })
                 }
                 Box(Modifier.weight(1f)) { if (showingHistory) historyContent() else favoritesContent() }
             }
@@ -626,15 +650,16 @@ fun LibraryScreen(
             )
             else -> {
                 Column(Modifier.weight(1f).fillMaxWidth()) {
-                    LibraryCollectionRow("Favorites", "$favoritesCount songs · On this device", Icons.Default.Favorite) {
+                    LibraryCollectionRow("Favorites", plural(favoritesCount, "song"), Icons.Default.Favorite) {
                         onFilter("Songs"); onSelectHistory(false)
                     }
-                    LibraryCollectionRow("Saved music", "$savedCount songs · Available offline", Icons.Default.DownloadDone, onOpenDownloads)
-                    LibraryCollectionRow("History", "$historyCount played · On this device", Icons.Default.History) {
+                    LibraryCollectionRow("Saved music", plural(savedCount, "song") + " · offline", Icons.Default.DownloadDone, onOpenDownloads)
+                    LibraryCollectionRow("History", if (historyCount == 0) "Nothing played yet" else "$historyCount recently played", Icons.Default.History) {
                         onFilter("Songs"); onSelectHistory(true)
                     }
-                    Text("YouTube Music", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMediumMuted,
-                        modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 6.dp))
+                    HorizontalDivider(Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    Text("Your YouTube Music playlists", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 4.dp))
                     AccountLibraryScreen(accountState, accountProvider, onSignIn, onCatalogOpen, onAddToQueue, onExpired,
                         modifier = Modifier.weight(1f).fillMaxWidth(), cachedCatalog = cachedCatalog, session = session,
                         selected = cord.kasane.music.provider.AccountCollection.PLAYLISTS)
@@ -669,31 +694,6 @@ fun FavoritesScreen(
     onRemoveFavorite: (Track) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // Compact Header (52dp)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "Favorites",
-                style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = "${favorites.size} tracks",
-                style = MaterialTheme.typography.labelMediumMuted,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.outlineVariant,
-            thickness = 0.5.dp
-        )
 
         if (favorites.isEmpty()) {
             Box(
@@ -745,31 +745,6 @@ fun HistoryScreen(
     onToggleFavorite: (HistoryEntity) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // Compact Header (52dp)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "History",
-                style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = "${history.size} played",
-                style = MaterialTheme.typography.labelMediumMuted,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        HorizontalDivider(
-            color = MaterialTheme.colorScheme.outlineVariant,
-            thickness = 0.5.dp
-        )
 
         if (history.isEmpty()) {
             Box(

@@ -45,10 +45,18 @@ object OfflinePolicy {
     fun playableFromCache(record: AudioFileRecord?, cachedBytesFromStart: Long): Boolean =
         record != null && record.contentLength > 0 && record.cacheKey.isNotEmpty() && cachedBytesFromStart >= record.contentLength
 
-    /** Cache sizes offered in settings. */
-    val CACHE_STEPS_MB = listOf(256, 512, 1024, 2048, 4096, 8192, 16384)
+    /** Quick limits offered in settings; anything else is a custom value. */
+    val CACHE_PRESETS_MB = listOf(512, 1024, 2048, 5120)
 
-    fun nearestCacheStep(mb: Int): Int = CACHE_STEPS_MB.minByOrNull { kotlin.math.abs(it - mb) } ?: 1024
+    /** Parses a user-typed size ("1.5" GB or "800" MB) into megabytes, or null when unusable. */
+    fun customLimitMb(text: String, gigabytes: Boolean): Int? {
+        val value = text.trim().replace(',', '.').toDoubleOrNull() ?: return null
+        if (!value.isFinite() || value <= 0) return null
+        val mb = if (gigabytes) value * 1024 else value
+        return mb.toInt().takeIf { it in cord.kasane.music.settings.AppSettings.MIN_CACHE_MB..cord.kasane.music.settings.AppSettings.MAX_CACHE_MB }
+    }
+
+    fun limitLabel(mb: Int): String = if (mb % 1024 == 0) "${mb / 1024} GB" else if (mb < 1024) "$mb MB" else "%.1f GB".format(mb / 1024.0)
 
     fun formatBytes(bytes: Long): String = when {
         bytes < 1024 -> "$bytes B"

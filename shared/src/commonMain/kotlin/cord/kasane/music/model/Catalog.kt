@@ -17,9 +17,13 @@ data class CatalogItem(val id: String, val kind: CatalogKind, val title: String,
         Track(id, title, subtitle, durationSeconds = durationSeconds, thumbnailUri = artwork) else null
 }
 @Serializable
-data class CatalogShelf(val title: String, val items: List<CatalogItem>)
+data class CatalogShelf(val title: String, val items: List<CatalogItem>, val moreBrowseId: String? = null)
+/** A mood/activity filter YouTube Music offers on Home; [params] is the opaque token that selects it. */
+@Serializable
+data class CatalogChip(val title: String, val params: String)
 @Serializable
 data class CatalogPage(val title: String, val subtitle: String, val artwork: String?,
-    val shelves: List<CatalogShelf>, val continuation: String? = null, val description: String = "") {
+    val shelves: List<CatalogShelf>, val continuation: String? = null, val description: String = "",
+    val chips: List<CatalogChip> = emptyList()) {
     val tracks: List<Track> get() = shelves.flatMap { it.items }.mapNotNull { it.track() }.distinctBy { it.id }
 }

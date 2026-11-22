@@ -2,6 +2,7 @@ package cord.kasane.music.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -24,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,6 +34,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import cord.kasane.music.model.CatalogItem
 import cord.kasane.music.model.CatalogKind
+import cord.kasane.music.model.CatalogChip
 import cord.kasane.music.model.Track
 import cord.kasane.music.ui.components.*
 import cord.kasane.music.ui.theme.*
@@ -45,6 +48,7 @@ class HomeActions(
     val openSettings: () -> Unit,
     val openSaved: () -> Unit,
     val refresh: () -> Unit,
+    val openShelf: (title: String, browseId: String) -> Unit = { _, _ -> },
 )
 
 /**
@@ -62,6 +66,9 @@ fun HomeScreen(
     offlineOnly: Boolean,
     currentTrackId: String?,
     actions: HomeActions,
+    chips: List<CatalogChip> = emptyList(),
+    selectedChip: String? = null,
+    onChip: (CatalogChip?) -> Unit = {},
 ) {
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = actions.refresh, modifier = Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), state = rememberLazyListState(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -70,6 +77,13 @@ fun HomeScreen(
                     Text("Kasane", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
                     IconButton(onClick = actions.openSearch) { Icon(Icons.Default.Search, "Search", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                     IconButton(onClick = actions.openSettings) { Icon(Icons.Outlined.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+            }
+            if (chips.isNotEmpty()) item(key = "chips") {
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(chips, key = { it.params }) { chip ->
+                        KasaneChoiceChip(chip.title, selectedChip == chip.params, { onChip(if (selectedChip == chip.params) null else chip) })
+                    }
                 }
             }
             when {
@@ -91,24 +105,24 @@ fun HomeScreen(
             sections.forEach { section ->
                 item(key = section.key, contentType = section::class.simpleName) {
                     when (section) {
-                        is HomeSection.SpeedDial -> SpeedDial(section, currentTrackId, actions)
-                        is HomeSection.SongGrid -> SongGrid(section, currentTrackId, actions)
+                        is HomeSection.QuickPicks -> QuickPicks(section, currentTrackId, actions)
+                        is HomeSection.SongRows -> SongRows(section, currentTrackId, actions)
                         is HomeSection.RecentTracks -> Shelf(section.title) {
-                            items(section.tracks, key = { it.id }) { TrackCard(it, 128.dp, onClick = { actions.playTrack(it) }) }
+                            items(section.tracks, key = { it.id }) { ArtworkTile(it, 132.dp, currentTrackId == it.id) { actions.playTrack(it) } }
                         }
                         is HomeSection.SavedOffline -> Shelf(section.title, "See all", actions.openSaved) {
                             items(section.tracks, key = { it.id }) { track ->
-                                TrackCard(track, 128.dp, onClick = { actions.playList(section.tracks, section.tracks.indexOf(track)) })
+                                ArtworkTile(track, 132.dp, currentTrackId == track.id) { actions.playList(section.tracks, section.tracks.indexOf(track)) }
                             }
                         }
-                        is HomeSection.Collections -> Shelf(section.title) {
+                        is HomeSection.Collections -> Shelf(section.title, more = section.more, onMore = { actions.openShelf(section.title, it) }) {
                             items(section.items, key = { "${it.kind}:${it.id}" }) { CollectionCard(it, 148.dp) { actions.open(it) } }
                         }
-                        is HomeSection.Artists -> Shelf(section.title) {
+                        is HomeSection.Artists -> Shelf(section.title, more = section.more, onMore = { actions.openShelf(section.title, it) }) {
                             items(section.items, key = { it.id }) { ArtistCircle(it) { actions.open(it) } }
                         }
-                        is HomeSection.Videos -> Shelf(section.title) {
-                            items(section.items, key = { it.id }) { VideoCard(it) { actions.open(it) } }
+                        is HomeSection.Videos -> Shelf(section.title, more = section.more, onMore = { actions.openShelf(section.title, it) }) {
+                            items(section.items, key = { it.id }) { WideCard(it.artwork, it.title, it.subtitle) { actions.open(it) } }
                         }
                         is HomeSection.RadioSeeds -> Shelf(section.title) {
                             items(section.seeds, key = { it.id }) { RadioCard(it) { actions.startRadio(it) } }
@@ -122,63 +136,87 @@ fun HomeScreen(
 
 @Composable
 private fun SectionHeader(title: String, action: String? = null, onAction: (() -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 20.dp, bottom = 6.dp).heightIn(min = 40.dp),
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 22.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (action != null && onAction != null) TextButton(onClick = onAction) { Text(action) }
-    }
-}
-
-@Composable
-private fun Shelf(title: String, action: String? = null, onAction: (() -> Unit)? = null, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
-    Column {
-        SectionHeader(title, action, onAction)
-        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), content = content)
-    }
-}
-
-@Composable
-private fun SpeedDial(section: HomeSection.SpeedDial, currentTrackId: String?, actions: HomeActions) {
-    Column {
-        SectionHeader(section.title)
-        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            section.tracks.chunked(2).forEach { pair ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    pair.forEach { track -> SpeedDialTile(track, track.id == currentTrackId, Modifier.weight(1f)) { actions.playTrack(track) } }
-                    if (pair.size == 1) Spacer(Modifier.weight(1f))
-                }
-            }
+        if (action != null && onAction != null) OutlinedButton(onClick = onAction, shape = CircleShape, contentPadding = PaddingValues(horizontal = 14.dp),
+            modifier = Modifier.height(32.dp), border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+            Text(action, style = MaterialTheme.typography.labelLarge)
         }
     }
 }
 
 @Composable
-private fun SpeedDialTile(track: Track, playing: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun Shelf(title: String, action: String? = null, onAction: (() -> Unit)? = null, more: String? = null,
+    onMore: ((String) -> Unit)? = null, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
+    Column {
+        if (more != null && onMore != null) SectionHeader(title, "See all") { onMore(more) } else SectionHeader(title, action, onAction)
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), content = content)
+    }
+}
+
+/** A cover with its title on a scrim: artwork-led, no buttons on the image. Long-press opens the track menu. */
+@Composable
+private fun ArtworkTile(track: Track, size: Dp, playing: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val entries = rememberTrackMenuEntries(track, onClick)
     val source = remember { MutableInteractionSource() }
-    Box(modifier) {
-        Surface(color = if (playing) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-            shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth().pressScale(source)) {
-            Row(Modifier.trackGestures(entries, "Play ${track.title}", onClick, { menu = true }, source).height(56.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                TrackArtwork(track.thumbnailUri, Modifier.size(56.dp), shape = MaterialTheme.shapes.small)
-                Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 10.dp))
+    Box(modifier.size(size)) {
+        Box(Modifier.fillMaxSize().pressScale(source).clip(MaterialTheme.shapes.small)
+            .trackGestures(entries, "Play ${track.title}", onClick, { menu = true }, source)) {
+            TrackArtwork(track.thumbnailUri, Modifier.fillMaxSize().then(if (playing) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.small) else Modifier),
+                shape = MaterialTheme.shapes.small, minPixels = 360)
+            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))))
+                .padding(start = 8.dp, end = 8.dp, top = 22.dp, bottom = 7.dp)) {
+                Text(track.title, style = MaterialTheme.typography.labelLarge, color = Color.White,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
         TrackContextMenu(track, menu, { menu = false }, onClick)
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SongGrid(section: HomeSection.SongGrid, currentTrackId: String?, actions: HomeActions) {
+private fun QuickPicks(section: HomeSection.QuickPicks, currentTrackId: String?, actions: HomeActions) {
     val width = LocalConfiguration.current.screenWidthDp.dp
+    val tile = (width - 32.dp - 16.dp) / 3
+    val pages = section.tracks.chunked(HomeComposer.PAGE_SIZE)
     val state = rememberLazyListState()
     Column {
         SectionHeader(section.title)
-        LazyRow(state = state, flingBehavior = rememberSnapFlingBehavior(state), contentPadding = PaddingValues(start = 0.dp, end = 16.dp)) {
+        LazyRow(state = state, flingBehavior = rememberSnapFlingBehavior(state), contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(pages, key = { it.first().id }) { page ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.width(width - 32.dp)) {
+                    page.chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { track -> ArtworkTile(track, tile, track.id == currentTrackId) { actions.playTrack(track) } }
+                        }
+                    }
+                }
+            }
+        }
+        if (pages.size > 1) {
+            val current by remember { derivedStateOf { state.firstVisibleItemIndex } }
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.Center) {
+                pages.indices.forEach { i ->
+                    Box(Modifier.padding(horizontal = 3.dp).size(6.dp).background(
+                        if (i == current) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant, CircleShape))
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SongRows(section: HomeSection.SongRows, currentTrackId: String?, actions: HomeActions) {
+    val width = LocalConfiguration.current.screenWidthDp.dp
+    val state = rememberLazyListState()
+    Column {
+        if (section.more != null) SectionHeader(section.title, "See all") { actions.openShelf(section.title, section.more) } else SectionHeader(section.title)
+        LazyRow(state = state, flingBehavior = rememberSnapFlingBehavior(state), contentPadding = PaddingValues(end = 16.dp)) {
             items(section.tracks.chunked(4), key = { column -> column.first().id }) { column ->
                 Column(Modifier.width(width - 40.dp)) {
                     column.forEach { track ->
@@ -214,31 +252,30 @@ private fun ArtistCircle(item: CatalogItem, onClick: () -> Unit) {
     }
 }
 
+/** Large 16:9 card for videos and live stations; sized so the next card peeks in. */
 @Composable
-private fun VideoCard(item: CatalogItem, onClick: () -> Unit) {
+private fun WideCard(artwork: String?, title: String, subtitle: String, onClick: () -> Unit) {
+    val width = LocalConfiguration.current.screenWidthDp.dp - 56.dp
     val source = remember { MutableInteractionSource() }
-    Column(Modifier.width(224.dp).pressScale(source).clip(MaterialTheme.shapes.medium).androidxClickable(source, "Play ${item.title}", onClick)) {
-        TrackArtwork(item.artwork, Modifier.fillMaxWidth().aspectRatio(16f / 9f), shape = MaterialTheme.shapes.medium)
-        Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
-        Text(item.subtitle, style = MaterialTheme.typography.bodySmallMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Column(Modifier.width(width).pressScale(source).clip(MaterialTheme.shapes.medium).androidxClickable(source, "Play $title", onClick)) {
+        TrackArtwork(artwork, Modifier.fillMaxWidth().aspectRatio(16f / 9f), shape = MaterialTheme.shapes.medium, minPixels = 800)
+        Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 2.dp))
+        Text(subtitle, style = MaterialTheme.typography.bodySmallMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 2.dp))
     }
 }
 
 @Composable
 private fun RadioCard(seed: Track, onClick: () -> Unit) {
     val source = remember { MutableInteractionSource() }
-    Column(Modifier.width(148.dp).pressScale(source).clip(MaterialTheme.shapes.medium).androidxClickable(source, "Start ${seed.artist} radio", onClick)) {
+    Column(Modifier.width(220.dp).pressScale(source).clip(MaterialTheme.shapes.medium).androidxClickable(source, "Start ${seed.artist} radio", onClick)) {
         Box {
-            TrackArtwork(seed.thumbnailUri, Modifier.size(148.dp), shape = MaterialTheme.shapes.medium)
-            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = CircleShape,
-                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp).size(32.dp)) {
+            TrackArtwork(seed.thumbnailUri, Modifier.fillMaxWidth().aspectRatio(16f / 9f), shape = MaterialTheme.shapes.medium, minPixels = 544)
+            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = CircleShape, modifier = Modifier.align(Alignment.BottomStart).padding(8.dp).size(32.dp)) {
                 Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Radio, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer) }
             }
         }
-        Text("${seed.artist} radio", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp))
-        Text("From ${seed.title}", style = MaterialTheme.typography.bodySmallMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 2.dp))
+        Text("${seed.artist} radio", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 2.dp))
+        Text("From ${seed.title}", style = MaterialTheme.typography.bodySmallMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 2.dp))
     }
 }
 
@@ -260,20 +297,20 @@ private fun HomeMessage(title: String, body: String, action: String?, onAction: 
 @Composable
 private fun HomeSkeleton() {
     val block = MaterialTheme.colorScheme.surfaceContainerHigh
+    val tile = (LocalConfiguration.current.screenWidthDp.dp - 48.dp) / 3
     Column(Modifier.padding(horizontal = 16.dp).semanticsLoading()) {
-        Box(Modifier.padding(top = 24.dp, bottom = 12.dp, start = 4.dp).size(140.dp, 22.dp).background(block, MaterialTheme.shapes.extraSmall))
-        repeat(4) {
+        Box(Modifier.padding(top = 22.dp, bottom = 10.dp).size(140.dp, 22.dp).background(block, MaterialTheme.shapes.extraSmall))
+        repeat(3) { Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) { repeat(3) { Box(Modifier.size(tile).background(block, MaterialTheme.shapes.small)) } } }
+        Box(Modifier.padding(top = 18.dp, bottom = 10.dp).size(120.dp, 22.dp).background(block, MaterialTheme.shapes.extraSmall))
+        repeat(2) {
             Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(48.dp).background(block, MaterialTheme.shapes.small))
                 Column(Modifier.padding(start = 12.dp)) {
-                    Box(Modifier.size(180.dp, 14.dp).background(block, MaterialTheme.shapes.extraSmall))
-                    Spacer(Modifier.height(6.dp))
+                    Box(Modifier.size(180.dp, 14.dp).background(block, MaterialTheme.shapes.extraSmall)); Spacer(Modifier.height(6.dp))
                     Box(Modifier.size(110.dp, 12.dp).background(block, MaterialTheme.shapes.extraSmall))
                 }
             }
         }
-        Box(Modifier.padding(top = 24.dp, bottom = 12.dp, start = 4.dp).size(120.dp, 22.dp).background(block, MaterialTheme.shapes.extraSmall))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { repeat(3) { Box(Modifier.size(148.dp).background(block, MaterialTheme.shapes.medium)) } }
     }
 }
 
@@ -281,25 +318,32 @@ private fun Modifier.semanticsLoading() = this.semantics { contentDescription = 
 
 private val previewActions = HomeActions({}, { _, _ -> }, {}, {}, {}, {}, {}, {})
 
-@Preview(showBackground = true, widthDp = 390, heightDp = 1500)
+private fun pt(i: Int, title: String, artist: String) = Track("t$i", title, artist, durationSeconds = 180.0 + i)
+
+/** Full Home at Pixel 6 Pro size with the real navigation chrome, for visual review. */
+@Preview(showBackground = true, widthDp = 412, heightDp = 892)
 @Composable
 fun HomeScreenPreview() {
     KasaneTheme(dynamicColor = false) {
         Surface(color = MaterialTheme.colorScheme.background) {
-            fun t(i: Int, title: String, artist: String) = Track("t$i", title, artist, durationSeconds = 180.0 + i)
-            HomeScreen(listOf(
-                HomeSection.SpeedDial("Speed dial", listOf(t(1, "Midnight City Lights", "Aether"), t(2, "Subway Melancholy", "Dustin Corder"),
-                    t(3, "Synthetic Dawn", "Kuro"), t(4, "Neon Drift", "Aether"), t(5, "Glass Rooms", "Hollow"), t(6, "Low Tide", "Mirei"))),
-                HomeSection.SongGrid("qp", "Quick picks", (7..14).map { t(it, "Quick pick $it", "Artist $it") }),
-                HomeSection.Collections("mix", "Mixed for you", (1..4).map { CatalogItem("m$it", CatalogKind.PLAYLIST, "My Mix $it", "Playlist · YouTube Music") }),
-                HomeSection.Artists("art", "Favourite artists", (1..4).map { CatalogItem("a$it", CatalogKind.ARTIST, "Artist $it") }),
-                HomeSection.RadioSeeds("Radio from your listening", listOf(t(1, "Midnight City Lights", "Aether"), t(3, "Synthetic Dawn", "Kuro"))),
-            ), loading = false, refreshing = false, error = null, offlineOnly = false, currentTrackId = "t2", actions = previewActions)
+            Column(Modifier.fillMaxSize().statusBarsPadding()) {
+                Box(Modifier.weight(1f)) {
+                    HomeScreen(listOf(
+                        HomeSection.QuickPicks("Quick picks", (1..9).map { pt(it, listOf("Midnight City Lights", "Subway Melancholy", "Synthetic Dawn", "Neon Drift", "Glass Rooms", "Low Tide", "Flower Castle", "Love Me Not", "Tic Toc")[it - 1], "Artist $it") }),
+                        HomeSection.SongRows("mix", "Song mixes", (10..17).map { pt(it, "Mix track $it", "Artist $it") }, more = "FEmusic_mixed"),
+                        HomeSection.Collections("alb", "Albums for you", (1..4).map { CatalogItem("m$it", CatalogKind.ALBUM, "Album $it", "Artist $it") }, more = "x"),
+                        HomeSection.Videos("live", "Listen together", (1..3).map { CatalogItem("v$it", CatalogKind.VIDEO, "STUDY WITH MIKU STATION", "Hatsune Miku") }),
+                        HomeSection.RadioSeeds("Radio from your listening", listOf(pt(1, "Midnight City Lights", "Aether"), pt(3, "Synthetic Dawn", "Kuro"))),
+                    ), loading = false, refreshing = false, error = null, offlineOnly = false, currentTrackId = "t2", actions = previewActions,
+                        chips = listOf("Energize", "Focus", "Happy", "Relax", "Romance").map { CatalogChip(it, it) }, selectedChip = null)
+                }
+                NavigationBar { listOf("Home", "Search", "Library").forEachIndexed { i, l -> NavigationBarItem(i == 0, {}, { Icon(Icons.Default.Search, null) }, label = { Text(l) }) } }
+            }
         }
     }
 }
 
-@Preview(showBackground = true, widthDp = 390, heightDp = 700)
+@Preview(showBackground = true, widthDp = 412, heightDp = 700)
 @Composable
 fun HomeLoadingPreview() {
     KasaneTheme(dynamicColor = false) {

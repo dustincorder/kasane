@@ -33,3 +33,14 @@ class CatalogModelTest {
         assertEquals(listOf("next"), cord.kasane.music.playback.QueuePolicy.radioAppend(setOf("playing"), candidates, 1).map { it.id })
     }
 }
+
+class HomeChipsParserTest {
+    @Test fun parsesMoodChipsAndSeeAllLinksFromAHomeResponse() {
+        val json = """{"contents":{"chipCloudRenderer":{"chips":[
+            {"chipCloudChipRenderer":{"text":{"runs":[{"text":"Focus"}]},"navigationEndpoint":{"browseEndpoint":{"browseId":"FEmusic_home","params":"ggMPOg1"}}}},
+            {"chipCloudChipRenderer":{"text":{"runs":[{"text":"NoToken"}]},"navigationEndpoint":{}}},
+            {"chipCloudChipRenderer":{"text":{"runs":[{"text":"Focus"}]},"navigationEndpoint":{"browseEndpoint":{"params":"ggMPOg1"}}}}]}}}"""
+        val chips = cord.kasane.music.provider.CatalogJsonParser.chips(kotlinx.serialization.json.Json.parseToJsonElement(json) as kotlinx.serialization.json.JsonObject)
+        assertEquals(listOf(cord.kasane.music.model.CatalogChip("Focus", "ggMPOg1")), chips)
+    }
+}

@@ -19,7 +19,7 @@ class HomeComposerTest {
     private fun play(id: String, at: Long) = HistoryEntity(trackId = id, title = "Song $id", artist = "Artist $id", playedAt = at)
     private fun songIds(sections: List<HomeSection>) = sections.flatMap { s ->
         when (s) {
-            is HomeSection.SpeedDial -> s.tracks.map { it.id }; is HomeSection.SongGrid -> s.tracks.map { it.id }
+            is HomeSection.QuickPicks -> s.tracks.map { it.id }; is HomeSection.SongRows -> s.tracks.map { it.id }
             is HomeSection.RecentTracks -> s.tracks.map { it.id }; is HomeSection.SavedOffline -> s.tracks.map { it.id }
             else -> emptyList()
         }
@@ -31,36 +31,53 @@ class HomeComposerTest {
         val top = listOf(stat("a", 9), stat("x", 5), stat("y", 4), stat("z", 3))
         val history = listOf(play("b", 10), play("q", 9), play("r", 8), play("s", 7))
         val saved = listOf(Track("x", "Song x", "A"), Track("t", "Song t", "A"), Track("u", "Song u", "A"))
-        val ids = songIds(HomeComposer.build(remote, top, history, saved, offlineOnly = false))
+        val ids = songIds(HomeComposer.build(remote, top, history, saved, offlineOnly = false, favorites = listOf(Track("e", "Song e", "A"))))
         assertEquals("duplicates: $ids", ids.size, ids.toSet().size)
     }
 
-    @Test fun personalShortcutsComeFirstAndNeedRepeatListens() {
-        val top = listOf(stat("a", 9), stat("b", 5), stat("c", 4), stat("d", 2), stat("once", 1))
-        val sections = HomeComposer.build(emptyList(), top, emptyList(), emptyList(), false)
-        val dial = sections.first() as HomeSection.SpeedDial
-        assertEquals(listOf("a", "b", "c", "d"), dial.tracks.map { it.id })
-        assertTrue(HomeComposer.build(emptyList(), top.take(3), emptyList(), emptyList(), false).none { it is HomeSection.SpeedDial })
+    @Test fun quickPicksStartWithYoutubeMusicThenHabitsThenFavorites() {
+        val remote = listOf(CatalogShelf("Quick picks", listOf("a", "b", "c").map(::song)))
+        val top = listOf(stat("t1", 6), stat("t2", 4), stat("once", 1))
+        val picks = HomeComposer.build(remote, top, emptyList(), emptyList(), false, favorites = listOf(Track("f1", "Fav", "A"))).first() as HomeSection.QuickPicks
+        assertEquals(listOf("a", "b", "c", "t1", "t2", "f1"), picks.tracks.map { it.id })
+        assertTrue("single plays are not habits", "once" !in picks.tracks.map { it.id })
+        val many = HomeComposer.build(listOf(CatalogShelf("Quick picks", (1..30).map { song("s$it") })), emptyList(), emptyList(), emptyList(), false).first() as HomeSection.QuickPicks
+        assertEquals(HomeComposer.PAGE_SIZE, many.tracks.size)
+    }
+
+    @Test fun withoutRemoteDataQuickPicksComeFromThisDevice() {
+        val top = (1..4).map { stat("t$it", 10 - it) }
+        val picks = HomeComposer.build(emptyList(), top, emptyList(), emptyList(), false).first() as HomeSection.QuickPicks
+        assertEquals(4, picks.tracks.size)
+        assertTrue(HomeComposer.build(emptyList(), top.take(2), emptyList(), emptyList(), false).none { it is HomeSection.QuickPicks })
     }
 
     @Test fun emptyHistoryFallsBackToTheYoutubeMusicFeedOnly() {
         val remote = listOf(CatalogShelf("Quick picks", listOf("a", "b", "c").map(::song)),
-            CatalogShelf("Albums for you", listOf("m", "n").map(::album)), CatalogShelf("Artists", listOf("p", "q").map(::artist)))
+            CatalogShelf("Albums for you", listOf("m", "n").map(::album), moreBrowseId = "FEmore"), CatalogShelf("Artists", listOf("p", "q").map(::artist)))
         val sections = HomeComposer.build(remote, emptyList(), emptyList(), emptyList(), false)
-        assertEquals(listOf(HomeSection.SongGrid::class, HomeSection.Collections::class, HomeSection.Artists::class), sections.map { it::class })
+        assertEquals(listOf(HomeSection.QuickPicks::class, HomeSection.Collections::class, HomeSection.Artists::class), sections.map { it::class })
+        assertEquals("FEmore", (sections[1] as HomeSection.Collections).more)
         assertTrue(HomeComposer.build(emptyList(), emptyList(), emptyList(), emptyList(), false).isEmpty())
+    }
+
+    @Test fun moodFilteredHomeShowsOnlyTheRemoteFeedForThatMood() {
+        val remote = listOf(CatalogShelf("Energize", listOf("a", "b", "c").map(::song)), CatalogShelf("Albums", listOf("m", "n").map(::album)))
+        val sections = HomeComposer.build(remote, listOf(stat("x", 9), stat("y", 8)), listOf(play("h", 1), play("i", 2), play("j", 3)), listOf(Track("s", "Saved", "A")), false, local = false)
+        assertTrue(sections.none { it is HomeSection.RecentTracks || it is HomeSection.RadioSeeds || it is HomeSection.SavedOffline })
+        assertEquals(listOf("a", "b", "c"), (sections.first() as HomeSection.QuickPicks).tracks.map { it.id })
     }
 
     @Test fun offlineOnlyShowsLocalMusicAndNoRemoteShelves() {
         val remote = listOf(CatalogShelf("Quick picks", listOf("a", "b", "c").map(::song)))
         val sections = HomeComposer.build(remote, emptyList(), listOf(play("h", 1), play("i", 2), play("j", 3)), listOf(Track("s", "Saved", "A")), offlineOnly = true)
         assertTrue(sections.first() is HomeSection.SavedOffline)
-        assertTrue(sections.none { it is HomeSection.SongGrid || it is HomeSection.Collections })
+        assertTrue(sections.none { it is HomeSection.SongRows || it is HomeSection.Collections || it is HomeSection.RadioSeeds })
     }
 
     @Test fun radioSeedsUseDistinctArtistsAndSmallShelvesAreDropped() {
         val top = listOf(stat("a", 9, "Same"), stat("b", 8, "Same"), stat("c", 7, "Other"), stat("d", 6, "Third"))
-        val sections = HomeComposer.build(listOf(CatalogShelf("Tiny", listOf(song("z")))), top, emptyList(), emptyList(), false)
+        val sections = HomeComposer.build(listOf(CatalogShelf("Tiny", listOf(album("z")))), top, emptyList(), emptyList(), false)
         val radio = sections.filterIsInstance<HomeSection.RadioSeeds>().single()
         assertEquals(radio.seeds.size, radio.seeds.map { it.artist }.toSet().size)
         assertTrue(sections.none { it.title == "Tiny" })

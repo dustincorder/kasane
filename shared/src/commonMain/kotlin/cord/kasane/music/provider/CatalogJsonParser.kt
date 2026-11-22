@@ -122,7 +122,9 @@ object CatalogJsonParser {
                             val title = text(shelf.optJsonObject("title")).ifBlank {
                                 objects(shelf.opt("header"), "title").firstOrNull()?.let(::text).orEmpty()
                             }
-                            shelves.add(CatalogShelf(title, items))
+                            val more = objects(shelf.opt("header"), "moreContentButton").firstOrNull()
+                                ?.let { objects(it, "browseEndpoint").firstOrNull()?.optString("browseId") }?.takeIf { it.isNotBlank() }
+                            shelves.add(CatalogShelf(title, items, more))
                         }
                     } else node.values.forEach { visit(it) }
                 }
@@ -142,6 +144,12 @@ object CatalogJsonParser {
         val nextToken = if (playlistShelf != null) continuation(playlistShelf) else continuation(root)
         return CatalogPage(text(header?.optJsonObject("title")).ifBlank { fallback },
             text(header?.optJsonObject("subtitle")), header?.let(ThumbnailJsonParser::bestUrl), shelves, nextToken,
-            text(header?.optJsonObject("description")))
+            text(header?.optJsonObject("description")), chips(root))
     }
+    /** Mood and activity filters. Only chips that carry a browse token are usable; the rest are ignored. */
+    fun chips(root: JsonObject): List<CatalogChip> = objects(root, "chipCloudChipRenderer").mapNotNull { chip ->
+        val params = objects(chip.optJsonObject("navigationEndpoint"), "browseEndpoint").firstOrNull()?.optString("params")
+        val title = text(chip.optJsonObject("text"))
+        if (params.isNullOrBlank() || title.isBlank()) null else CatalogChip(title, params)
+    }.distinctBy { it.params }
 }

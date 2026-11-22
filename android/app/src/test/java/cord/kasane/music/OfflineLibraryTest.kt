@@ -83,10 +83,13 @@ class OfflineLibraryTest {
         assertFalse(OfflinePolicy.playableFromCache(null, 1000))
     }
 
-    @Test fun cacheSizeStepsSnapToOfferedValues() {
-        assertEquals(1024, OfflinePolicy.nearestCacheStep(1000))
-        assertEquals(256, OfflinePolicy.nearestCacheStep(10))
-        assertEquals(16384, OfflinePolicy.nearestCacheStep(99999))
+    @Test fun customCacheLimitsAreParsedAndBounded() {
+        assertEquals(1536, OfflinePolicy.customLimitMb("1.5", gigabytes = true))
+        assertEquals(1536, OfflinePolicy.customLimitMb("1,5", gigabytes = true))
+        assertEquals(800, OfflinePolicy.customLimitMb(" 800 ", gigabytes = false))
+        assertNull(OfflinePolicy.customLimitMb("10", gigabytes = false)); assertNull(OfflinePolicy.customLimitMb("0", true))
+        assertNull(OfflinePolicy.customLimitMb("abc", true)); assertNull(OfflinePolicy.customLimitMb("1000", true)); assertNull(OfflinePolicy.customLimitMb("NaN", true))
+        assertEquals("2 GB", OfflinePolicy.limitLabel(2048)); assertEquals("512 MB", OfflinePolicy.limitLabel(512)); assertEquals("1.5 GB", OfflinePolicy.limitLabel(1536).replace(',', '.'))
         assertEquals("1.5 MB", OfflinePolicy.formatBytes(1_572_864).replace(',', '.'))
     }
 

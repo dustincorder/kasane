@@ -87,10 +87,12 @@ class RoomCatalogCacheStore(private val dao: KasaneDatabase.CatalogCacheDao) : C
                     cord.kasane.music.model.CatalogItem(item.id, kind, item.title, item.subtitle, item.artwork, item.durationSeconds)
                 }
             } }
-            CatalogShelf(shelf.title, content)
+            CatalogShelf(shelf.title, content, shelf.moreBrowseId)
         }
         return CacheEntry(CatalogPage(page.title, page.subtitle, page.artwork, resolved,
-            page.continuation, page.description), page.updatedAt)
+            page.continuation, page.description, page.chips.orEmpty().lines().mapNotNull { line ->
+                line.split('\t', limit = 2).takeIf { it.size == 2 && it[1].isNotBlank() }?.let { cord.kasane.music.model.CatalogChip(it[0], it[1]) }
+            }), page.updatedAt)
     }
 
     override suspend fun write(scope: String, key: String, page: CatalogPage, now: Long) = dao.save(scope, key, page, now)
