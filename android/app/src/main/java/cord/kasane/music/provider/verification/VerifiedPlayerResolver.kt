@@ -20,6 +20,9 @@ import org.json.JSONObject
 /** A browser engine that has loaded `kasane-verifier.js`. */
 interface VerificationRuntime {
     suspend fun call(method: String, args: JSONArray): Any?
+
+    /** User-Agent of the engine that answers the BotGuard challenge; sent with its Create/GenerateIT requests. */
+    val userAgent: String
 }
 
 class VerificationException(message: String) : java.io.IOException("YouTube playback verification failed: $message")
@@ -111,7 +114,7 @@ class VerifiedPlayerResolver(
     }
 
     private fun waa(method: String, body: JSONArray): Any = post("$youtubeBase/api/jnn/v1/$method", body,
-        mapOf("X-Goog-Api-Key" to WAA_API_KEY, "X-User-Agent" to "grpc-web-javascript/0.1"), "BotGuard $method",
+        mapOf("User-Agent" to runtime.userAgent, "X-Goog-Api-Key" to WAA_API_KEY, "X-User-Agent" to "grpc-web-javascript/0.1"), "BotGuard $method",
         "application/json+protobuf")
 
     private fun post(url: String, body: Any, headers: Map<String, String>, what: String, type: String = "application/json"): Any {

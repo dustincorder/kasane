@@ -21,6 +21,7 @@ import org.junit.Test
 class VerifiedPlayerResolverTest {
     private class FakeRuntime(private val sig: Any = "SIGNED") : VerificationRuntime {
         val calls = mutableListOf<Pair<String, String>>()
+        override val userAgent = "TestEngine/1.0"
         override suspend fun call(method: String, args: JSONArray): Any? {
             calls += method to args.toString()
             return when (method) {
@@ -72,6 +73,9 @@ class VerifiedPlayerResolverTest {
         val body = JSONObject(requests.first { it.path!!.startsWith("/youtubei/v1/player") }.body.readUtf8())
         assertEquals("WEB_REMIX", body.getJSONObject("context").getJSONObject("client").getString("clientName"))
         assertEquals(20774, body.getJSONObject("playbackContext").getJSONObject("contentPlaybackContext").getInt("signatureTimestamp"))
+        val challenges = requests.filter { it.path!!.startsWith("/api/jnn/v1/") }
+        assertEquals(2, challenges.size)
+        assertTrue(challenges.all { it.getHeader("User-Agent") == "TestEngine/1.0" })
         server.shutdown()
     }
 

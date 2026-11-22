@@ -22,7 +22,10 @@ Both load `verifier/dist/kasane-verifier.js`, built from `verifier/entry.js` wit
 `preBuild` fails if the bundle is missing). The browser code never touches the
 network: native code fetches `/iframe_api`, `base.js`, the BotGuard
 `Create`/`GenerateIT` calls (public web API key) and the player response, then
-passes data in. No user agent or origin is spoofed.
+passes data in. No user agent or origin is spoofed. On Android the BotGuard
+requests carry the WebView's own User-Agent (`WebSettings.getDefaultUserAgent`):
+with OkHttp's default agent Google still issues an integrity token, but GVS
+rejects every proof minted from it (HTTP 403).
 
 The integrity token (~12 h, refreshed 10 min early), player functions (refreshed
 every 6 h or on a new player version) and proof stay in memory only. Signed URLs,

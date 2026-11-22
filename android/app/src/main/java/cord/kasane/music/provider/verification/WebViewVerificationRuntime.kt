@@ -30,6 +30,9 @@ class WebViewVerificationRuntime(private val context: Context) : VerificationRun
     private val startLock = Mutex()
     @Volatile private var view: WebView? = null
 
+    // Google issues an integrity token that GVS rejects when the challenge requests carry OkHttp's User-Agent.
+    override val userAgent: String by lazy { android.webkit.WebSettings.getDefaultUserAgent(context) }
+
     private inner class Bridge {
         @JavascriptInterface
         fun reply(id: String, payload: String) {
