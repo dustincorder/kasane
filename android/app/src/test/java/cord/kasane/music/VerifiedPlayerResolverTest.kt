@@ -99,17 +99,38 @@ class VerifiedPlayerResolverTest {
 
     @Test fun verifiedStreamWinsAndFailuresReportBothSources() = runBlocking {
         val ios = MockWebServer().apply { enqueue(MockResponse().setResponseCode(500)); enqueue(MockResponse().setResponseCode(500)); start() }
-        val verified = HlsPlayerResolver(OkHttpClient(), ios.url("/player").toString(), verified = {
+        val notices = cord.kasane.music.provider.PlaybackNotices()
+        notices.post("JALbemLw3G4", "stale")
+        val verified = HlsPlayerResolver(OkHttpClient(), ios.url("/player").toString(), notices = notices, verified = {
             ProgressiveStream(cord.kasane.music.provider.ResolvedAudioStream("https://rr1.googlevideo.com/v", 140, "audio/mp4", 0), VerifiedPlayerResolver.PROFILE)
         }).resolve("JALbemLw3G4")
         assertTrue(verified is ProgressiveStream)
         assertEquals(0, ios.requestCount)
-        val failed = HlsPlayerResolver(OkHttpClient(), ios.url("/player").toString(), verified = {
+        assertEquals(null, notices.current.value)
+        val failed = HlsPlayerResolver(OkHttpClient(), ios.url("/player").toString(), notices = notices, verified = {
             UnavailableStream("YouTube playback verification failed: x.", "VERIFICATION_FAILED")
         }).resolve("JALbemLw3G4")
         assertEquals("VERIFICATION_FAILED", (failed as UnavailableStream).code)
         assertTrue(failed.reason.contains("verification failed") && failed.reason.contains("iOS:"))
         assertEquals(1, ios.requestCount)
+        assertEquals(null, notices.current.value)
+        ios.shutdown()
+    }
+
+    @Test fun iosFallbackIsAnnouncedToTheUser() = runBlocking {
+        val manifest = "https://manifest.googlevideo.com/api/manifest/hls_variant/id/1/index.m3u8"
+        val ios = MockWebServer().apply {
+            enqueue(MockResponse().setBody("""{"playabilityStatus":{"status":"OK"},"streamingData":{"hlsManifestUrl":"$manifest"}}"""))
+            start()
+        }
+        val notices = cord.kasane.music.provider.PlaybackNotices()
+        val stream = HlsPlayerResolver(OkHttpClient(), ios.url("/player").toString(), notices = notices, verified = {
+            UnavailableStream("YouTube playback verification failed: player script is not supported.", "VERIFICATION_FAILED")
+        }).resolve("JALbemLw3G4")
+        assertTrue(stream.toString(), stream is cord.kasane.music.provider.HlsStream)
+        val notice = notices.current.value!!
+        assertEquals("JALbemLw3G4", notice.videoId)
+        assertTrue(notice.message.contains("player script is not supported") && notice.message.contains("iOS stream"))
         ios.shutdown()
     }
 }

@@ -39,4 +39,5 @@ export interface PlaybackProgress {
   duration_secs: number;
   state: PlaybackState;
   current_track: Track | null;
+  notice?: string | null;
 }

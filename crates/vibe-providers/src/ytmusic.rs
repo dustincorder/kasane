@@ -19,6 +19,10 @@ const IOS_VERSION: &str = "21.26.4";
 const IOS_USER_AGENT: &str =
     "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_5 like Mac OS X;)";
 
+fn fallback_notice(error: &VibeError) -> String {
+    format!("Verified playback unavailable ({error}). Playing the iOS HLS stream instead.")
+}
+
 fn provider_error(message: impl Into<String>) -> VibeError {
     VibeError::Provider {
         provider: "YouTubeMusic".into(),
@@ -188,12 +192,18 @@ impl MusicProvider for YouTubeMusicProvider {
             }
             Err(error) => error,
         };
-        // A second real source (iOS HLS) is tried and both outcomes are reported;
-        // no placeholder audio is ever substituted.
+        // A second real source (iOS HLS) is tried and the user is told; when both
+        // fail both reasons are reported. No placeholder audio is substituted.
         tracing::warn!("Verified YouTube playback unavailable: {verified_error}");
-        self.resolve_ios(track).await.map_err(|ios_error| {
-            provider_error(format!("{verified_error}; iOS HLS: {ios_error}"))
-        })
+        match self.resolve_ios(track).await {
+            Ok(mut source) => {
+                source.notice = Some(fallback_notice(&verified_error));
+                Ok(source)
+            }
+            Err(ios_error) => Err(provider_error(format!(
+                "{verified_error}; iOS HLS: {ios_error}"
+            ))),
+        }
     }
 }
 
@@ -334,6 +344,7 @@ fn parse_player(root: &Value) -> Result<StreamSource> {
                     mime_type: "application/vnd.apple.mpegurl".into(),
                     bitrate_kbps: None,
                     expires_at: None,
+                    notice: None,
                 });
             }
             if root

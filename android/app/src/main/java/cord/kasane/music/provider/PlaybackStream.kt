@@ -31,6 +31,7 @@ class HlsPlayerResolver(
     private val diagnostic: (String) -> Unit = {},
     private val progressiveCheck: (suspend (String, ResolvedAudioStream) -> Boolean)? = null,
     private val verified: (suspend (String) -> PlaybackStream)? = null,
+    private val notices: PlaybackNotices = PlaybackNotices.shared,
     private val authenticatedPlayer: suspend (String) -> JSONObject? = { null },
 ) {
     init {
@@ -63,12 +64,19 @@ class HlsPlayerResolver(
         val verification = verified?.invoke(videoId)
         if (verification is ProgressiveStream) {
             diagnostic("videoId=$videoId client=${verification.clientProfile} event=verified")
+            notices.clear(videoId)
             return@withContext verification
         }
         if (verification is UnavailableStream) diagnostic("videoId=$videoId client=WEB_REMIX_VERIFIED event=unavailable code=${verification.code}")
         val ios = resolveIos(videoId)
-        if (ios is UnavailableStream && verification is UnavailableStream)
-            UnavailableStream("${verification.reason} iOS: ${ios.reason}", verification.code) else ios
+        when {
+            verification !is UnavailableStream -> { notices.clear(videoId); ios }
+            ios is UnavailableStream -> { notices.clear(videoId); UnavailableStream("${verification.reason} iOS: ${ios.reason}", verification.code) }
+            else -> {
+                notices.post(videoId, "Verified playback unavailable (${verification.reason.trimEnd('.')}). Playing the iOS stream instead.")
+                ios
+            }
+        }
     }
     private suspend fun resolveIos(videoId: String): PlaybackStream {
         val body = JSONObject().put("videoId", videoId).put("context", JSONObject().put("client", JSONObject()

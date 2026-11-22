@@ -136,6 +136,7 @@ impl WebPlaybackVerifier {
             url: url.into(),
             mime_type: format.mime_type,
             bitrate_kbps: format.bitrate_kbps,
+            notice: None,
         })
     }
 

@@ -375,6 +375,19 @@ private fun KasaneContent(app: KasaneApplication) {
                     ) {
                         Text(playbackState.errorMessage!!)
                     }
+                } else if (playbackState.noticeMessage != null) {
+                    Snackbar(
+                        containerColor = Gray850,
+                        contentColor = White,
+                        action = {
+                            TextButton(onClick = { app.playbackManager.clearNotice() }) {
+                                Text("Dismiss", color = Gray400)
+                            }
+                        },
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(playbackState.noticeMessage!!)
+                    }
                 }
             },
             bottomBar = {

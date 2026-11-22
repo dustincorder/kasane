@@ -18,6 +18,7 @@ data class PlaybackUiState(
     val currentTrack: Track? = null, val isPlaying: Boolean = false, val isLoading: Boolean = false,
     val currentPositionMs: Long = 0, val durationMs: Long = 0,
     val queue: List<Track> = emptyList(), val queueIndex: Int = -1, val errorMessage: String? = null,
+    val noticeMessage: String? = null,
     val shuffleEnabled: Boolean = false, val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val canSkipNext: Boolean = false, val canSkipPrevious: Boolean = false
 )
@@ -32,6 +33,7 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
     private val mutableState = MutableStateFlow(PlaybackUiState())
     val uiState = mutableState.asStateFlow()
     private var dismissedError: androidx.media3.common.PlaybackException? = null
+    private var dismissedNotice: cord.kasane.music.provider.PlaybackNotices.Notice? = null
     private var controller: MediaController? = null
     private val pendingCommands = ArrayDeque<(Player) -> Unit>()
     init {
@@ -58,7 +60,10 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
     }
     private fun publish(player: Player) {
         val queue = (0 until player.mediaItemCount).map { PlaybackService.mediaItemToTrack(player.getMediaItemAt(it)) }
+        val notice = cord.kasane.music.provider.PlaybackNotices.shared.current.value
+            ?.takeIf { it.videoId == player.currentMediaItem?.mediaId && it != dismissedNotice }
         mutableState.value = PlaybackUiState(
+            noticeMessage = notice?.message,
             currentTrack = player.currentMediaItem?.let(PlaybackService::mediaItemToTrack),
             isPlaying = player.isPlaying, isLoading = player.playbackState == Player.STATE_BUFFERING,
             currentPositionMs = player.currentPosition.coerceAtLeast(0),
@@ -180,5 +185,9 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
         Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
         else -> Player.REPEAT_MODE_OFF
     } }
+    fun clearNotice() {
+        dismissedNotice = cord.kasane.music.provider.PlaybackNotices.shared.current.value
+        mutableState.value = mutableState.value.copy(noticeMessage = null)
+    }
     fun clearError() { dismissedError = controller?.playerError; mutableState.value = mutableState.value.copy(errorMessage = null) }
 }

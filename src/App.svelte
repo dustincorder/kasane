@@ -82,6 +82,11 @@
       <p role="alert" class="flex-1 text-accent-highlight">{player.error}</p>
       <button class="text-text-secondary hover:text-text-primary" onclick={() => (player.error = null)}>Dismiss</button>
     </div>
+  {:else if player.notice}
+    <div class="fixed inset-x-4 bottom-24 z-[60] mx-auto flex max-w-xl items-center gap-3 rounded-lg border border-surface-border bg-surface-elevated p-3 text-sm shadow-lg">
+      <p role="status" class="flex-1 text-text-secondary">{player.notice}</p>
+      <button class="text-text-secondary hover:text-text-primary" onclick={() => player.dismissNotice()}>Dismiss</button>
+    </div>
   {/if}
   <PlayerBar />
 

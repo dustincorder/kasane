@@ -81,6 +81,7 @@ impl AudioWorker {
             duration_secs: self.duration.as_secs_f64(),
             state,
             current_track: None,
+            notice: None,
         }
     }
 

@@ -34,9 +34,11 @@ Every failure is explicit: runtime version mismatch, BotGuard/integrity failure,
 unsupported player script, missing itag 140, foreign or non-HTTPS audio host,
 non-OK playability (reported with YouTube's status, e.g. `LOGIN_REQUIRED`), and
 GVS HTTP errors from the downloader. If verification fails, the existing iOS HLS
-profile is tried; when both fail the user sees both reasons. A failed
-verification is logged (`KasanePlayback` on Android, `tracing` warn on Linux);
-it never produces placeholder audio.
+profile is tried and the user is told while it plays ("Verified playback
+unavailable (…). Playing the iOS … stream instead." – a Snackbar on Android via
+`PlaybackNotices`, a status banner on Linux via `PlaybackProgress.notice`); when
+both fail the user sees both reasons. Failures are also logged (`KasanePlayback`
+on Android, `tracing` warn on Linux). No placeholder audio is ever produced.
 
 Linux downloads the whole stream into memory in 1 MiB `Range` requests (YouTube
 throttles single whole-file requests to about playback speed).

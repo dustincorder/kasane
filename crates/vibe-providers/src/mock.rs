@@ -112,6 +112,7 @@ impl MusicProvider for MockProvider {
             mime_type: "audio/webm".to_string(),
             bitrate_kbps: Some(160),
             expires_at: None,
+            notice: None,
         })
     }
 }
