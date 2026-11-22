@@ -91,7 +91,11 @@ impl Discovery {
                         let Some(addr) = addr else { continue };
                         let _ = events.send(DiscoveryEvent::Resolved(Discovered {
                             id,
-                            name: resolved.get_fullname().to_string(),
+                            name: resolved
+                                .get_fullname()
+                                .strip_suffix(&format!(".{SERVICE_TYPE}"))
+                                .unwrap_or(resolved.get_fullname())
+                                .to_string(),
                             platform: props.get("platform").map(|v| v.val_str().to_string()),
                             addr: format!("{}:{}", addr, resolved.get_port()),
                             fp_hint: props.get("fp").map(|v| v.val_str().to_string()),
