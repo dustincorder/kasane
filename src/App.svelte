@@ -5,7 +5,7 @@
   import LibraryView from '$lib/components/LibraryView.svelte';
   import QueueView from '$lib/components/QueueView.svelte';
   import { player } from '$lib/stores/player.svelte';
-  import { Search, Library, ListMusic, Music2 } from 'lucide-svelte';
+  import { Search, Library, ListMusic } from 'lucide-svelte';
 
   type Tab = 'search' | 'library' | 'queue';
   let activeTab = $state<Tab>('search');
@@ -19,9 +19,7 @@
       <div class="space-y-6">
         <!-- Brand -->
         <div class="flex items-center gap-2.5 px-2 py-1">
-          <div class="w-7 h-7 rounded-md bg-accent-subtle border border-surface-border flex items-center justify-center text-text-primary">
-            <Music2 size={16} />
-          </div>
+          <img src="/logo.svg" alt="" class="w-7 h-7" />
           <span class="hidden sm:inline font-semibold text-sm tracking-tight text-text-primary">Kasane</span>
         </div>
 
@@ -29,7 +27,7 @@
         <nav class="space-y-1">
           <button
             onclick={() => (activeTab = 'search')}
-            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition {activeTab === 'search' ? 'bg-surface-hover text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover/50'}"
+            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition {activeTab === 'search' ? 'bg-surface-hover text-accent-highlight' : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover/50'}"
           >
             <Search size={16} />
             <span class="sr-only sm:not-sr-only">Search</span>
@@ -37,7 +35,7 @@
 
           <button
             onclick={() => (activeTab = 'library')}
-            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition {activeTab === 'library' ? 'bg-surface-hover text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover/50'}"
+            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition {activeTab === 'library' ? 'bg-surface-hover text-accent-highlight' : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover/50'}"
           >
             <Library size={16} />
             <span class="sr-only sm:not-sr-only">Library</span>
@@ -45,7 +43,7 @@
 
           <button
             onclick={() => (activeTab = 'queue')}
-            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition {activeTab === 'queue' ? 'bg-surface-hover text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover/50'}"
+            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition {activeTab === 'queue' ? 'bg-surface-hover text-accent-highlight' : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover/50'}"
           >
             <ListMusic size={16} />
             <span class="sr-only sm:not-sr-only">Queue</span>
@@ -57,7 +55,7 @@
       <div class="hidden sm:flex px-2 py-2 border-t border-surface-border/50 text-[11px] text-text-muted items-center justify-between">
         <span>v0.1.0</span>
         <span class="inline-flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          <span class="w-1.5 h-1.5 rounded-full bg-accent-highlight"></span>
           Ready
         </span>
       </div>
