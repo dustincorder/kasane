@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use vibe_core::error::{Result, VibeError};
 use vibe_core::model::{Artist, ProviderType, StreamSource, Track};
 use vibe_core::traits::MusicProvider;
@@ -10,11 +9,11 @@ use vibe_core::traits::MusicProvider;
 pub struct YouTubeMusicProvider {
     client: reqwest::Client,
     player_url: String,
-    visitor_data: Mutex<Option<String>>,
 }
 
-const VR_VERSION: &str = "1.65.10";
-const VR_USER_AGENT: &str = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
+const IOS_VERSION: &str = "21.26.4";
+const IOS_USER_AGENT: &str =
+    "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_5 like Mac OS X;)";
 
 fn provider_error(message: impl Into<String>) -> VibeError {
     VibeError::Provider {
@@ -49,8 +48,7 @@ impl YouTubeMusicProvider {
 
         Self {
             client,
-            player_url: "https://music.youtube.com/youtubei/v1/player?prettyPrint=false".into(),
-            visitor_data: Mutex::new(None),
+            player_url: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false".into(),
         }
     }
 }
@@ -131,66 +129,41 @@ impl MusicProvider for YouTubeMusicProvider {
         {
             return Err(provider_error("Invalid YouTube video ID"));
         }
-        let mut visitor = self.visitor_data.lock().await;
-        for attempt in 0..2 {
-            let mut body = serde_json::json!({
-                "context": { "client": {
-                    "clientName": "ANDROID_VR", "clientVersion": VR_VERSION,
-                    "deviceMake": "Oculus", "deviceModel": "Quest 3",
-                    "osName": "Android", "osVersion": "12L", "androidSdkVersion": 32,
-                    "hl": "en", "gl": "US", "userAgent": VR_USER_AGENT
-                }},
-                "videoId": track.id,
-                "playbackContext": { "contentPlaybackContext": { "html5Preference": "HTML5_PREF_WANTS" }}
-            });
-            let mut request = self
-                .client
-                .post(&self.player_url)
-                .header(USER_AGENT, VR_USER_AGENT)
-                .header("X-YouTube-Client-Name", "28")
-                .header("X-YouTube-Client-Version", VR_VERSION);
-            if let Some(value) = visitor.as_ref() {
-                body["context"]["client"]["visitorData"] = Value::String(value.clone());
-                request = request.header("X-Goog-Visitor-Id", value);
-            }
-            let response = request
-                .json(&body)
-                .send()
-                .await
-                .map_err(|_| provider_error("Player request failed"))?;
-            if !response.status().is_success() {
-                return Err(provider_error(format!(
-                    "Player request returned HTTP {}",
-                    response.status()
-                )));
-            }
-            let root: Value = response
-                .json()
-                .await
-                .map_err(|_| provider_error("Invalid player JSON response"))?;
-            let issued = root
-                .pointer("/responseContext/visitorData")
-                .and_then(Value::as_str)
-                .filter(|value| {
-                    !value.is_empty() && value.bytes().all(|b| (33..=126).contains(&b))
-                });
-            let changed = issued.is_some_and(|value| visitor.as_deref() != Some(value));
-            if let Some(value) = issued {
-                *visitor = Some(value.into());
-            }
-            if attempt == 0 && is_bot_challenge(&root) && changed {
-                continue;
-            }
-            if root
-                .pointer("/videoDetails/videoId")
-                .and_then(Value::as_str)
-                .is_some_and(|id| id != track.id)
-            {
-                return Err(provider_error("Player returned a different video ID"));
-            }
-            return parse_player(&root);
+        let body = serde_json::json!({
+            "videoId": track.id, "context": {"client": {
+                "clientName": "IOS", "clientVersion": IOS_VERSION,
+                "deviceModel": "iPhone16,2", "osName": "iPhone",
+                "osVersion": "18.5.0.22F76", "hl": "en", "gl": "US"
+            }}
+        });
+        let response = self
+            .client
+            .post(&self.player_url)
+            .header(USER_AGENT, IOS_USER_AGENT)
+            .header("X-YouTube-Client-Name", "5")
+            .header("X-YouTube-Client-Version", IOS_VERSION)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|_| provider_error("Player request failed"))?;
+        if !response.status().is_success() {
+            return Err(provider_error(format!(
+                "Player request returned HTTP {}",
+                response.status()
+            )));
         }
-        Err(provider_error("Bot check not cleared"))
+        let root: Value = response
+            .json()
+            .await
+            .map_err(|_| provider_error("Invalid player JSON response"))?;
+        if root
+            .pointer("/videoDetails/videoId")
+            .and_then(Value::as_str)
+            .is_some_and(|id| id != track.id)
+        {
+            return Err(provider_error("Player returned a different video ID"));
+        }
+        parse_player(&root)
     }
 }
 
@@ -264,19 +237,6 @@ fn parse_search(json: &Value, limit: usize) -> Result<Vec<Track>> {
     }
 }
 
-fn is_bot_challenge(root: &Value) -> bool {
-    let reason = root
-        .pointer("/playabilityStatus/reason")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_lowercase();
-    root.pointer("/playabilityStatus/status")
-        .and_then(Value::as_str)
-        == Some("LOGIN_REQUIRED")
-        && reason.contains("confirm")
-        && reason.contains("bot")
-}
-
 fn parse_player(root: &Value) -> Result<StreamSource> {
     let reason = root
         .pointer("/playabilityStatus/reason")
@@ -286,12 +246,36 @@ fn parse_player(root: &Value) -> Result<StreamSource> {
         .pointer("/playabilityStatus/status")
         .and_then(Value::as_str)
     {
-        Some("OK") => direct_audio_source(root)
-            .ok_or_else(|| provider_error("No compatible direct AAC/MP4 audio format")),
-        Some("LOGIN_REQUIRED") if is_bot_challenge(root) => {
-            Err(provider_error("Bot check not cleared"))
+        Some("OK") => {
+            if let Some(url) = root
+                .pointer("/streamingData/hlsManifestUrl")
+                .and_then(Value::as_str)
+            {
+                let parsed = reqwest::Url::parse(url)
+                    .map_err(|_| provider_error("Unsupported HLS manifest URL"))?;
+                if parsed.scheme() != "https"
+                    || parsed.host_str().is_none()
+                    || !parsed.username().is_empty()
+                {
+                    return Err(provider_error("Unsupported HLS manifest URL"));
+                }
+                return Ok(StreamSource {
+                    url: parsed.into(),
+                    mime_type: "application/vnd.apple.mpegurl".into(),
+                    bitrate_kbps: None,
+                    expires_at: None,
+                });
+            }
+            if root
+                .pointer("/streamingData/serverAbrStreamingUrl")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+            {
+                return Err(provider_error("YouTube requires playback verification for this track (no attestation provider)"));
+            }
+            Err(provider_error("No compatible HLS audio stream"))
         }
-        Some("LOGIN_REQUIRED") => Err(provider_error(format!("Login required: {reason}"))),
+        Some("LOGIN_REQUIRED") => Err(provider_error(format!("Sign-in required: {reason}"))),
         Some(status) => Err(provider_error(format!("Unplayable ({status}): {reason}"))),
         None => Err(provider_error(
             "Invalid player response: missing playability status",
@@ -299,76 +283,42 @@ fn parse_player(root: &Value) -> Result<StreamSource> {
     }
 }
 
-fn direct_audio_source(json: &Value) -> Option<StreamSource> {
-    json.pointer("/streamingData/adaptiveFormats")?
-        .as_array()?
-        .iter()
-        .filter_map(|format| {
-            let mime = format.get("mimeType")?.as_str()?;
-            let url = reqwest::Url::parse(format.get("url")?.as_str()?).ok()?;
-            // Symphonia can decode AAC/MP4, but not the provider's WebM/Opus tracks.
-            if !mime.starts_with("audio/mp4;")
-                || !mime.contains("mp4a.40.")
-                || url.scheme() != "https"
-                || url.host_str().is_none()
-                || format
-                    .get("drmTrackType")
-                    .and_then(Value::as_str)
-                    .is_some_and(|value| !value.is_empty())
-                || format
-                    .get("drmFamilies")
-                    .and_then(Value::as_array)
-                    .is_some_and(|value| !value.is_empty())
-            {
-                return None;
-            }
-            Some((
-                format.get("itag").and_then(Value::as_u64) == Some(140),
-                StreamSource {
-                    url: url.into(),
-                    mime_type: mime.into(),
-                    bitrate_kbps: format
-                        .get("bitrate")
-                        .and_then(Value::as_u64)
-                        .map(|bitrate| (bitrate / 1000) as u32),
-                    expires_at: None,
-                },
-            ))
-        })
-        .max_by_key(|(preferred, source)| (*preferred, source.bitrate_kbps))
-        .map(|(_, source)| source)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    const DIRECT: &str = include_str!("../tests/fixtures/player-direct.json");
+    const HLS: &str = include_str!("../tests/fixtures/player-hls.json");
     const LOGIN: &str = include_str!("../tests/fixtures/player-login.json");
-    const BOT: &str = include_str!("../tests/fixtures/player-bot.json");
+    const SABR: &str = include_str!("../tests/fixtures/player-sabr.json");
     const NO_AUDIO: &str = include_str!("../tests/fixtures/player-no-audio.json");
 
     #[test]
     fn player_fixtures_have_distinct_outcomes() {
         assert_eq!(
-            parse_player(&serde_json::from_str(DIRECT).unwrap())
+            parse_player(&serde_json::from_str(HLS).unwrap())
                 .unwrap()
-                .url,
-            "https://example.com/aac"
+                .mime_type,
+            "application/vnd.apple.mpegurl"
         );
         for (fixture, message) in [
-            (LOGIN, "Login required"),
-            (BOT, "Bot check not cleared"),
-            (NO_AUDIO, "No compatible direct AAC/MP4"),
+            (LOGIN, "Sign-in required"),
+            (SABR, "requires playback verification"),
+            (NO_AUDIO, "No compatible HLS"),
         ] {
             assert!(parse_player(&serde_json::from_str(fixture).unwrap())
                 .unwrap_err()
                 .to_string()
                 .contains(message));
         }
-        assert!(parse_player(&json!({"playabilityStatus":{"status":"UNPLAYABLE","reason":"Not available in your region"}})).unwrap_err().to_string().contains("Unplayable (UNPLAYABLE): Not available in your region"));
+        assert!(parse_player(
+            &json!({"playabilityStatus":{"status":"UNPLAYABLE","reason":"Unavailable here"}})
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("Unplayable (UNPLAYABLE): Unavailable here"));
         assert!(parse_player(&json!({})).is_err());
+        assert!(parse_player(&json!({"playabilityStatus":{"status":"OK"},"streamingData":{"hlsManifestUrl":"file:///bad"}})).is_err());
     }
 
     #[test]
@@ -440,80 +390,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bot_handshake_uses_server_visitor_once_and_matching_vr_profile() {
-        let (url, server) = serve_player(vec![BOT, DIRECT]).await;
-        let provider = YouTubeMusicProvider {
-            player_url: url,
-            ..YouTubeMusicProvider::new()
-        };
-        let track = provider.get_track_details("JALbemLw3G4").await.unwrap();
+    async fn ios_profile_matches_android_without_visitor_handshake() {
         assert_eq!(
-            provider.resolve_stream(&track).await.unwrap().url,
-            "https://example.com/aac"
+            YouTubeMusicProvider::new().player_url,
+            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false"
         );
-        let requests = server.await.unwrap();
-        assert_eq!(requests.len(), 2);
-        for (headers, body) in &requests {
-            assert!(headers.contains("x-youtube-client-name: 28\r\n"));
-            assert!(headers.contains("x-youtube-client-version: 1.65.10\r\n"));
-            assert!(headers.contains(&format!("user-agent: {}", VR_USER_AGENT.to_lowercase())));
-            assert_eq!(body["context"]["client"]["clientName"], "ANDROID_VR");
-            assert_eq!(body["context"]["client"]["deviceModel"], "Quest 3");
-            assert_eq!(
-                body["playbackContext"]["contentPlaybackContext"]["html5Preference"],
-                "HTML5_PREF_WANTS"
-            );
-        }
-        assert!(requests[0].1["context"]["client"]["visitorData"].is_null());
-        assert!(requests[1]
-            .0
-            .contains("x-goog-visitor-id: anonymous-fixture"));
-        assert_eq!(
-            requests[1].1["context"]["client"]["visitorData"],
-            "anonymous-fixture"
-        );
-    }
-
-    #[tokio::test]
-    async fn login_does_not_retry_and_uncleared_bot_is_bounded() {
-        for (responses, expected, count) in [
-            (vec![LOGIN], "Login required", 1),
-            (vec![BOT, BOT], "Bot check not cleared", 2),
-        ] {
-            let (url, server) = serve_player(responses).await;
+        for fixture in [HLS, LOGIN, SABR] {
+            let (url, server) = serve_player(vec![fixture]).await;
             let provider = YouTubeMusicProvider {
                 player_url: url,
                 ..YouTubeMusicProvider::new()
             };
             let track = provider.get_track_details("JALbemLw3G4").await.unwrap();
-            assert!(provider
-                .resolve_stream(&track)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains(expected));
-            assert_eq!(server.await.unwrap().len(), count);
+            let _ = provider.resolve_stream(&track).await;
+            let requests = server.await.unwrap();
+            assert_eq!(requests.len(), 1);
+            let (headers, body) = &requests[0];
+            assert!(headers.contains("x-youtube-client-name: 5\r\n"));
+            assert!(headers.contains("x-youtube-client-version: 21.26.4\r\n"));
+            assert!(headers.contains(&format!("user-agent: {}", IOS_USER_AGENT.to_lowercase())));
+            assert!(!headers.contains("x-goog-visitor-id"));
+            assert_eq!(
+                body,
+                &json!({"videoId":"JALbemLw3G4", "context":{"client":{
+                    "clientName":"IOS","clientVersion":"21.26.4","deviceModel":"iPhone16,2",
+                    "osName":"iPhone","osVersion":"18.5.0.22F76","hl":"en","gl":"US"
+                }}})
+            );
         }
-    }
-
-    #[test]
-    fn selects_direct_aac_over_unsupported_opus() {
-        let player = json!({ "streamingData": { "adaptiveFormats": [
-            { "mimeType": "audio/webm; codecs=\"opus\"", "url": "https://example.com/opus" },
-            { "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "url": "https://example.com/aac" }
-        ]}});
-        assert_eq!(
-            direct_audio_source(&player).unwrap().url,
-            "https://example.com/aac"
-        );
-    }
-
-    #[test]
-    fn unsupported_transport_does_not_become_a_watch_url() {
-        assert!(direct_audio_source(&json!({ "streamingData": {
-            "serverAbrStreamingUrl": "https://example.com/sabr",
-            "hlsManifestUrl": "https://example.com/manifest.m3u8"
-        }}))
-        .is_none());
     }
 }
