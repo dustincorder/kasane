@@ -37,7 +37,7 @@ fun TrackLikeButton(track: Track, localFavorite: Boolean, onLocalToggle: () -> U
             if (unknown) Icons.Default.QuestionMark else if (cloud != null && state == CloudLikeState.DISLIKED) Icons.Default.ThumbDown
             else if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
             contentDescription = null,
-            tint = if (liked) MaterialTheme.colorScheme.primary else Gray400,
+            tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

@@ -45,8 +45,8 @@ private fun WithRealArtwork(content: @Composable () -> Unit) {
         onDispose { Coil.setImageLoader(loaders.first); loaders.second.shutdown() }
     }
     CompositionLocalProvider(LocalInspectionMode provides false) {
-        MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
-            Surface(color = Gray950, content = content)
+        KasaneTheme(dynamicColor = false) {
+            Surface(color = MaterialTheme.colorScheme.background, content = content)
         }
     }
 }
@@ -64,25 +64,19 @@ fun HomeRealArtworkPreview() = WithRealArtwork {
 @Composable
 fun SearchRealArtworkPreview() = WithRealArtwork {
     Column {
-        Text("Search · Songs", style = KasaneTypography.titleLarge, modifier = Modifier.padding(16.dp))
+        Text("Search · Songs", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
         TrackRow(searchTrack, onClick = {})
         TrackRow(homeTrack, onClick = {})
     }
 }
 
-@Preview(showBackground = true, widthDp = 390)
-@Composable
-fun MiniPlayerRealArtworkPreview() = WithRealArtwork {
-    MiniPlayer(PlaybackUiState(currentTrack = searchTrack, isPlaying = true,
-        currentPositionMs = 45000, durationMs = 180000), {}, {}, {}, {})
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 fun NowPlayingRealArtworkPreview() = WithRealArtwork {
-    NowPlayingSheet(PlaybackUiState(currentTrack = homeTrack, currentPositionMs = 45000, durationMs = 180000),
-        {}, {}, {}, {}, {}, false, {}, rememberModalBottomSheetState(skipPartiallyExpanded = true))
+    val sheet = rememberPlayerSheetState()
+    LaunchedEffect(Unit) { sheet.progress.snapTo(1f) }
+    PlayerSheet(PlaybackUiState(currentTrack = homeTrack, currentPositionMs = 45000, durationMs = 180000, isPlaying = true),
+        sheet, PlayerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}), false, dockedBottom = 80.dp)
 }
 
 @Preview(showBackground = true, widthDp = 390)

@@ -20,7 +20,9 @@ data class PlaybackUiState(
     val queue: List<Track> = emptyList(), val queueIndex: Int = -1, val errorMessage: String? = null,
     val noticeMessage: String? = null,
     val shuffleEnabled: Boolean = false, val repeatMode: Int = Player.REPEAT_MODE_OFF,
-    val canSkipNext: Boolean = false, val canSkipPrevious: Boolean = false
+    val canSkipNext: Boolean = false, val canSkipPrevious: Boolean = false,
+    /** Queue indices in the order they will actually play after the current item (follows shuffle). */
+    val upcomingOrder: List<Int> = emptyList()
 )
 
 internal fun shouldPauseOnToggle(playWhenReady: Boolean, state: Int, hasError: Boolean): Boolean =
@@ -80,46 +82,69 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
                 else "Could not play this track. Check your connection or try another track."
             },
             shuffleEnabled = player.shuffleModeEnabled, repeatMode = player.repeatMode,
+            upcomingOrder = upcoming(player),
             canSkipNext = player.hasNextMediaItem(), canSkipPrevious = player.hasPreviousMediaItem() || player.currentPosition > 3000)
+    }
+    private fun upcoming(player: Player): List<Int> {
+        val timeline = player.currentTimeline
+        if (timeline.isEmpty) return emptyList()
+        val order = ArrayList<Int>()
+        var index = player.currentMediaItemIndex
+        while (order.size < player.mediaItemCount) {
+            index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+            if (index == androidx.media3.common.C.INDEX_UNSET) break
+            order += index
+        }
+        return order
     }
     private fun command(action: (Player) -> Unit) {
         val player = controller
         if (player != null) { action(player); publish(player) }
         else if (pendingCommands.size < 20) pendingCommands.addLast(action)
     }
-    fun playTrack(track: Track) = playSingle(track, "single")
+    fun playTrack(track: Track) = startContext(track, "single")
     /** Selecting an existing queue entry must preserve its collection/radio context. */
     fun playQueueItem(trackId: String) = command { player ->
         val index = (0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId == trackId }
-        if (index != null) {
-            if (index != player.currentMediaItemIndex || player.playbackState == Player.STATE_ENDED || player.playerError != null)
-                player.seekToDefaultPosition(index)
-            player.prepare(); player.play()
-        }
+        if (index != null) playQueueIndex(player, index)
     }
-    fun startRadio(track: Track) = playSingle(track, "forced")
-    private fun playSingle(track: Track, radioMode: String) = command { player ->
-        val index = (0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId == track.id }
-        if (index != null) {
-            player.replaceMediaItem(index, PlaybackService.trackToMediaItem(track, radioMode = radioMode))
+    fun playQueueIndex(index: Int) = command { player -> if (index in 0 until player.mediaItemCount) playQueueIndex(player, index) }
+    private fun playQueueIndex(player: Player, index: Int) {
+        if (index != player.currentMediaItemIndex || player.playbackState == Player.STATE_ENDED || player.playerError != null)
             player.seekToDefaultPosition(index)
-        }
-        else {
-            player.addMediaItem(player.currentMediaItemIndex.plus(1).coerceIn(0, player.mediaItemCount),
-                PlaybackService.trackToMediaItem(track, radioMode = radioMode))
-            val added = (0 until player.mediaItemCount).first { player.getMediaItemAt(it).mediaId == track.id }
-            player.seekToDefaultPosition(added)
-        }
         player.prepare(); player.play()
     }
+    fun startRadio(track: Track) = startContext(track, "forced")
+    /**
+     * A track chosen from search, home or a list outside the queue starts a new playback context: the queue becomes
+     * just that track, it is the anchor of a fresh radio, and nothing from the previous queue or ordering is kept.
+     * Choosing the track that is already playing only resumes it; pause, resume and seek never rebuild the queue.
+     */
+    private fun startContext(track: Track, radioMode: String) = command { player ->
+        if (!QueuePolicy.startsNewContext(player.currentMediaItem?.mediaId, track.id, radioMode == "forced")) { prepareAndPlay(player); return@command }
+        val start = QueuePolicy.newContext(track)
+        val context = java.util.UUID.randomUUID().toString()
+        player.setMediaItems(start.items.map { PlaybackService.trackToMediaItem(it, radioMode = radioMode, playContext = context) }, start.startIndex, 0)
+        player.shuffleModeEnabled = start.shuffle
+        prepareAndPlay(player)
+    }
     fun playTracks(tracks: List<Track>, shuffle: Boolean = false) {
-        val prepared = QueuePolicy.prepare(tracks)
-        if (prepared.isEmpty()) return
+        val start = QueuePolicy.collectionStart(tracks, shuffle) { size -> (0 until size).random() } ?: return
         val collectionContext = java.util.UUID.randomUUID().toString()
         command { player ->
-            player.setMediaItems(prepared.map { PlaybackService.trackToMediaItem(it, radioMode = "collection", collectionContext = collectionContext) }, if (shuffle) prepared.indices.random() else 0, 0)
-            player.shuffleModeEnabled = shuffle
-            player.prepare(); player.play()
+            player.setMediaItems(start.items.map { PlaybackService.trackToMediaItem(it, radioMode = "collection", collectionContext = collectionContext) }, start.startIndex, 0)
+            player.shuffleModeEnabled = start.shuffle
+            prepareAndPlay(player)
+        }
+    }
+    fun moveQueueItem(from: Int, to: Int) = command { player ->
+        QueuePolicy.validMove(player.mediaItemCount, from, to)?.let { (f, t) -> player.moveMediaItem(f, t) }
+    }
+    fun removeQueueItem(index: Int) = command { player ->
+        if (index in 0 until player.mediaItemCount) {
+            val removedCurrent = index == player.currentMediaItemIndex
+            player.removeMediaItem(index)
+            if (removedCurrent && player.mediaItemCount > 0 && player.playWhenReady) { player.prepare(); player.play() }
         }
     }
     private fun promoteManual(player: Player, index: Int) {

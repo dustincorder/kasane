@@ -33,7 +33,7 @@ fun KasaneChoiceChip(label: String, selected: Boolean, onClick: () -> Unit,
 @Composable
 fun ChoiceStatesPreview() {
     KasaneTheme(dynamicColor = false) {
-        Surface(color = Gray950) {
+        Surface(color = MaterialTheme.colorScheme.background) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 KasaneChoiceChip("Normal", false, {})
                 KasaneChoiceChip("Selected", true, {})

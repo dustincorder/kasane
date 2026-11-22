@@ -135,6 +135,11 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.material3:material3")
 
+    // Seed-based Material 3 palettes for the fallback and custom accents (HCT, same algorithm as Material You)
+    implementation("com.materialkolor:material-kolor:2.1.1")
+    // Drag-and-drop reordering for the queue
+    implementation("sh.calvin.reorderable:reorderable:2.5.1")
+
     // Image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
 

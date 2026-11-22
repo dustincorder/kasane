@@ -117,10 +117,10 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
         }
         Spacer(Modifier.height(4.dp))
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.primary)
-        if (query.isBlank()) Text("Songs, albums, artists and playlists. Find your next listen.", color = Gray400, modifier = Modifier.padding(24.dp))
-        else if (!loading && error == null && items.isEmpty()) Text("No results for “$query”. Try another search.", color = Gray400, modifier = Modifier.padding(24.dp))
+        if (query.isBlank()) Text("Songs, albums, artists and playlists. Find your next listen.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
+        else if (!loading && error == null && items.isEmpty()) Text("No results for “$query”. Try another search.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
         error?.let { message ->
-            Text(message, color = Gray400, modifier = Modifier.padding(16.dp))
+            Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
             TextButton(onClick = { revision++ }) { Text("Retry search") }
         }
         LazyColumn(Modifier.weight(1f)) {
@@ -268,16 +268,16 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
             }
             if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(20.dp)) }
             if (error != null) item {
-                Text(error, color = Gray400, modifier = Modifier.padding(20.dp))
+                Text(error, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
                 TextButton(onClick = if (page != null && page.continuation != null) onLoadMore else onRetry, enabled = !loadingMore) { Text("Retry") }
             }
             if (!loading && page != null && page.shelves.isEmpty() && error == null) item {
-                Text("No available items in this collection.", color = Gray400, modifier = Modifier.padding(20.dp))
+                Text("No available items in this collection.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
             }
             page?.shelves?.forEachIndexed { index, shelf ->
                 val playable = shelf.items.all { it.track() != null }
                 if (playable) {
-                    if (shelf.title.isNotBlank()) item { Text(shelf.title, style = KasaneTypography.titleMedium, modifier = Modifier.padding(20.dp)) }
+                    if (shelf.title.isNotBlank()) item { Text(shelf.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(20.dp)) }
                     items(shelf.items, key = { "$index:${it.kind}:${it.id}" }) { entry ->
                         val track = entry.track() ?: return@items
                         TrackRow(track, onClick = { onPlay(page.tracks.dropWhile { it.id != track.id }, false) },
@@ -299,6 +299,6 @@ fun CatalogDetailPreview() {
         val item = CatalogItem("preview-album", CatalogKind.ALBUM, "Evening sessions", "Kasane Preview")
         val page = CatalogPage(item.title, item.subtitle, null, listOf(CatalogShelf("Tracks", listOf(
             CatalogItem("preview-track", CatalogKind.SONG, "A very long song title across the evening", "Preview artist", durationSeconds = 180.0)))))
-        Surface(color = Gray950) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, {}) }
+        Surface(color = MaterialTheme.colorScheme.background) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, {}) }
     }
 }

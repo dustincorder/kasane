@@ -1,9 +1,6 @@
 package cord.kasane.music.ui.components
 
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -14,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -23,37 +21,24 @@ import cord.kasane.music.model.Track
 import cord.kasane.music.ui.theme.*
 
 /**
- * The overflow affordance on artwork keeps a 48dp touch target but draws only a 26dp scrim chip with
- * a 16dp glyph, so it no longer dominates the cover.
+ * Grid item: the whole card is the target. Tap plays or opens, long-press opens the menu, and there is no
+ * button on the artwork. TalkBack gets every menu entry as an action.
  */
-@Composable
-fun ArtworkMenuButton(onClick: () -> Unit, modifier: Modifier = Modifier, description: String = "Track options") {
-    Box(
-        modifier.size(48.dp).clickable(role = Role.Button, onClickLabel = description, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Box(Modifier.size(26.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape), contentAlignment = Alignment.Center) {
-            Icon(Icons.Default.MoreVert, description, tint = White, modifier = Modifier.size(16.dp))
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TrackCard(track: Track, width: Dp, onClick: () -> Unit, modifier: Modifier = Modifier,
     onLocalFavorite: (() -> Unit)? = null, localFavorite: Boolean = false) {
     var expanded by remember(track.id) { mutableStateOf(false) }
+    val entries = rememberTrackMenuEntries(track, onPlay = onClick, onLocalFavorite = onLocalFavorite, localFavorite = localFavorite)
+    val source = remember { MutableInteractionSource() }
     Box(modifier.width(width)) {
-        Column(Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { expanded = true })) {
-            TrackArtwork(track.thumbnailUri, Modifier.size(width))
+        Column(Modifier.fillMaxWidth().pressScale(source).clip(MaterialTheme.shapes.medium)
+            .trackGestures(entries, "Play ${track.title}", onClick, { expanded = true }, source)) {
+            TrackArtwork(track.thumbnailUri, Modifier.size(width), shape = MaterialTheme.shapes.medium)
             Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
-            Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp, start = 2.dp, end = 2.dp))
+            Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmallMuted,
+                modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 2.dp))
         }
-        Box(Modifier.align(Alignment.TopEnd)) {
-            ArtworkMenuButton({ expanded = true })
-            TrackContextMenu(track, expanded, { expanded = false }, onClick,
-                onLocalFavorite = onLocalFavorite, localFavorite = localFavorite)
-        }
+        TrackContextMenu(track, expanded, { expanded = false }, onClick, onLocalFavorite = onLocalFavorite, localFavorite = localFavorite)
     }
 }

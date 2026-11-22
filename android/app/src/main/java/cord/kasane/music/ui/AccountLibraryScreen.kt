@@ -89,16 +89,16 @@ fun AccountLibraryScreen(state: AccountState, provider: AccountLibraryProvider, 
         if (state !is AccountState.SignedIn) {
             Column(Modifier.fillMaxSize().padding(horizontal = 24.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center) {
-                Icon(Icons.Default.LibraryMusic, contentDescription = null, tint = Gray400, modifier = Modifier.size(40.dp))
-                Text("Sign in to see your YouTube Music library", color = White, modifier = Modifier.padding(top = 16.dp), style = KasaneTypography.titleMedium)
-                Text("Your on-device favorites and listening history stay separate.", color = Gray400,
-                    modifier = Modifier.padding(top = 8.dp), style = KasaneTypography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Icon(Icons.Default.LibraryMusic, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
+                Text("Sign in to see your YouTube Music library", color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
+                Text("Your on-device favorites and listening history stay separate.", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMediumMuted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 TextButton(onClick = onSignIn, modifier = Modifier.padding(top = 8.dp)) { Text("Sign in") }
             }
         } else {
             if (selectedPlaylist != null) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 TextButton(onClick = { selectedPlaylistId = null; selectedPlaylistTitle = ""; selectedPlaylistSubtitle = ""; selectedPlaylistArtwork = null }) { Text("Back to playlists") }
-                Text(selectedPlaylist?.title.orEmpty(), color = White, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                Text(selectedPlaylist?.title.orEmpty(), color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f))
                 val offline = cord.kasane.music.ui.components.LocalOfflineActions.current
                 val loaded = page?.tracks.orEmpty()
@@ -107,14 +107,14 @@ fun AccountLibraryScreen(state: AccountState, provider: AccountLibraryProvider, 
                 }
             }
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.primary)
-            error?.let { Text(it, color = Gray400, modifier = Modifier.padding(20.dp)); TextButton(onClick = { revision++ }) { Text("Retry") } }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp)); TextButton(onClick = { revision++ }) { Text("Retry") } }
             val serverEntries = page?.shelves?.flatMap { it.items }.orEmpty()
             val entries = buildList {
                 addAll(serverEntries)
                 if (page != null && selectedPlaylist == null && selected == AccountCollection.PLAYLISTS &&
                     serverEntries.none { it.kind == CatalogKind.PLAYLIST && it.id == YtmLikedSongs.id }) add(YtmLikedSongs)
             }.distinctBy { it.kind to it.id }
-            if (!loading && error == null && entries.isEmpty()) Text(if (selectedPlaylist == null) "No saved items in this collection." else "This playlist has no available tracks.", color = Gray400, modifier = Modifier.padding(20.dp))
+            if (!loading && error == null && entries.isEmpty()) Text(if (selectedPlaylist == null) "No saved items in this collection." else "This playlist has no available tracks.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
             LazyColumn(state = androidx.compose.foundation.lazy.rememberLazyListState(), modifier = Modifier.weight(1f).fillMaxWidth()) {
                 items(entries, key = { "${it.kind}:${it.id}" }) { item ->
                     val track = item.track()
@@ -134,14 +134,14 @@ fun AccountLibraryScreen(state: AccountState, provider: AccountLibraryProvider, 
                         Box(Modifier.size(52.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp)), contentAlignment = androidx.compose.ui.Alignment.Center) {
                             if (!item.artwork.isNullOrBlank()) TrackArtwork(item.artwork, Modifier.fillMaxSize())
                             else Icon(if (item.id == YtmLikedSongs.id) Icons.Default.Favorite else Icons.Default.LibraryMusic,
-                                contentDescription = null, tint = if (item.id == YtmLikedSongs.id) MaterialTheme.colorScheme.primary else Gray400)
+                                contentDescription = null, tint = if (item.id == YtmLikedSongs.id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Column(Modifier.weight(1f).padding(start = 14.dp)) {
                             Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
                             Text(if (item.id == YtmLikedSongs.id) "Playlist · YouTube Music" else item.subtitle.ifBlank { item.kind.label },
-                                color = Gray400, style = KasaneTypography.bodySmall, maxLines = 1)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmallMuted, maxLines = 1)
                         }
-                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Gray400)
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 if (page?.continuation != null && entries.size < 2000) item {
@@ -178,7 +178,7 @@ fun AccountLibraryScreen(state: AccountState, provider: AccountLibraryProvider, 
 @Composable
 fun AccountLibraryGuestPreview() {
     KasaneTheme(dynamicColor = false) {
-        Surface(color = Gray950) {
+        Surface(color = MaterialTheme.colorScheme.background) {
             val previewProvider = remember { object : AccountLibraryProvider {
                 override suspend fun collection(collection: AccountCollection, continuation: String?) =
                     CatalogPage("", "", null, emptyList())

@@ -2,7 +2,6 @@ package cord.kasane.music.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -47,19 +46,24 @@ fun TrackRow(
     onToggleFavorite: (() -> Unit)? = null,
     isFavorite: Boolean = false,
     modifier: Modifier = Modifier,
-    useCloudFavorite: Boolean = true
+    useCloudFavorite: Boolean = true,
+    extraMenu: List<MenuEntry> = emptyList(),
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
     val offline = LocalOfflineBadges.current[track.id]
+    val entries = rememberTrackMenuEntries(track, onClick, onPlayNext, onAddToQueue, onToggleFavorite, isFavorite, extraMenu)
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = { menuExpanded = true })
-            .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            .trackGestures(entries, "Play ${track.title}", onClick, { menuExpanded = true })
+            .padding(start = if (leading == null) 16.dp else 4.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        leading?.invoke()
         Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
             TrackArtwork(track.thumbnailUri, Modifier.fillMaxSize())
             if (isLoading || isPlaying) Box(
@@ -87,12 +91,14 @@ fun TrackRow(
             TrackLikeButton(track, isFavorite, onToggleFavorite ?: {}, useCloud = useCloudFavorite)
         }
         Box {
+            // A 20dp glyph inside the standard 48dp touch target: compact to look at, comfortable to hit.
             IconButton(onClick = { menuExpanded = true }) {
-                Icon(Icons.Default.MoreVert, "Track options", tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.MoreVert, "More options for ${track.title}", tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
             }
             TrackContextMenu(track, menuExpanded, { menuExpanded = false }, onClick,
-                onPlayNext, onAddToQueue, onToggleFavorite, isFavorite)
+                onPlayNext, onAddToQueue, onToggleFavorite, isFavorite, extraMenu)
         }
+        trailing?.invoke()
     }
 }
 

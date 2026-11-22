@@ -37,7 +37,7 @@ fun PlaylistPickerHost() {
     LaunchedEffect(picker) { picker?.messages?.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
     if (state.visible && picker != null) {
         ModalBottomSheet(onDismissRequest = picker::dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Gray900, contentColor = White) {
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface) {
             // Material3's modal handles system insets. Do not double-pad navigation bars.
             PlaylistPickerContent(state, picker::dismiss, picker::refresh, picker::add)
         }
@@ -48,24 +48,24 @@ fun PlaylistPickerHost() {
 fun PlaylistPickerContent(state: PlaylistPickerState, onClose: () -> Unit, onRefresh: () -> Unit, onAdd: (String) -> Unit) {
     Column(Modifier.fillMaxWidth().heightIn(max = 540.dp)) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Add to playlist", style = KasaneTypography.titleLarge, modifier = Modifier.weight(1f))
+            Text("Add to playlist", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close playlist picker") }
         }
         state.track?.let { track ->
-            Text(track.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = KasaneTypography.bodyLarge,
+            Text(track.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(horizontal = 20.dp))
-            Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Gray400,
-                style = KasaneTypography.bodyMedium, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 12.dp))
+            Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMediumMuted, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 12.dp))
         }
-        HorizontalDivider(color = Gray800)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary)
         state.error?.let { message ->
-            Text(message, style = KasaneTypography.bodyMedium, color = MaterialTheme.colorScheme.error,
+            Text(message, style = MaterialTheme.typography.bodyMediumMuted, color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
         }
         if (!state.loading && state.error == null && state.options.isEmpty()) {
             Text("No editable playlists were returned. Create a playlist in YouTube Music, then refresh this list.",
-                color = Gray400, style = KasaneTypography.bodyMedium, modifier = Modifier.padding(20.dp))
+                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMediumMuted, modifier = Modifier.padding(20.dp))
         }
         LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth(), contentPadding = PaddingValues(vertical = 8.dp)) {
             items(state.options, key = { it.id }) { playlist ->
@@ -75,17 +75,17 @@ fun PlaylistPickerContent(state: PlaylistPickerState, onClose: () -> Unit, onRef
                     .heightIn(min = 64.dp).padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (playlist.artwork != null) TrackArtwork(playlist.artwork, Modifier.size(44.dp))
-                    else Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, tint = Gray400, modifier = Modifier.size(44.dp).padding(8.dp))
+                    else Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(44.dp).padding(8.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(playlist.title, style = KasaneTypography.bodyLarge, maxLines = 2,
-                            overflow = TextOverflow.Ellipsis, color = if (playlist.alreadyAdded) Gray400 else White)
+                        Text(playlist.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2,
+                            overflow = TextOverflow.Ellipsis, color = if (playlist.alreadyAdded) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
                         Text(when {
                             busy -> "Adding…"
                             playlist.alreadyAdded -> "Already added"
                             playlist.privacy == "PRIVATE" -> "Private · YouTube Music"
                             playlist.privacy == "UNLISTED" -> "Unlisted · YouTube Music"
                             else -> "YouTube Music"
-                        }, style = KasaneTypography.labelMedium, color = Gray400)
+                        }, style = MaterialTheme.typography.labelMediumMuted, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (busy) CircularProgressIndicator(Modifier.size(22.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
                     else if (playlist.alreadyAdded) Icon(Icons.Default.Check, "Already in playlist", tint = MaterialTheme.colorScheme.primary)
@@ -94,7 +94,7 @@ fun PlaylistPickerContent(state: PlaylistPickerState, onClose: () -> Unit, onRef
         }
         TextButton(onClick = onRefresh, enabled = !state.loading && state.pendingPlaylist == null,
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp).heightIn(min = 48.dp)) {
-            Text(if (state.loading) "Loading playlists…" else "Refresh playlists", color = if (state.loading || state.pendingPlaylist != null) Gray500 else MaterialTheme.colorScheme.primary)
+            Text(if (state.loading) "Loading playlists…" else "Refresh playlists", color = if (state.loading || state.pendingPlaylist != null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -103,7 +103,7 @@ fun PlaylistPickerContent(state: PlaylistPickerState, onClose: () -> Unit, onRef
 @Composable
 fun PlaylistPickerPreview() {
     KasaneTheme(dynamicColor = false) {
-        Surface(color = Gray900) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
             PlaylistPickerContent(PlaylistPickerState(visible = true,
                 track = Track("preview0001", "A track title with enough words to wrap naturally", "Preview artist"),
                 options = listOf(
@@ -118,7 +118,7 @@ fun PlaylistPickerPreview() {
 @Composable
 fun PlaylistPickerErrorPreview() {
     KasaneTheme(dynamicColor = false) {
-        Surface(color = Gray900) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
             PlaylistPickerContent(PlaylistPickerState(visible = true, track = Track("preview0001", "Track title", "Preview artist"),
                 error = "Could not confirm the addition. Refresh the list before trying again.", refreshRequired = true), {}, {}, {})
         }
@@ -129,7 +129,7 @@ fun PlaylistPickerErrorPreview() {
 @Composable
 fun PlaylistPickerLoadingPreview() {
     KasaneTheme(dynamicColor = false) {
-        Surface(color = Gray900) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
             PlaylistPickerContent(PlaylistPickerState(visible = true, loading = true,
                 track = Track("preview0001", "A track", "Preview artist")), {}, {}, {})
         }

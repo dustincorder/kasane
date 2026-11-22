@@ -56,12 +56,6 @@ import cord.kasane.music.auth.AccountChannel
 import cord.kasane.music.auth.CapturedWebSession
 import cord.kasane.music.auth.WebSessionParser
 import cord.kasane.music.ui.theme.KasaneTheme
-import cord.kasane.music.ui.theme.Gray400
-import cord.kasane.music.ui.theme.Gray850
-import cord.kasane.music.ui.theme.Gray950
-import cord.kasane.music.ui.theme.White
-import cord.kasane.music.ui.theme.KasaneDarkColorScheme
-import cord.kasane.music.ui.theme.KasaneTypography
 
 private const val LOGIN_URL = "https://accounts.google.com/ServiceLogin?ltmpl=music&service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F"
 private const val MUSIC_ORIGIN = "https://music.youtube.com"
@@ -114,17 +108,17 @@ fun YtMusicLoginDialog(
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = Gray950) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close sign in", tint = White) }
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close sign in", tint = MaterialTheme.colorScheme.onSurface) }
                     Column(Modifier.weight(1f)) {
-                        Text("Sign in to YouTube Music", color = White, style = MaterialTheme.typography.titleMedium)
-                        Text("Google sign in stays inside this temporary secure web view.", color = Gray400, style = MaterialTheme.typography.bodySmall)
+                        Text("Sign in to YouTube Music", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+                        Text("Google sign in stays inside this temporary secure web view.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 if (channels == null && sessionCaptured) {
-                    Text("YouTube Music session detected. Checking your channel…", color = Gray400,
+                    Text("YouTube Music session detected. Checking your channel…", color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(20.dp), style = MaterialTheme.typography.bodyMedium)
                     if (isCheckingChannels) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary)
                     errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp)) }
@@ -271,7 +265,7 @@ fun YtMusicLoginDialog(
                         }
                     }, modifier = Modifier.weight(1f).fillMaxWidth(), update = { _: WebView -> })
                     Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Continue on the official Google and YouTube pages. Kasane never asks for your password.", color = Gray400, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        Text("Continue on the official Google and YouTube pages. Kasane never asks for your password.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                         if (pageError != null) TextButton(onClick = {
                             pageError = null
                             progress = true
@@ -300,7 +294,7 @@ fun YtMusicLoginDialog(
                 } else {
                     Text(
                         if (channels.size == 1) "Connecting account…" else "Choose the YouTube channel Kasane should use",
-                        color = White, modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
+                        color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
                     if (channels.size == 1) {
                         Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             if (isCheckingChannels) CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
@@ -310,7 +304,7 @@ fun YtMusicLoginDialog(
                             }
                         }
                     } else if (isCheckingChannels) Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary); Text("Checking your YouTube session…", color = Gray400, modifier = Modifier.padding(12.dp))
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary); Text("Checking your YouTube session…", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(12.dp))
                     } else {
                         errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
                         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
@@ -319,8 +313,8 @@ fun YtMusicLoginDialog(
                                 Row(Modifier.fillMaxWidth().clickable { selectedKey = key }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     RadioButton(selected = selectedKey == key, onClick = { selectedKey = key })
                                     Column(Modifier.padding(start = 8.dp)) {
-                                        Text(channel.title, color = White)
-                                        channel.subtitle?.let { Text(it, color = Gray400, style = MaterialTheme.typography.bodySmall) }
+                                        Text(channel.title, color = MaterialTheme.colorScheme.onSurface)
+                                        channel.subtitle?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
                                     }
                                 }
                             }
@@ -331,7 +325,7 @@ fun YtMusicLoginDialog(
                             TextButton(onClick = onRetryChannels, enabled = !isCheckingChannels) { Text("Retry") }
                             Button(
                                 enabled = !isCheckingChannels && selectedKey != null,
-                                colors = ButtonDefaults.buttonColors(disabledContainerColor = Gray850, disabledContentColor = Gray400),
+                                colors = ButtonDefaults.buttonColors(disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh, disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                                 onClick = {
                                     channels.firstOrNull { (it.pageId ?: it.dataSyncId ?: it.title) == selectedKey }?.let(onConfirmChannel)
                                 }) { Text("Confirm channel") }
@@ -354,7 +348,7 @@ fun clearYtMusicWebSession(onComplete: (() -> Unit)? = null) {
 @Composable
 private fun LoginDialogPreview() {
     KasaneTheme(dynamicColor = false) {
-        Surface(color = Gray950) {
+        Surface(color = MaterialTheme.colorScheme.background) {
             YtMusicLoginDialog(
                 channels = listOf(
                     AccountChannel("Kasane Preview", "YouTube channel", "UCpreview", "preview||user", null, false),
@@ -375,7 +369,7 @@ private fun LoginDialogPreview() {
 @Composable
 private fun SingleChannelLoginPreview() {
     KasaneTheme(dynamicColor = false) {
-        Surface(color = Gray950) {
+        Surface(color = MaterialTheme.colorScheme.background) {
             YtMusicLoginDialog(
                 channels = listOf(AccountChannel("Kasane Preview", "YouTube channel", "UCpreview", "preview||user", null, true)),
                 isCheckingChannels = true,

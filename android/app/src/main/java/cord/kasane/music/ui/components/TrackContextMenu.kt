@@ -28,13 +28,21 @@ private val EmptyTrackLinks: kotlinx.coroutines.flow.StateFlow<Map<String, cord.
 val LocalTrackNavigation = staticCompositionLocalOf<TrackNavigation?> { null }
 val LocalTrackActions = staticCompositionLocalOf<TrackActions?> { null }
 
-/** Shared menu for track rows, long press, and Now Playing; only wired actions are shown. */
+/** One menu action. `action` never dismisses anything; callers decide what happens around it. */
+class MenuEntry(val label: String, val enabled: Boolean = true, val action: () -> Unit)
+
+/**
+ * Single source of truth for a track's actions. The long-press menu, the trailing overflow button and the
+ * TalkBack actions list all render these same entries, so they can never drift apart.
+ */
 @Composable
-fun TrackContextMenu(
-    track: Track, expanded: Boolean, onDismiss: () -> Unit, onPlay: () -> Unit,
+fun rememberTrackMenuEntries(
+    track: Track, onPlay: () -> Unit,
     onNext: (() -> Unit)? = null, onQueue: (() -> Unit)? = null,
     onLocalFavorite: (() -> Unit)? = null, localFavorite: Boolean = false,
-) {
+    extra: List<MenuEntry> = emptyList(),
+    refreshRating: Boolean = false,
+): List<MenuEntry> {
     val navigation = LocalTrackNavigation.current
     val allLinks by key(navigation) { (navigation?.links ?: EmptyTrackLinks).collectAsState() }
     val links = allLinks[track.id]
@@ -44,49 +52,54 @@ fun TrackContextMenu(
     val cloud = LocalCloudLikes.current?.takeIf { !track.isLocal && track.sourceProvider == "youtube" }
     val states by key(cloud) { (cloud?.states ?: EmptyCloudLikes).collectAsState() }
     val pending by key(cloud) { (cloud?.pending ?: EmptyPendingLikes).collectAsState() }
-    LaunchedEffect(expanded, cloud, track.id) { if (expanded) cloud?.refresh(track.id) }
+    LaunchedEffect(refreshRating, cloud, track.id) { if (refreshRating) cloud?.refresh(track.id) }
     val ratings = TrackMenuPolicy.ratings(cloud != null, track.isLocal, states[track.id], cloud?.supportsDislike == true)
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Column(Modifier.widthIn(max = 280.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(track.title, style = KasaneTypography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(track.artist, color = Gray400, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        DropdownMenuItem(text = { Text("Play") }, onClick = { onDismiss(); onPlay() })
-        val next = onNext ?: actions?.let { { it.next(track) } }
-        val queue = onQueue ?: actions?.let { { it.queue(track) } }
-        if (next != null) DropdownMenuItem(text = { Text("Play next") }, onClick = { onDismiss(); next() })
-        if (queue != null) DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onDismiss(); queue() })
-        if (actions != null && youtube) DropdownMenuItem(text = { Text("Start radio") }, onClick = { onDismiss(); actions.radio(track) })
-        val offlineActions = LocalOfflineActions.current
-        if (offlineActions != null && cord.kasane.music.offline.OfflinePolicy.canRequestSave(track)) {
-            when (LocalOfflineBadges.current[track.id]) {
-                OfflineBadge.SAVED -> DropdownMenuItem(text = { Text("Remove from offline") }, onClick = { onDismiss(); offlineActions.remove(track.id) })
-                OfflineBadge.DOWNLOADING -> DropdownMenuItem(text = { Text("Cancel download") }, onClick = { onDismiss(); offlineActions.remove(track.id) })
-                OfflineBadge.FAILED -> DropdownMenuItem(text = { Text("Retry saving offline") }, onClick = { onDismiss(); offlineActions.retry(track.id) })
-                else -> DropdownMenuItem(text = { Text("Save offline") }, onClick = { onDismiss(); offlineActions.save(listOf(track)) })
-            }
-        }
-        val playlists = LocalPlaylistPicker.current
-        if (youtube && playlists != null) DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onDismiss(); playlists.open(track) })
-        if (ratings.like != null) DropdownMenuItem(
-            text = { Text(ratings.like) },
-            enabled = track.id !in pending && states[track.id] != CloudLikeState.LOADING, onClick = { onDismiss(); cloud?.toggle(track.id) })
-        if (ratings.dislike != null) DropdownMenuItem(
-            text = { Text(ratings.dislike) },
-            enabled = track.id !in pending, onClick = { onDismiss(); cloud?.toggleDislike(track.id) })
-        links?.album?.let { album -> DropdownMenuItem(text = { Text("Go to album") }, onClick = { onDismiss(); navigation?.open?.invoke(album) }) }
-        links?.artist?.let { artist -> DropdownMenuItem(text = { Text("Go to artist") }, onClick = { onDismiss(); navigation?.open?.invoke(artist) }) }
-        if (youtube) DropdownMenuItem(text = { Text("Share") }, onClick = {
-            onDismiss()
+    val offlineActions = LocalOfflineActions.current
+    val offlineBadge = LocalOfflineBadges.current[track.id]
+    val playlists = LocalPlaylistPicker.current
+    return buildList {
+        add(MenuEntry("Play", action = onPlay))
+        (onNext ?: actions?.let { { it.next(track) } })?.let { add(MenuEntry("Play next", action = it)) }
+        (onQueue ?: actions?.let { { it.queue(track) } })?.let { add(MenuEntry("Add to queue", action = it)) }
+        addAll(extra)
+        if (actions != null && youtube) add(MenuEntry("Start radio") { actions.radio(track) })
+        if (offlineActions != null && cord.kasane.music.offline.OfflinePolicy.canRequestSave(track)) add(when (offlineBadge) {
+            OfflineBadge.SAVED -> MenuEntry("Remove from offline") { offlineActions.remove(track.id) }
+            OfflineBadge.DOWNLOADING -> MenuEntry("Cancel download") { offlineActions.remove(track.id) }
+            OfflineBadge.FAILED -> MenuEntry("Retry saving offline") { offlineActions.retry(track.id) }
+            else -> MenuEntry("Save offline") { offlineActions.save(listOf(track)) }
+        })
+        if (youtube && playlists != null) add(MenuEntry("Add to playlist") { playlists.open(track) })
+        ratings.like?.let { add(MenuEntry(it, enabled = track.id !in pending && states[track.id] != CloudLikeState.LOADING) { cloud?.toggle(track.id) }) }
+        ratings.dislike?.let { add(MenuEntry(it, enabled = track.id !in pending) { cloud?.toggleDislike(track.id) }) }
+        links?.album?.let { album -> add(MenuEntry("Go to album") { navigation?.open?.invoke(album) }) }
+        links?.artist?.let { artist -> add(MenuEntry("Go to artist") { navigation?.open?.invoke(artist) }) }
+        if (youtube) add(MenuEntry("Share") {
             val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, "https://music.youtube.com/watch?v=${track.id}")
             }
             context.startActivity(android.content.Intent.createChooser(intent, "Share song"))
         })
-        if (onLocalFavorite != null) DropdownMenuItem(
-            text = { Text(if (localFavorite) "Remove local favorite" else "Save to local favorites") },
-            onClick = { onDismiss(); onLocalFavorite() })
+        if (onLocalFavorite != null) add(MenuEntry(if (localFavorite) "Remove local favorite" else "Save to local favorites", action = onLocalFavorite))
+    }
+}
+
+/** Shared menu for track rows, long press, and Now Playing; only wired actions are shown. */
+@Composable
+fun TrackContextMenu(
+    track: Track, expanded: Boolean, onDismiss: () -> Unit, onPlay: () -> Unit,
+    onNext: (() -> Unit)? = null, onQueue: (() -> Unit)? = null,
+    onLocalFavorite: (() -> Unit)? = null, localFavorite: Boolean = false,
+    extra: List<MenuEntry> = emptyList(),
+) {
+    val entries = rememberTrackMenuEntries(track, onPlay, onNext, onQueue, onLocalFavorite, localFavorite, extra, refreshRating = expanded)
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Column(Modifier.widthIn(max = 280.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(track.artist, style = MaterialTheme.typography.bodyMediumMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        entries.forEach { entry -> DropdownMenuItem(text = { Text(entry.label) }, enabled = entry.enabled, onClick = { onDismiss(); entry.action() }) }
     }
 }
 

@@ -16,6 +16,9 @@ import cord.kasane.music.KasaneApplication
 import cord.kasane.music.auth.AccountIdentity
 import cord.kasane.music.auth.AccountState
 import cord.kasane.music.ui.components.TrackArtwork
+import cord.kasane.music.settings.AccentSource
+import cord.kasane.music.settings.ThemeMode
+import androidx.compose.ui.graphics.toArgb
 import cord.kasane.music.ui.theme.*
 
 @Composable
@@ -50,9 +53,13 @@ fun SettingsScreen(
     onExportLocalData: () -> Unit,
     onManageSaved: () -> Unit,
 ) {
-    val dynamic by app.settings.dynamicColor.collectAsState()
+    val mode by app.settings.themeMode.collectAsState()
+    val source by app.settings.accentSource.collectAsState()
+    val accent by app.settings.accentColor.collectAsState()
     SettingsContent(state, onBack, onSignIn, onSignOut, onRetry, onCancel, onExportLocalData,
-        dynamicColor = dynamic, onDynamicColor = app.settings::setDynamicColor,
+        mode = mode, source = source, accent = androidx.compose.ui.graphics.Color(accent),
+        onMode = app.settings::setThemeMode, onAuto = { app.settings.setAccentSource(AccentSource.AUTO) },
+        onAccent = { app.settings.setAccentColor(it.toArgb()) },
         extraSections = {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             StorageSection(app, onManageSaved)
@@ -69,8 +76,8 @@ fun SettingsContent(
     onRetry: () -> Unit,
     onCancel: () -> Unit,
     onExportLocalData: () -> Unit,
-    dynamicColor: Boolean,
-    onDynamicColor: (Boolean) -> Unit,
+    mode: ThemeMode, source: AccentSource, accent: androidx.compose.ui.graphics.Color,
+    onMode: (ThemeMode) -> Unit, onAuto: () -> Unit, onAccent: (androidx.compose.ui.graphics.Color) -> Unit,
     extraSections: @Composable ColumnScope.() -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize()) {
@@ -120,11 +127,7 @@ fun SettingsContent(
                 }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            SettingsSection("Appearance") {
-                SettingsSwitchRow("Dynamic color", "Use Material You accents from your wallpaper. Surfaces stay charcoal for consistent contrast." +
-                    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) " Requires Android 12 or newer." else "",
-                    dynamicColor, enabled = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S, onChange = onDynamicColor)
-            }
+            AppearanceSection(mode, source, accent, onMode, onAuto, onAccent)
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SettingsSection("Playback") {
                 val context = androidx.compose.ui.platform.LocalContext.current
@@ -159,7 +162,7 @@ fun SettingsContent(
 fun SettingsGuestPreview() {
     KasaneTheme(dynamicColor = false) {
         Surface(color = MaterialTheme.colorScheme.background) {
-            SettingsContent(AccountState.Guest, {}, {}, {}, {}, {}, {}, false, {})
+            SettingsContent(AccountState.Guest, {}, {}, {}, {}, {}, {}, ThemeMode.DARK, AccentSource.AUTO, cord.kasane.music.ui.theme.FallbackSeed, {}, {}, {})
         }
     }
 }
@@ -169,7 +172,7 @@ fun SettingsGuestPreview() {
 fun SettingsSignedInPreview() {
     KasaneTheme(dynamicColor = false) {
         Surface(color = MaterialTheme.colorScheme.background) {
-            SettingsContent(AccountState.SignedIn(AccountIdentity("Kasane Listener", null, "UCpreview")), {}, {}, {}, {}, {}, {}, true, {})
+            SettingsContent(AccountState.SignedIn(AccountIdentity("Kasane Listener", null, "UCpreview")), {}, {}, {}, {}, {}, {}, ThemeMode.LIGHT, AccentSource.MANUAL, cord.kasane.music.ui.theme.FallbackSeed, {}, {}, {})
         }
     }
 }

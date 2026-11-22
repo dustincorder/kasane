@@ -30,6 +30,7 @@ import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -54,8 +55,7 @@ import cord.kasane.music.model.HistoryEntity
 import cord.kasane.music.model.Track
 import cord.kasane.music.model.CatalogItem
 import cord.kasane.music.model.CatalogShelf
-import cord.kasane.music.ui.components.MiniPlayer
-import cord.kasane.music.ui.components.NowPlayingSheet
+import cord.kasane.music.ui.components.*
 import cord.kasane.music.ui.components.TrackRow
 import cord.kasane.music.ui.theme.*
 import kotlinx.coroutines.FlowPreview
@@ -111,10 +111,10 @@ fun KasaneApp(app: KasaneApplication) {
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 private fun KasaneContent(app: KasaneApplication) {
-    MaterialTheme(
-        colorScheme = KasaneDarkColorScheme,
-        typography = KasaneTypography
-    ) {
+    val themeMode by app.settings.themeMode.collectAsState()
+    val accentSource by app.settings.accentSource.collectAsState()
+    val accentArgb by app.settings.accentColor.collectAsState()
+    KasaneTheme(themeMode, accentSource, androidx.compose.ui.graphics.Color(accentArgb)) {
         val playbackState by app.playbackManager.uiState.collectAsState()
         val scope = rememberCoroutineScope()
         val context = LocalContext.current
@@ -149,8 +149,10 @@ private fun KasaneContent(app: KasaneApplication) {
         }
 
         var selectedTab by rememberSaveable { mutableStateOf(0) } // Home / Search / Library
-        val nowPlayingSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        var isNowPlayingOpen by remember { mutableStateOf(false) }
+        val playerSheet = rememberPlayerSheetState()
+        val isNowPlayingOpen = playerSheet.isExpanded
+        var showQueue by remember { mutableStateOf(false) }
+        var navBarHeightPx by remember { mutableIntStateOf(0) }
 
         val screenState = rememberSaveableStateHolder()
         var libraryHistory by rememberSaveable { mutableStateOf(false) }
@@ -332,11 +334,7 @@ private fun KasaneContent(app: KasaneApplication) {
             when {
                 showDownloads && !isNowPlayingOpen -> showDownloads = false
                 showSettings && !isNowPlayingOpen -> showSettings = false
-                isNowPlayingOpen -> {
-                    scope.launch { nowPlayingSheetState.hide() }.invokeOnCompletion {
-                        isNowPlayingOpen = navigation.nowPlayingOpen
-                    }
-                }
+                isNowPlayingOpen -> playerSheet.collapse()
                 detailStack.isNotEmpty() -> { detailStack = detailStack.take(navigation.detailDepth) }
                 selectedTab != 0 -> {
                     focusManager.clearFocus()
@@ -351,40 +349,13 @@ private fun KasaneContent(app: KasaneApplication) {
 
         val openCatalog: (CatalogItem) -> Unit = { entry ->
             entry.track()?.let { app.playbackManager.playTrack(it) }
-                ?: run { isNowPlayingOpen = false; detailStack = detailStack + entry }
+                ?: run { playerSheet.collapse(); detailStack = detailStack + entry }
         }
         CompositionLocalProvider(cord.kasane.music.ui.components.LocalTrackNavigation provides
             cord.kasane.music.ui.components.TrackNavigation(app.ytProvider.catalog.trackLinks, openCatalog),
             cord.kasane.music.ui.components.LocalOfflineBadges provides offlineBadges,
             cord.kasane.music.ui.components.LocalOfflineActions provides offlineActions) {
-        // Fullscreen Now Playing Sheet
-        if (isNowPlayingOpen && playbackState.currentTrack != null) {
-            val currentTrack = playbackState.currentTrack!!
-            NowPlayingSheet(
-                uiState = playbackState,
-                onTogglePlay = { app.playbackManager.togglePlayPause() },
-                onNext = { app.playbackManager.playNext() },
-                onPrev = { app.playbackManager.playPrevious() },
-                onSeek = { app.playbackManager.seekTo(it) },
-                onDismiss = { isNowPlayingOpen = false },
-                isFavorite = favoriteIds.contains(currentTrack.id),
-                onToggleFavorite = {
-                    scope.launch {
-                        app.database.trackDao().insertTrack(currentTrack)
-                        if (favoriteIds.contains(currentTrack.id)) {
-                            app.database.trackDao().removeFavorite(currentTrack.id)
-                        } else {
-                            app.database.trackDao().addFavorite(FavoriteEntity(currentTrack.id))
-                        }
-                    }
-                },
-                onQueueTrack = { app.playbackManager.playQueueItem(it.id) },
-                onShuffle = { app.playbackManager.toggleShuffle() },
-                onRepeat = { app.playbackManager.cycleRepeat() },
-                sheetState = nowPlayingSheetState
-            )
-        }
-
+        Box(Modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.graphicsLayer {
                 translationX = size.width * predictiveBackProgress * 0.08f
@@ -406,7 +377,7 @@ private fun KasaneContent(app: KasaneApplication) {
                                 }
                             }
                         },
-                        modifier = Modifier.padding(16.dp)
+                        modifier = Modifier.padding(16.dp).padding(bottom = if (playbackState.currentTrack != null) 72.dp else 0.dp)
                     ) {
                         Text(playbackState.errorMessage!!)
                     }
@@ -419,21 +390,14 @@ private fun KasaneContent(app: KasaneApplication) {
                                 Text("Dismiss", color = MaterialTheme.colorScheme.inversePrimary)
                             }
                         },
-                        modifier = Modifier.padding(16.dp)
+                        modifier = Modifier.padding(16.dp).padding(bottom = if (playbackState.currentTrack != null) 72.dp else 0.dp)
                     ) {
                         Text(playbackState.noticeMessage!!)
                     }
                 }
             },
             bottomBar = {
-                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer)) {
-                    MiniPlayer(
-                        uiState = playbackState,
-                        onTogglePlay = { app.playbackManager.togglePlayPause() },
-                        onNext = { app.playbackManager.playNext() },
-                        onPrev = { app.playbackManager.playPrevious() },
-                        onOpenNowPlaying = { isNowPlayingOpen = true }
-                    )
+                Box(Modifier.onSizeChanged { navBarHeightPx = it.height }.graphicsLayer { translationY = playerSheet.progress.value * size.height }) {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 0.dp) {
                         val navItems = listOf(
                             Triple(0, "Home", Icons.Default.Home to Icons.Outlined.Home),
@@ -451,13 +415,13 @@ private fun KasaneContent(app: KasaneApplication) {
                                     detailStack = emptyList()
                                     showSettings = false
                                     showDownloads = false
-                                    isNowPlayingOpen = navigation.nowPlayingOpen
+                                    playerSheet.collapse()
                                 },
                                 icon = { Icon(if (isSelected) icons.first else icons.second, contentDescription = null) },
                                 label = { Text(label) },
                                 colors = NavigationBarItemDefaults.colors(
-                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
                                     selectedTextColor = MaterialTheme.colorScheme.onSurface,
                                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -476,7 +440,7 @@ private fun KasaneContent(app: KasaneApplication) {
                     TextButton(onClick = { app.settings.setOfflineOnly(false) }) { Text("Turn off") }
                 }
             }
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(bottom = if (playbackState.currentTrack != null) 76.dp else 0.dp)) {
                 if (showDownloads) {
                     DownloadsScreen(app, onBack = { showDownloads = false }, onPlay = { app.playbackManager.playTrack(it) })
                 } else if (showSettings) {
@@ -594,6 +558,27 @@ private fun KasaneContent(app: KasaneApplication) {
             }
           }
         }
+        val current = playbackState.currentTrack
+        if (current != null) {
+            PlayerSheet(
+                state = playbackState, sheet = playerSheet, isFavorite = favoriteIds.contains(current.id),
+                dockedBottom = with(androidx.compose.ui.platform.LocalDensity.current) { navBarHeightPx.toDp() },
+                actions = PlayerActions(
+                    togglePlay = { app.playbackManager.togglePlayPause() }, next = { app.playbackManager.playNext() },
+                    previous = { app.playbackManager.playPrevious() }, seekTo = { app.playbackManager.seekTo(it) },
+                    shuffle = { app.playbackManager.toggleShuffle() }, repeat = { app.playbackManager.cycleRepeat() },
+                    retry = { app.playbackManager.retryPlayback() }, dismissError = { app.playbackManager.clearError() },
+                    toggleFavorite = { scope.launch {
+                        app.database.trackDao().insertTrack(current)
+                        if (favoriteIds.contains(current.id)) app.database.trackDao().removeFavorite(current.id)
+                        else app.database.trackDao().addFavorite(FavoriteEntity(current.id))
+                    } },
+                    openQueue = { showQueue = true }))
+        }
+        if (showQueue) QueueSheet(playbackState, onPlayIndex = { app.playbackManager.playQueueIndex(it) },
+            onMove = { from, to -> app.playbackManager.moveQueueItem(from, to) },
+            onRemove = { app.playbackManager.removeQueueItem(it) }, onDismiss = { showQueue = false })
+        }
         cord.kasane.music.ui.components.PlaylistPickerHost()
     }
     }
@@ -641,7 +626,7 @@ fun HomeScreen(
             catalogShelves.forEach { shelf -> item { CatalogShelfRow(shelf, onCatalogOpen) } }
             if (isHomeLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(20.dp), color = MaterialTheme.colorScheme.primary) }
             if (homeError != null) item {
-                Text(homeError, color = Gray400, modifier = Modifier.padding(20.dp))
+                Text(homeError, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
                 TextButton(onClick = onRetryHome) { Text("Retry") }
             }
         } else {
@@ -650,10 +635,10 @@ fun HomeScreen(
             when {
                 isHomeLoading -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(20.dp), color = MaterialTheme.colorScheme.primary)
                 homeError != null -> Column(Modifier.padding(horizontal = 20.dp)) {
-                    Text(homeError, color = Gray400)
+                    Text(homeError, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TextButton(onClick = onRetryHome) { Text("Try again") }
                 }
-                uniqueRecommendations.isEmpty() -> Text("No recommendations yet. Find something you love in Search.", color = Gray400, modifier = Modifier.padding(20.dp))
+                uniqueRecommendations.isEmpty() -> Text("No recommendations yet. Find something you love in Search.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
                 else -> LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(uniqueRecommendations, key = { it.id }) { track ->
                         cord.kasane.music.ui.components.TrackCard(track, 156.dp, onClick = { onTrackClick(track) },
@@ -720,8 +705,8 @@ fun LibraryScreen(
         when (filter) {
             "Songs" -> {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (showingHistory) "Recently played" else "Favorites", color = White, style = KasaneTypography.titleMedium, modifier = Modifier.weight(1f))
-                    Text("On this device", color = Gray400, style = KasaneTypography.labelMedium)
+                    Text(if (showingHistory) "Recently played" else "Favorites", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Text("On this device", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMediumMuted)
                 }
                 Box(Modifier.weight(1f)) { if (showingHistory) historyContent() else favoritesContent() }
             }
@@ -743,7 +728,7 @@ fun LibraryScreen(
                     LibraryCollectionRow("History", "$historyCount played · On this device", Icons.Default.History) {
                         onFilter("Songs"); onSelectHistory(true)
                     }
-                    Text("YouTube Music", color = Gray400, style = KasaneTypography.labelMedium,
+                    Text("YouTube Music", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMediumMuted,
                         modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 6.dp))
                     AccountLibraryScreen(accountState, accountProvider, onSignIn, onCatalogOpen, onAddToQueue, onExpired,
                         modifier = Modifier.weight(1f).fillMaxWidth(), cachedCatalog = cachedCatalog, session = session,
@@ -772,7 +757,7 @@ private fun LibraryCollectionRow(title: String, subtitle: String, icon: androidx
 @Composable
 fun HomeScreenPreview() {
     KasaneTheme(dynamicColor = false) {
-        HomeScreen(
+        Surface(color = MaterialTheme.colorScheme.background) { HomeScreen(
             currentTrack = Track(
                 id = "prev-current",
                 title = "Beat It",
@@ -824,7 +809,7 @@ fun HomeScreenPreview() {
             onTrackClick = {},
             onAddToQueue = {},
             onToggleFavorite = {}
-        )
+        ) }
     }
 }
 
@@ -850,18 +835,18 @@ fun FavoritesScreen(
         ) {
             Text(
                 text = "Favorites",
-                style = KasaneTypography.titleMedium.copy(fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                color = White
+                style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = "${favorites.size} tracks",
-                style = KasaneTypography.labelMedium,
-                color = Gray400
+                style = MaterialTheme.typography.labelMediumMuted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         HorizontalDivider(
-            color = Gray800,
+            color = MaterialTheme.colorScheme.outlineVariant,
             thickness = 0.5.dp
         )
 
@@ -872,8 +857,8 @@ fun FavoritesScreen(
             ) {
                 Text(
                     text = "No favorite tracks yet",
-                    style = KasaneTypography.bodyMedium,
-                    color = Gray400
+                    style = MaterialTheme.typography.bodyMediumMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
@@ -893,7 +878,7 @@ fun FavoritesScreen(
                         useCloudFavorite = false
                     )
                     HorizontalDivider(
-                        color = Gray800,
+                        color = MaterialTheme.colorScheme.outlineVariant,
                         thickness = 0.5.dp,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
@@ -926,18 +911,18 @@ fun HistoryScreen(
         ) {
             Text(
                 text = "History",
-                style = KasaneTypography.titleMedium.copy(fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                color = White
+                style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = "${history.size} played",
-                style = KasaneTypography.labelMedium,
-                color = Gray400
+                style = MaterialTheme.typography.labelMediumMuted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         HorizontalDivider(
-            color = Gray800,
+            color = MaterialTheme.colorScheme.outlineVariant,
             thickness = 0.5.dp
         )
 
@@ -948,8 +933,8 @@ fun HistoryScreen(
             ) {
                 Text(
                     text = "No listening history yet",
-                    style = KasaneTypography.bodyMedium,
-                    color = Gray400
+                    style = MaterialTheme.typography.bodyMediumMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
@@ -975,7 +960,7 @@ fun HistoryScreen(
                         isFavorite = favoriteIds.contains(track.id)
                     )
                     HorizontalDivider(
-                        color = Gray800,
+                        color = MaterialTheme.colorScheme.outlineVariant,
                         thickness = 0.5.dp,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
@@ -996,7 +981,7 @@ fun SearchScreenPreview() {
 @Composable
 fun LibraryScreenPreview() {
     KasaneTheme(dynamicColor = false) {
-        Surface(color = Gray950) {
+        Surface(color = MaterialTheme.colorScheme.background) {
             val provider = remember { object : cord.kasane.music.provider.AccountLibraryProvider {
                 override suspend fun collection(collection: cord.kasane.music.provider.AccountCollection, continuation: String?) = cord.kasane.music.model.CatalogPage("", "", null, emptyList())
                 override suspend fun playlist(playlistId: String, continuation: String?) = cord.kasane.music.model.CatalogPage("", "", null, emptyList())
@@ -1013,7 +998,7 @@ fun LibraryScreenPreview() {
 @Composable
 fun LibraryOnlinePreview() {
     KasaneTheme(dynamicColor = false) {
-        Surface(color = Gray950) {
+        Surface(color = MaterialTheme.colorScheme.background) {
             val provider = remember { object : cord.kasane.music.provider.AccountLibraryProvider {
                 override suspend fun collection(collection: cord.kasane.music.provider.AccountCollection, continuation: String?) =
                     when (collection) {
