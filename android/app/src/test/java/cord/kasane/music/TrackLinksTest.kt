@@ -11,7 +11,8 @@ class TrackLinksTest {
         val links = TrackLinksParser.parse(root)
         assertEquals("UCartist", links["wzpAehzNCU8"]?.artist?.id)
         assertEquals("MPREalbum", links["wzpAehzNCU8"]?.album?.id)
-        assertEquals("UCdifferent", links["dQw4w9WgXcQ"]?.artist?.id)
+        // An endpoint with no visible name would need a placeholder label, so no link is created for it.
+        assertEquals(null, links["dQw4w9WgXcQ"])
     }
     @Test fun missingEndpointNeverBecomesTitleBasedGuess() {
         val root = JSONObject("""{"playlistPanelVideoRenderer":{"videoId":"wzpAehzNCU8","title":{"simpleText":"Brand New Day"},"longBylineText":{"simpleText":"BLits Games"}}}""")

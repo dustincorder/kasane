@@ -45,8 +45,8 @@ private fun WithRealArtwork(content: @Composable () -> Unit) {
         onDispose { Coil.setImageLoader(loaders.first); loaders.second.shutdown() }
     }
     CompositionLocalProvider(LocalInspectionMode provides false) {
-        MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
-            Surface(color = Gray950, content = content)
+        KasaneTheme(dynamicColor = false) {
+            Surface(color = MaterialTheme.colorScheme.background, content = content)
         }
     }
 }
@@ -54,35 +54,28 @@ private fun WithRealArtwork(content: @Composable () -> Unit) {
 @Preview(showBackground = true, widthDp = 390, heightDp = 620)
 @Composable
 fun HomeRealArtworkPreview() = WithRealArtwork {
-    HomeScreen(null, false, false, emptyList(), emptyList(), emptySet(), emptyList(), false,
-        {}, {}, {}, {}, catalogShelves = listOf(CatalogShelf("Quick picks", listOf(
-            CatalogItem(homeTrack.id, CatalogKind.SONG, homeTrack.title, homeTrack.artist, homeTrack.thumbnailUri),
-            CatalogItem(searchTrack.id, CatalogKind.SONG, searchTrack.title, searchTrack.artist, searchTrack.thumbnailUri)))))
+    HomeScreen(listOf(HomeSection.QuickPicks("Quick picks", listOf(homeTrack, searchTrack, homeTrack.copy(id = "artwork-preview-3")))),
+        loading = false, refreshing = false, error = null, offlineOnly = false, currentTrackId = null,
+        actions = HomeActions({}, { _, _ -> }, {}, {}, {}, {}, {}, {}))
 }
 
 @Preview(showBackground = true, widthDp = 390)
 @Composable
 fun SearchRealArtworkPreview() = WithRealArtwork {
     Column {
-        Text("Search · Songs", style = KasaneTypography.titleLarge, modifier = Modifier.padding(16.dp))
+        Text("Search · Songs", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
         TrackRow(searchTrack, onClick = {})
         TrackRow(homeTrack, onClick = {})
     }
 }
 
-@Preview(showBackground = true, widthDp = 390)
-@Composable
-fun MiniPlayerRealArtworkPreview() = WithRealArtwork {
-    MiniPlayer(PlaybackUiState(currentTrack = searchTrack, isPlaying = true,
-        currentPositionMs = 45000, durationMs = 180000), {}, {}, {}, {})
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 fun NowPlayingRealArtworkPreview() = WithRealArtwork {
-    NowPlayingSheet(PlaybackUiState(currentTrack = homeTrack, currentPositionMs = 45000, durationMs = 180000),
-        {}, {}, {}, {}, {}, false, {}, rememberModalBottomSheetState(skipPartiallyExpanded = true))
+    val sheet = rememberPlayerSheetState()
+    LaunchedEffect(Unit) { sheet.progress.snapTo(1f) }
+    PlayerSheet(PlaybackUiState(currentTrack = homeTrack, currentPositionMs = 45000, durationMs = 180000, isPlaying = true),
+        sheet, PlayerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}), false, dockedBottom = 80.dp)
 }
 
 @Preview(showBackground = true, widthDp = 390)

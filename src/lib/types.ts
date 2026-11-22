@@ -23,7 +23,7 @@ export interface Track {
   uri: string | null;
 }
 
-export type PlaybackState = 'Stopped' | 'Playing' | 'Paused' | 'Buffering' | { Error: string };
+export type PlaybackState = 'Stopped' | 'Ended' | 'Playing' | 'Paused' | 'Buffering' | { Error: string };
 
 export type RepeatMode = 'Off' | 'All' | 'One';
 
@@ -39,4 +39,5 @@ export interface PlaybackProgress {
   duration_secs: number;
   state: PlaybackState;
   current_track: Track | null;
+  notice?: string | null;
 }

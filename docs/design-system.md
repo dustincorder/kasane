@@ -1,3 +1,20 @@
+# Android design system (current)
+
+Material 3, dark charcoal, one cold-blue accent. Source of truth: `android/app/.../ui/theme/Theme.kt`.
+
+| Role | Value | Use |
+|---|---|---|
+| Background / surface | `#0F1012` | App base |
+| Surface container low/default/high | `#151619` / `#181A1E` / `#1B1D21` | Sheets, navigation bar, mini-player |
+| Primary (`KasaneBlue`) | `#8AB6F9` | Active track, progress, play button, selected states |
+| Primary container | `#1C2E47` | Selected chips and navigation indicator |
+| On-surface / variant | `#D9DCE2` / `#A6ACB6` | Text, metadata |
+| Outline / variant | `#3A3E45` / `#26292E` | Dividers and borders |
+
+Rules: use `MaterialTheme.colorScheme` roles (never raw constants) so optional Material You accents work; shapes 4/8/12/16/24 dp, content 8 dp, player/sheets larger; sans-serif only; overflow buttons on artwork keep a 48 dp touch target with a 26 dp scrim chip and 16 dp glyph; no purple gradients, glows or oversized cards. Dynamic color only recolours accent roles; surfaces stay charcoal for stable contrast.
+
+The sections below describe the legacy Rose palette still used by the Linux desktop until it is redesigned.
+
 # Kasane — Design System
 
 Дизайн-система музыкального плеера **Kasane (カサネ)**.

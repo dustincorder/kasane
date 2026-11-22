@@ -12,6 +12,12 @@ import kotlinx.coroutines.flow.Flow
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
+/** Aggregated listening statistic for Home; not an entity. */
+data class PlayStat(val trackId: String, val title: String, val artist: String, val album: String?, val thumbnailUri: String?,
+    val plays: Int, val lastPlayed: Long) {
+    fun track() = Track(trackId, title, artist, album, thumbnailUri = thumbnailUri)
+}
+
 @Entity(tableName = "catalog_cache_page", primaryKeys = ["scopeKey", "cacheKey"], indices = [Index("updatedAt")])
 data class CachedCatalogPageRecord(
     val scopeKey: String,
@@ -22,10 +28,14 @@ data class CachedCatalogPageRecord(
     val continuation: String?,
     val description: String,
     val updatedAt: Long = System.currentTimeMillis(),
+    /** Home mood chips as `title<TAB>params` lines; null for pages without chips. */
+    val chips: String? = null,
+    /** JSON [cord.kasane.music.model.PageMeta]: creators, stats, ownership. Null when the page has none. */
+    val meta: String? = null,
 )
 
 @Entity(tableName = "catalog_cache_shelf", primaryKeys = ["scopeKey", "cacheKey", "shelfIndex"])
-data class CachedCatalogShelfRecord(val scopeKey: String, val cacheKey: String, val shelfIndex: Int, val title: String)
+data class CachedCatalogShelfRecord(val scopeKey: String, val cacheKey: String, val shelfIndex: Int, val title: String, val moreBrowseId: String? = null)
 
 @Entity(tableName = "catalog_cache_item", primaryKeys = ["itemKey"], indices = [Index("scopeKey")])
 data class CachedCatalogItemEntity(
@@ -38,6 +48,7 @@ data class CachedCatalogItemEntity(
     val artwork: String?,
     val durationSeconds: Double,
     val updatedAt: Long,
+    val album: String? = null,
 )
 
 @Entity(tableName = "catalog_cache_shelf_item", primaryKeys = ["scopeKey", "cacheKey", "shelfIndex", "position"], indices = [Index("itemKey")])
@@ -74,6 +85,10 @@ interface TrackDao {
     @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE trackId = :trackId)")
     fun isFavorite(trackId: String): Flow<Boolean>
 
+    /** Tracks whose audio is saved on this device. Pattern is a pre-escaped LIKE pattern (escape char \\). */
+    @Query("SELECT * FROM tracks WHERE (title LIKE :pattern ESCAPE '\\' OR artist LIKE :pattern ESCAPE '\\') AND id IN (SELECT videoId FROM audio_files WHERE pinned = 1 AND state = 'saved') ORDER BY title COLLATE NOCASE LIMIT 100")
+    fun searchSaved(pattern: String): Flow<List<Track>>
+
     @Insert
     suspend fun insertHistory(history: HistoryEntity)
 
@@ -92,16 +107,34 @@ interface TrackDao {
 
     @Query("SELECT * FROM history ORDER BY playedAt DESC, id DESC")
     suspend fun getHistoryForExport(): List<HistoryEntity>
+
+    /** Play counts per track since [since], most played first. Metadata comes from the newest history row. */
+    @Query("""
+        SELECT h.trackId AS trackId, h.title AS title, h.artist AS artist, h.album AS album, h.thumbnailUri AS thumbnailUri,
+               stats.plays AS plays, stats.lastPlayed AS lastPlayed
+        FROM (SELECT trackId, COUNT(*) AS plays, MAX(playedAt) AS lastPlayed, MAX(id) AS latestId
+              FROM history WHERE playedAt >= :since GROUP BY trackId) stats
+        JOIN history h ON h.id = stats.latestId
+        ORDER BY stats.plays DESC, stats.lastPlayed DESC
+        LIMIT :limit
+    """)
+    fun topPlayed(since: Long, limit: Int = 40): Flow<List<PlayStat>>
+
+    /** Tracks whose audio is saved on this device, most recently saved first. */
+    @Query("SELECT t.* FROM tracks t JOIN audio_files a ON a.videoId = t.id WHERE a.pinned = 1 AND a.state = 'saved' ORDER BY a.updatedAt DESC LIMIT :limit")
+    fun recentlySaved(limit: Int = 20): Flow<List<Track>>
 }
 
 @Database(
     entities = [TrackRecord::class, FavoriteEntity::class, HistoryEntity::class, CachedCatalogPageRecord::class,
-        CachedCatalogShelfRecord::class, CachedCatalogItemEntity::class, CachedCatalogShelfItemRecord::class],
-    version = 3,
+        CachedCatalogShelfRecord::class, CachedCatalogItemEntity::class, CachedCatalogShelfItemRecord::class,
+        cord.kasane.music.offline.AudioFileRecord::class],
+    version = 7,
     exportSchema = false
 )
 abstract class KasaneDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
+    abstract fun audioDao(): cord.kasane.music.offline.AudioFileDao
 
     @Dao
     interface CatalogCacheDao {
@@ -168,17 +201,19 @@ abstract class KasaneDatabase : RoomDatabase() {
         @Transaction
         suspend fun save(scopeKey: String, cacheKey: String, page: CatalogPage, now: Long) {
             putPage(CachedCatalogPageRecord(scopeKey, cacheKey, page.title, page.subtitle, page.artwork,
-                page.continuation, page.description, now))
+                page.continuation, page.description, now,
+                page.chips.takeIf { it.isNotEmpty() }?.joinToString("\n") { it.title.replace('\t', ' ').replace('\n', ' ') + "\t" + it.params },
+                cord.kasane.music.model.PageMeta.of(page)?.let { kotlinx.serialization.json.Json.encodeToString(cord.kasane.music.model.PageMeta.serializer(), it) }))
             deleteShelfItems(scopeKey, cacheKey)
             deleteShelves(scopeKey, cacheKey)
             val itemRows = linkedMapOf<String, CachedCatalogItemEntity>()
-            val shelfRows = page.shelves.mapIndexed { index, shelf -> CachedCatalogShelfRecord(scopeKey, cacheKey, index, shelf.title) }
+            val shelfRows = page.shelves.mapIndexed { index, shelf -> CachedCatalogShelfRecord(scopeKey, cacheKey, index, shelf.title, shelf.moreBrowseId) }
             val linkRows = buildList {
                 page.shelves.forEachIndexed { shelfIndex, shelf ->
                     shelf.items.forEachIndexed { position, item ->
                         val itemKey = cord.kasane.music.data.CatalogCache.itemKey(scopeKey, item)
                         itemRows[itemKey] = CachedCatalogItemEntity(itemKey, scopeKey, item.kind.name, item.id,
-                            item.title, item.subtitle, item.artwork, item.durationSeconds, now)
+                            item.title, item.subtitle, item.artwork, item.durationSeconds, now, item.album)
                         add(CachedCatalogShelfItemRecord(scopeKey, cacheKey, shelfIndex, position, itemKey))
                     }
                 }
@@ -209,6 +244,34 @@ abstract class KasaneDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_catalog_cache_updatedAt ON catalog_cache(updatedAt)")
             }
         }
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `catalog_cache_item` ADD COLUMN `album` TEXT")
+                // Entries written before artist/album metadata existed would keep showing blank artists.
+                // Mark every cached page stale: it is still readable offline, but refetched on the next view.
+                db.execSQL("UPDATE catalog_cache_page SET updatedAt = 0")
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `catalog_cache_page` ADD COLUMN `meta` TEXT")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `catalog_cache_shelf` ADD COLUMN `moreBrowseId` TEXT")
+                db.execSQL("ALTER TABLE `catalog_cache_page` ADD COLUMN `chips` TEXT")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(cord.kasane.music.offline.AudioFileRecord.CREATE_TABLE_SQL)
+            }
+        }
+
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS catalog_cache")

@@ -4,17 +4,26 @@ import type { PlaybackProgress, QueueState, Track } from '$lib/types';
 class PlayerStore {
   currentTrack = $state<Track | null>(null);
   isPlaying = $state<boolean>(false);
-  isBuffering = $state<boolean>(false);
+  isPaused = $state<boolean>(false);
+  isBusy = $state(false);
+  error = $state<string | null>(null);
+  notice = $state<string | null>(null);
+  private dismissedNotice: string | null = null;
   positionSecs = $state<number>(0);
   durationSecs = $state<number>(0);
   volume = $state<number>(1.0);
   queue = $state<Track[]>([]);
   currentIndex = $state<number | null>(null);
+  canPlay = $derived(!this.isBusy && this.queue.length > 0);
+  canPrevious = $derived(!this.isBusy && (this.currentIndex ?? 0) > 0);
+  canNext = $derived(!this.isBusy && (this.currentIndex ?? -1) + 1 < this.queue.length);
+  canSeek = $derived(!this.isBusy && this.durationSecs > 0 && (this.isPlaying || this.isPaused));
   favorites = $state<Track[]>([]);
   history = $state<Track[]>([]);
   showNowPlayingModal = $state<boolean>(false);
 
-  private pollInterval: any = null;
+  private polling = false;
+  private playbackVersion = 0;
 
   constructor() {
     this.startPolling();
@@ -48,31 +57,64 @@ class PlayerStore {
     }
   }
 
+  private async syncPlayback(version: number) {
+    const progress = await invoke<PlaybackProgress>('get_playback_state');
+    const queue = await invoke<QueueState>('get_queue');
+    if (version !== this.playbackVersion) return;
+    const changedTrack = progress.current_track?.id !== this.currentTrack?.id || queue.current_index !== this.currentIndex;
+    this.positionSecs = progress.position_secs;
+    this.durationSecs = progress.duration_secs;
+    this.currentTrack = progress.current_track;
+    const notice = progress.notice ?? null;
+    this.notice = notice !== this.dismissedNotice ? notice : null;
+    if (notice === null) this.dismissedNotice = null;
+    this.isPlaying = progress.state === 'Playing';
+    this.isPaused = progress.state === 'Paused';
+    this.queue = queue.items;
+    this.currentIndex = queue.current_index;
+    if (changedTrack) void this.refreshHistory();
+  }
+
   private startPolling() {
-    this.pollInterval = setInterval(async () => {
+    setInterval(async () => {
+      if (this.polling || this.isBusy) return;
+      this.polling = true;
+      const version = this.playbackVersion;
       try {
-        const progress = await invoke<PlaybackProgress>('get_playback_state');
-        this.positionSecs = progress.position_secs;
-        this.durationSecs = progress.duration_secs;
-        this.currentTrack = progress.current_track;
-        this.isPlaying = progress.state === 'Playing';
-        this.isBuffering = progress.state === 'Buffering';
+        await this.syncPlayback(version);
       } catch (e) {
-        // Suppress polling log spam in dev / when tauri isn't responding
+        if (version === this.playbackVersion) this.error = String(e);
+      } finally {
+        this.polling = false;
       }
     }, 500);
   }
 
-  async playTrack(track: Track) {
+  private async runPlayback(command: string, args?: Record<string, unknown>) {
+    if (this.isBusy) return;
+    this.isBusy = true;
+    const version = ++this.playbackVersion;
+    this.error = null;
     try {
-      await invoke('play_track', { track });
-      this.currentTrack = track;
-      this.isPlaying = true;
-      await this.refreshQueue();
-      await this.refreshHistory();
+      await invoke(command, args);
+      await this.syncPlayback(version);
     } catch (e) {
-      console.error('Play track failed:', e);
+      this.error = String(e);
+    } finally {
+      this.isBusy = false;
     }
+  }
+
+  playTrack(track: Track) {
+    return this.runPlayback('play_track', { track });
+  }
+
+  playQueueItem(index: number) {
+    return this.runPlayback('play_queue_item', { index });
+  }
+
+  openAudioFile() {
+    return this.runPlayback('open_audio_file');
   }
 
   async addToQueue(track: Track) {
@@ -80,44 +122,24 @@ class PlayerStore {
       await invoke('add_to_queue', { track });
       await this.refreshQueue();
     } catch (e) {
-      console.error('Add to queue failed:', e);
+      this.error = String(e);
     }
   }
 
-  async togglePlay() {
-    try {
-      await invoke('toggle_play_pause');
-      this.isPlaying = !this.isPlaying;
-    } catch (e) {
-      console.error('Toggle play failed:', e);
-    }
+  togglePlay() {
+    return this.runPlayback('toggle_play_pause');
   }
 
-  async next() {
-    try {
-      await invoke('next_track');
-      await this.refreshQueue();
-    } catch (e) {
-      console.error('Next failed:', e);
-    }
+  next() {
+    return this.runPlayback('next_track');
   }
 
-  async previous() {
-    try {
-      await invoke('previous_track');
-      await this.refreshQueue();
-    } catch (e) {
-      console.error('Previous failed:', e);
-    }
+  previous() {
+    return this.runPlayback('previous_track');
   }
 
-  async seek(position: number) {
-    try {
-      this.positionSecs = position;
-      await invoke('seek', { positionSecs: position });
-    } catch (e) {
-      console.error('Seek failed:', e);
-    }
+  seek(position: number) {
+    return this.runPlayback('seek', { positionSecs: position });
   }
 
   async setVolume(vol: number) {
@@ -136,6 +158,11 @@ class PlayerStore {
     } catch (e) {
       console.error('Toggle favorite failed:', e);
     }
+  }
+
+  dismissNotice() {
+    this.dismissedNotice = this.notice;
+    this.notice = null;
   }
 
   isFavorite(trackId: string): boolean {

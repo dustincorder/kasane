@@ -33,12 +33,15 @@ android {
 
     // Instrumentation is debug-only and isolated from the user's release package/data.
     testBuildType = "debug"
+    // Shared verification runtime (built by `npm ci && npm run build:verifier` at the repo root).
+    sourceSets.getByName("main").assets.srcDir(rootProject.file("../verifier/dist"))
     if (providers.gradleProperty("kasaneProofProbe").orNull == "true") {
         sourceSets.getByName("androidTest").assets.srcDir(layout.buildDirectory.dir("generated/attestationProbeAssets"))
     }
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
         managedDevices {
             devices {
                 create<com.android.build.api.dsl.ManagedVirtualDevice>("kasaneApi35") {
@@ -133,6 +136,11 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.material3:material3")
 
+    // Seed-based Material 3 palettes for the fallback and custom accents (HCT, same algorithm as Material You)
+    implementation("com.materialkolor:material-kolor:2.1.1")
+    // Drag-and-drop reordering for the queue
+    implementation("sh.calvin.reorderable:reorderable:2.5.1")
+
     // Image loading
     implementation("io.coil-kt:coil-compose:2.7.0")
 
@@ -159,6 +167,20 @@ dependencies {
     testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("org.robolectric:robolectric:4.14.1") // JVM tests of real Media3 cache classes need android.net.Uri
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+    // Compose UI regression tests run on the JVM under Robolectric (no device, no install)
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+val verifierBundle = rootProject.file("../verifier/dist/kasane-verifier.js")
+tasks.named("preBuild") {
+    doFirst {
+        if (!verifierBundle.isFile) {
+            throw GradleException("Missing ${verifierBundle.path}: run `npm ci && npm run build:verifier` in the repository root.")
+        }
+    }
 }

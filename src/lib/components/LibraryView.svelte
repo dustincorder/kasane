@@ -1,12 +1,20 @@
 <script lang="ts">
   import { player } from '$lib/stores/player.svelte';
-  import { Play, Heart, Clock } from 'lucide-svelte';
+  import { Play, Heart, Clock, FolderOpen } from 'lucide-svelte';
 
   let favorites = $derived(player.favorites);
   let history = $derived(player.history);
 </script>
 
 <div class="p-6 max-w-5xl mx-auto space-y-8 select-none">
+  <button
+    onclick={() => player.openAudioFile()}
+    disabled={player.isBusy}
+    class="inline-flex items-center gap-2 rounded-lg border border-surface-border bg-surface-elevated px-4 py-2 text-sm text-text-primary hover:bg-surface-hover disabled:opacity-50"
+  >
+    <FolderOpen size={16} />
+    Open audio file
+  </button>
   <!-- Favorites Section -->
   <section class="space-y-3">
     <div class="flex items-center gap-2 text-text-primary font-semibold text-lg">
@@ -23,11 +31,11 @@
         {#each favorites as track}
           <div class="flex items-center justify-between p-3 bg-surface-elevated border border-surface-border rounded-lg hover:bg-surface-hover transition group">
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-10 h-10 rounded bg-surface-base flex-shrink-0 overflow-hidden">
+              <div class="w-10 h-10 rounded-md bg-surface-base flex-shrink-0 overflow-hidden">
                 {#if track.thumbnail_url}
                   <img src={track.thumbnail_url} alt={track.title} class="w-full h-full object-cover" />
                 {:else}
-                  <div class="w-full h-full flex items-center justify-center text-xs font-mono text-text-muted">♪</div>
+                  <div class="w-full h-full flex items-center justify-center text-xs text-text-muted">♪</div>
                 {/if}
               </div>
               <div class="truncate">
@@ -39,7 +47,8 @@
             <div class="flex items-center gap-2">
               <button
                 onclick={() => player.playTrack(track)}
-                class="p-2 text-surface-base bg-text-primary rounded-full hover:opacity-90 active:scale-95 transition"
+                disabled={player.isBusy}
+                class="p-2 bg-accent-active text-white rounded-full hover:opacity-90 active:scale-95 transition"
                 title="Play track"
               >
                 <Play size={14} fill="currentColor" class="translate-x-0.5" />
@@ -67,11 +76,11 @@
         {#each history as track}
           <div class="flex items-center justify-between p-3 hover:bg-surface-hover transition group">
             <div class="flex items-center gap-3 min-w-0">
-              <div class="w-9 h-9 rounded bg-surface-base flex-shrink-0 overflow-hidden">
+              <div class="w-10 h-10 rounded-md bg-surface-base flex-shrink-0 overflow-hidden">
                 {#if track.thumbnail_url}
                   <img src={track.thumbnail_url} alt={track.title} class="w-full h-full object-cover" />
                 {:else}
-                  <div class="w-full h-full flex items-center justify-center text-xs font-mono text-text-muted">♪</div>
+                  <div class="w-full h-full flex items-center justify-center text-xs text-text-muted">♪</div>
                 {/if}
               </div>
               <div class="truncate">
@@ -81,9 +90,10 @@
             </div>
 
             <div class="flex items-center gap-3">
-              <span class="text-xs font-mono text-text-muted">{player.formatTime(track.duration_secs)}</span>
+              <span class="text-xs tabular-nums text-text-muted">{track.duration_secs > 0 ? player.formatTime(track.duration_secs) : '—'}</span>
               <button
                 onclick={() => player.playTrack(track)}
+                disabled={player.isBusy}
                 class="p-1.5 text-text-secondary hover:text-text-primary rounded hover:bg-surface-border transition"
                 title="Play again"
               >

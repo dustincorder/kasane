@@ -15,6 +15,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.LibraryMusic
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -26,6 +30,7 @@ import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -50,8 +55,7 @@ import cord.kasane.music.model.HistoryEntity
 import cord.kasane.music.model.Track
 import cord.kasane.music.model.CatalogItem
 import cord.kasane.music.model.CatalogShelf
-import cord.kasane.music.ui.components.MiniPlayer
-import cord.kasane.music.ui.components.NowPlayingSheet
+import cord.kasane.music.ui.components.*
 import cord.kasane.music.ui.components.TrackRow
 import cord.kasane.music.ui.theme.*
 import kotlinx.coroutines.FlowPreview
@@ -107,10 +111,10 @@ fun KasaneApp(app: KasaneApplication) {
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 private fun KasaneContent(app: KasaneApplication) {
-    MaterialTheme(
-        colorScheme = KasaneDarkColorScheme,
-        typography = KasaneTypography
-    ) {
+    val themeMode by app.settings.themeMode.collectAsState()
+    val accentSource by app.settings.accentSource.collectAsState()
+    val accentArgb by app.settings.accentColor.collectAsState()
+    KasaneTheme(themeMode, accentSource, androidx.compose.ui.graphics.Color(accentArgb)) {
         val playbackState by app.playbackManager.uiState.collectAsState()
         val scope = rememberCoroutineScope()
         val context = LocalContext.current
@@ -145,8 +149,10 @@ private fun KasaneContent(app: KasaneApplication) {
         }
 
         var selectedTab by rememberSaveable { mutableStateOf(0) } // Home / Search / Library
-        val nowPlayingSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        var isNowPlayingOpen by remember { mutableStateOf(false) }
+        val playerSheet = rememberPlayerSheetState()
+        val isNowPlayingOpen = playerSheet.isExpanded
+        var showQueue by remember { mutableStateOf(false) }
+        var navBarHeightPx by remember { mutableIntStateOf(0) }
 
         val screenState = rememberSaveableStateHolder()
         var libraryHistory by rememberSaveable { mutableStateOf(false) }
@@ -155,8 +161,51 @@ private fun KasaneContent(app: KasaneApplication) {
         var detailStack by remember { mutableStateOf<List<CatalogItem>>(emptyList()) }
         var homeShelves by remember { mutableStateOf<List<CatalogShelf>>(emptyList()) }
         var showSettings by remember { mutableStateOf(false) }
+        var showDownloads by remember { mutableStateOf(false) }
+        var pendingSave by remember { mutableStateOf<List<Track>?>(null) }
+        val offlineOnly by app.settings.offlineOnly.collectAsState()
+        val recentSearches by app.searchHistory.recent.collectAsState()
+        val offlineRecords by app.offline.all.collectAsState(initial = emptyList())
+        val savedCount = remember(offlineRecords) { offlineRecords.count { it.pinned && it.audioState == cord.kasane.music.offline.AudioState.SAVED } }
+        val offlineBadges = remember(offlineRecords) {
+            offlineRecords.mapNotNull { record ->
+                val badge = when (record.audioState) {
+                    cord.kasane.music.offline.AudioState.SAVED -> cord.kasane.music.ui.components.OfflineBadge.SAVED
+                    cord.kasane.music.offline.AudioState.QUEUED, cord.kasane.music.offline.AudioState.DOWNLOADING -> cord.kasane.music.ui.components.OfflineBadge.DOWNLOADING
+                    cord.kasane.music.offline.AudioState.FAILED -> if (record.pinned) cord.kasane.music.ui.components.OfflineBadge.FAILED else null
+                    cord.kasane.music.offline.AudioState.CACHED -> null
+                }
+                badge?.let { record.videoId to it }
+            }.toMap()
+        }
+        val runSave: (List<Track>) -> Unit = { tracks ->
+            scope.launch {
+                val summary = app.offline.save(tracks)
+                val message = when {
+                    summary.queued > 0 -> "Saving ${summary.queued} song${if (summary.queued == 1) "" else "s"} offline" +
+                        (summary.blockedBy?.let { " · $it" } ?: "")
+                    summary.alreadySaved > 0 -> "Already saved offline."
+                    else -> "These tracks cannot be saved offline."
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
+        }
+        val offlineActions = remember(app) { cord.kasane.music.ui.components.OfflineActions(
+            save = { tracks -> if (app.settings.offlineNoticeAccepted.value) runSave(tracks) else pendingSave = tracks },
+            remove = app.offline::remove, retry = app.offline::retry) }
+        pendingSave?.let { tracks ->
+            AlertDialog(
+                onDismissRequest = { pendingSave = null },
+                title = { Text("Save offline") },
+                text = { Text("Saved audio stays inside Kasane. It is not exported or shared. Whether a track can be saved depends on YouTube: some tracks stream in formats that cannot be stored, and saved copies may stop working if YouTube or its terms change. Only save music you are allowed to keep offline; Kasane does not grant any download rights.") },
+                confirmButton = { TextButton(onClick = { app.settings.acceptOfflineNotice(); pendingSave = null; runSave(tracks) }) { Text("Save") } },
+                dismissButton = { TextButton(onClick = { pendingSave = null }) { Text("Cancel") } })
+        }
         val favorites by app.database.trackDao().getFavorites().collectAsState(initial = emptyList())
         val history by app.database.trackDao().getRecentHistory().collectAsState(initial = emptyList())
+        val monthAgo = remember { System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000 }
+        val topPlayed by remember { app.database.trackDao().topPlayed(monthAgo) }.collectAsState(initial = emptyList())
+        val recentlySaved by remember { app.database.trackDao().recentlySaved() }.collectAsState(initial = emptyList())
         val favoriteIds = remember(favorites) { favorites.map { it.id }.toSet() }
 
         // Home feed recommendations from YouTube Music
@@ -176,7 +225,35 @@ private fun KasaneContent(app: KasaneApplication) {
             if (accountState is AccountState.SignedIn) libraryOnline = true
         }
         var activeHomeScope by remember { mutableStateOf<String?>(null) }
-        LaunchedEffect(homeRevision, accountState, catalogScope) {
+        var homeChips by remember { mutableStateOf<List<cord.kasane.music.model.CatalogChip>>(emptyList()) }
+        var selectedChip by remember { mutableStateOf<String?>(null) }
+        var chipShelves by remember { mutableStateOf<List<CatalogShelf>>(emptyList()) }
+        var chipLoading by remember { mutableStateOf(false) }
+        var chipError by remember { mutableStateOf<String?>(null) }
+        // Artist and album links for Now Playing: fetched once per song when playback did not already bring them.
+        val currentTrackId = playbackState.currentTrack?.takeIf { !it.isLocal }?.id
+        val knownLinks by app.ytProvider.catalog.trackLinks.collectAsState()
+        LaunchedEffect(currentTrackId, offlineOnly) {
+            val id = currentTrackId ?: return@LaunchedEffect
+            if (offlineOnly || knownLinks.containsKey(id) || !id.matches(Regex("[A-Za-z0-9_-]{11}"))) return@LaunchedEffect
+            try { app.ytProvider.catalog.loadTrackLinks(id) } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+        }
+        val homeSections = remember(homeShelves, chipShelves, selectedChip, topPlayed, history, recentlySaved, favorites, offlineOnly) {
+            if (selectedChip != null) HomeComposer.build(chipShelves, emptyList(), emptyList(), emptyList(), false, local = false)
+            else HomeComposer.build(homeShelves, topPlayed, history, recentlySaved, offlineOnly, favorites)
+        }
+        // A mood chip is a real YouTube Music request: the feed for that mood replaces Home until it is cleared.
+        LaunchedEffect(selectedChip, accountState, offlineOnly) {
+            val params = selectedChip
+            chipShelves = emptyList(); chipError = null
+            if (params == null || offlineOnly) { chipLoading = false; return@LaunchedEffect }
+            chipLoading = true
+            try { chipShelves = app.ytProvider.catalog.homeFiltered(app.accountRepository.session(), params).shelves }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { chipError = "Couldn't load this mood. Check your connection and try again." }
+            finally { chipLoading = false }
+        }
+        LaunchedEffect(homeRevision, accountState, catalogScope, offlineOnly) {
             if (activeHomeScope != catalogScope) {
                 activeHomeScope = catalogScope
                 homeShelves = emptyList()
@@ -186,7 +263,10 @@ private fun KasaneContent(app: KasaneApplication) {
             if (saved != null) {
                 homeShelves = saved.page.shelves
                 homeRecommendations = saved.page.tracks
+                if (saved.page.chips.isNotEmpty()) homeChips = saved.page.chips
             }
+            // Offline Only: the saved feed and local sections are all Home shows; never touch the network.
+            if (offlineOnly) { isHomeLoading = false; isHomeRefreshing = false; homeError = null; handledHomeRevision = homeRevision; return@LaunchedEffect }
             val isStale = saved == null || System.currentTimeMillis() - saved.updatedAt >= cord.kasane.music.data.CachedCatalogRepository.HOME_TTL_MS
             val shouldRefresh = homeRevision != handledHomeRevision || isStale
             if (!shouldRefresh) { isHomeLoading = false; homeError = null; return@LaunchedEffect }
@@ -201,22 +281,11 @@ private fun KasaneContent(app: KasaneApplication) {
                 ) ?: return@LaunchedEffect
                 homeShelves = homePage.shelves
                 homeRecommendations = homePage.tracks
+                if (homePage.chips.isNotEmpty()) homeChips = homePage.chips
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
                 homeError = "Recommendations unavailable. Check your connection and try again."
             } finally { isHomeLoading = false; isHomeRefreshing = false; handledHomeRevision = homeRevision }
-        }
-        if (showSettings) {
-            ModalBottomSheet(onDismissRequest = { showSettings = false }, containerColor = Gray950,
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-                ProfileScreen(accountState, startWebSessionLogin,
-                    { scope.launch { app.accountRepository.signOut(); clearYtMusicWebSession() } },
-                    { scope.launch { app.accountRepository.restore() } }, {
-                        app.accountRepository.cancelSignIn()
-                        showLoginDialog = false
-                        clearYtMusicWebSession()
-                    }, onExportLocalData = { exportLocalData.launch("kasane-local-data.json") })
-            }
         }
         if (showLoginDialog) {
             YtMusicLoginDialog(
@@ -293,17 +362,15 @@ private fun KasaneContent(app: KasaneApplication) {
 
         var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
         // AndroidX supplies predictive progress and dispatches the same path for completed legacy Back.
-        PredictiveBackHandler(enabled = isNowPlayingOpen || detailStack.isNotEmpty() || selectedTab != 0) { progress ->
+        PredictiveBackHandler(enabled = isNowPlayingOpen || showSettings || showDownloads || detailStack.isNotEmpty() || selectedTab != 0) { progress ->
             try {
                 progress.collect { event -> predictiveBackProgress = event.progress }
                 predictiveBackProgress = 0f
             val navigation = navigationAfterBack(selectedTab, isNowPlayingOpen, detailStack.size)
             when {
-                isNowPlayingOpen -> {
-                    scope.launch { nowPlayingSheetState.hide() }.invokeOnCompletion {
-                        isNowPlayingOpen = navigation.nowPlayingOpen
-                    }
-                }
+                showDownloads && !isNowPlayingOpen -> showDownloads = false
+                showSettings && !isNowPlayingOpen -> showSettings = false
+                isNowPlayingOpen -> playerSheet.collapse()
                 detailStack.isNotEmpty() -> { detailStack = detailStack.take(navigation.detailDepth) }
                 selectedTab != 0 -> {
                     focusManager.clearFocus()
@@ -318,191 +385,152 @@ private fun KasaneContent(app: KasaneApplication) {
 
         val openCatalog: (CatalogItem) -> Unit = { entry ->
             entry.track()?.let { app.playbackManager.playTrack(it) }
-                ?: run { isNowPlayingOpen = false; detailStack = detailStack + entry }
+                ?: run { playerSheet.collapse(); detailStack = detailStack + entry }
         }
         CompositionLocalProvider(cord.kasane.music.ui.components.LocalTrackNavigation provides
-            cord.kasane.music.ui.components.TrackNavigation(app.ytProvider.catalog.trackLinks, openCatalog)) {
-        // Fullscreen Now Playing Sheet
-        if (isNowPlayingOpen && playbackState.currentTrack != null) {
-            val currentTrack = playbackState.currentTrack!!
-            NowPlayingSheet(
-                uiState = playbackState,
-                onTogglePlay = { app.playbackManager.togglePlayPause() },
-                onNext = { app.playbackManager.playNext() },
-                onPrev = { app.playbackManager.playPrevious() },
-                onSeek = { app.playbackManager.seekTo(it) },
-                onDismiss = { isNowPlayingOpen = false },
-                isFavorite = favoriteIds.contains(currentTrack.id),
-                onToggleFavorite = {
-                    scope.launch {
-                        app.database.trackDao().insertTrack(currentTrack)
-                        if (favoriteIds.contains(currentTrack.id)) {
-                            app.database.trackDao().removeFavorite(currentTrack.id)
-                        } else {
-                            app.database.trackDao().addFavorite(FavoriteEntity(currentTrack.id))
-                        }
-                    }
-                },
-                onQueueTrack = { app.playbackManager.playQueueItem(it.id) },
-                onShuffle = { app.playbackManager.toggleShuffle() },
-                onRepeat = { app.playbackManager.cycleRepeat() },
-                sheetState = nowPlayingSheetState
-            )
-        }
-
+            cord.kasane.music.ui.components.TrackNavigation(app.ytProvider.catalog.trackLinks, openCatalog),
+            cord.kasane.music.ui.components.LocalOfflineBadges provides offlineBadges,
+            cord.kasane.music.ui.components.LocalCurrentTrackId provides playbackState.currentTrack?.id,
+            cord.kasane.music.ui.components.LocalOfflineActions provides offlineActions) {
+        Box(Modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.graphicsLayer {
                 translationX = size.width * predictiveBackProgress * 0.08f
             },
-            containerColor = Gray950,
+            containerColor = MaterialTheme.colorScheme.background,
             contentWindowInsets = WindowInsets.safeDrawing,
             snackbarHost = {
                 if (playbackState.errorMessage != null) {
                     Snackbar(
-                        containerColor = Gray850,
-                        contentColor = White,
+                        containerColor = MaterialTheme.colorScheme.inverseSurface,
+                        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
                         action = {
                             Row {
                                 TextButton(onClick = { app.playbackManager.retryPlayback() }) {
-                                    Text("Retry", color = AccentRose)
+                                    Text("Retry", color = MaterialTheme.colorScheme.inversePrimary)
                                 }
                                 TextButton(onClick = { app.playbackManager.clearError() }) {
-                                    Text("Dismiss", color = Gray400)
+                                    Text("Dismiss", color = MaterialTheme.colorScheme.inversePrimary)
                                 }
                             }
                         },
-                        modifier = Modifier.padding(16.dp)
+                        modifier = Modifier.padding(16.dp).padding(bottom = if (playbackState.currentTrack != null) 72.dp else 0.dp)
                     ) {
                         Text(playbackState.errorMessage!!)
+                    }
+                } else if (playbackState.noticeMessage != null) {
+                    Snackbar(
+                        containerColor = MaterialTheme.colorScheme.inverseSurface,
+                        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                        action = {
+                            TextButton(onClick = { app.playbackManager.clearNotice() }) {
+                                Text("Dismiss", color = MaterialTheme.colorScheme.inversePrimary)
+                            }
+                        },
+                        modifier = Modifier.padding(16.dp).padding(bottom = if (playbackState.currentTrack != null) 72.dp else 0.dp)
+                    ) {
+                        Text(playbackState.noticeMessage!!)
                     }
                 }
             },
             bottomBar = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Gray900)
-                ) {
-                    MiniPlayer(
-                        uiState = playbackState,
-                        onTogglePlay = { app.playbackManager.togglePlayPause() },
-                        onNext = { app.playbackManager.playNext() },
-                        onPrev = { app.playbackManager.playPrevious() },
-                        onOpenNowPlaying = { isNowPlayingOpen = true }
-                    )
-
-                    HorizontalDivider(
-                        color = Gray800,
-                        thickness = 0.5.dp
-                    )
-
-                    // Streamlined Bottom Navigation (compact 64dp, no pill clutter, proper insets)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Gray900)
-                            .windowInsetsPadding(WindowInsets.navigationBars)
-                            .height(64.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                Box(Modifier.onSizeChanged { navBarHeightPx = it.height }.graphicsLayer { translationY = playerSheet.progress.value * size.height }) {
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 0.dp) {
                         val navItems = listOf(
-                            Triple(0, "Home", Icons.Default.Home),
-                            Triple(1, "Search", Icons.Default.Search),
-                            Triple(2, "Library", Icons.Default.LibraryMusic)
+                            Triple(0, "Home", Icons.Default.Home to Icons.Outlined.Home),
+                            Triple(1, "Search", Icons.Default.Search to Icons.Outlined.Search),
+                            Triple(2, "Library", Icons.Default.LibraryMusic to Icons.Outlined.LibraryMusic)
                         )
-
-                        for ((tabIndex, label, icon) in navItems) {
-                            val isSelected = selectedTab == tabIndex
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .clickable {
-                                        if (tabIndex != 1) focusManager.clearFocus()
-                                        val navigation = navigationAfterTabSelection(tabIndex)
-                                        selectedTab = navigation.selectedTab
-                                        detailStack = emptyList()
-                                        isNowPlayingOpen = navigation.nowPlayingOpen
-                                    },
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = label,
-                                    tint = if (isSelected) AccentRose else Gray500,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = label,
-                                    style = KasaneTypography.labelMedium.copy(
-                                        fontSize = 11.sp,
-                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                                    ),
-                                    color = if (isSelected) AccentRose else Gray500
-                                )
-                            }
+                        for ((tabIndex, label, icons) in navItems) {
+                            val isSelected = selectedTab == tabIndex && !showSettings && !showDownloads
+                            NavigationBarItem(
+                                selected = isSelected,
+                                onClick = {
+                                    if (tabIndex != 1) focusManager.clearFocus()
+                                    val navigation = navigationAfterTabSelection(tabIndex)
+                                    selectedTab = navigation.selectedTab
+                                    detailStack = emptyList()
+                                    showSettings = false
+                                    showDownloads = false
+                                    playerSheet.collapse()
+                                },
+                                icon = { Icon(if (isSelected) icons.first else icons.second, contentDescription = null) },
+                                label = { Text(label) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                            )
                         }
                     }
                 }
             }
         ) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .background(Gray950)
-            ) {
-                if (detailStack.isNotEmpty()) {
+          // consumeWindowInsets: the Scaffold already padded the status bar, so nested TopAppBars must not add it again.
+          Column(Modifier.fillMaxSize().padding(innerPadding).consumeWindowInsets(innerPadding).background(MaterialTheme.colorScheme.background)) {
+            if (offlineOnly) Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CloudOff, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Text("Offline Only · playing saved and cached music", style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                    TextButton(onClick = { app.settings.setOfflineOnly(false) }) { Text("Turn off") }
+                }
+            }
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(bottom = if (playbackState.currentTrack != null) 76.dp else 0.dp)) {
+                if (showDownloads) {
+                    DownloadsScreen(app, onBack = { showDownloads = false }, onPlay = { app.playbackManager.playTrack(it) })
+                } else if (showSettings) {
+                    SettingsScreen(
+                        app = app, state = accountState,
+                        onBack = { showSettings = false },
+                        onSignIn = startWebSessionLogin,
+                        onSignOut = { scope.launch { app.accountRepository.signOut(); clearYtMusicWebSession() } },
+                        onRetry = { scope.launch { app.accountRepository.restore() } },
+                        onCancel = {
+                            app.accountRepository.cancelSignIn()
+                            showLoginDialog = false
+                            clearYtMusicWebSession()
+                        },
+                        onExportLocalData = { exportLocalData.launch("kasane-local-data.json") },
+                        onManageSaved = { showDownloads = true })
+                } else if (detailStack.isNotEmpty()) {
                     val detail = detailStack.last()
                     screenState.SaveableStateProvider("detail:${detail.kind}:${detail.id}") {
                         CatalogDetailScreen(detail, app.ytProvider.catalog,
                             { detailStack = detailStack.dropLast(1) }, openCatalog,
                             { tracks, shuffle -> app.playbackManager.playTracks(tracks, shuffle) },
                             { app.playbackManager.addToQueue(it) }, app.cachedCatalog, catalogScope,
-                            app.accountRepository.session().takeIf { accountState is AccountState.SignedIn })
+                            app.accountRepository.session().takeIf { accountState is AccountState.SignedIn },
+                            (accountState as? AccountState.SignedIn)?.identity)
                     }
                 } else screenState.SaveableStateProvider(selectedTab) {
                 when (selectedTab) {
                     0 -> HomeScreen(
-                        currentTrack = playbackState.currentTrack,
-                        isPlaying = playbackState.isPlaying,
-                        isLoading = playbackState.isLoading,
-                        recentHistory = history,
-                        favorites = favorites,
-                        favoriteIds = favoriteIds,
-                        recommendations = homeRecommendations,
-                        isHomeLoading = isHomeLoading,
-                        onOpenSearch = { selectedTab = 1 },
-                        onOpenSettings = { showSettings = true },
-                        catalogShelves = homeShelves,
-                        isRefreshing = isHomeRefreshing,
-                        onRefresh = { homeRevision++ },
-                        onCatalogOpen = openCatalog,
-                        homeError = homeError,
-                        onRetryHome = { homeRevision++ },
-                        onTrackClick = { app.playbackManager.playTrack(it) },
-                        onAddToQueue = { app.playbackManager.addToQueue(it) },
-                        onToggleFavorite = { track ->
-                            scope.launch {
-                                app.database.trackDao().insertTrack(track)
-                                if (favoriteIds.contains(track.id)) {
-                                    app.database.trackDao().removeFavorite(track.id)
-                                } else {
-                                    app.database.trackDao().addFavorite(FavoriteEntity(track.id))
-                                }
-                            }
-                        }
-                    )
-                    1 -> CatalogSearchScreen(
+                        sections = homeSections, loading = if (selectedChip != null) chipLoading else isHomeLoading,
+                        refreshing = isHomeRefreshing, error = if (selectedChip != null) chipError else homeError,
+                        chips = if (offlineOnly) emptyList() else homeChips, selectedChip = selectedChip,
+                        onChip = { selectedChip = it?.params },
+                        offlineOnly = offlineOnly, currentTrackId = playbackState.currentTrack?.id,
+                        actions = HomeActions(
+                            playTrack = { app.playbackManager.playTrack(it) },
+                            playList = { tracks, index -> app.playbackManager.playTracks(tracks.drop(index.coerceAtLeast(0))) },
+                            startRadio = { app.playbackManager.startRadio(it) },
+                            open = openCatalog, openSearch = { selectedTab = 1 }, openSettings = { showSettings = true },
+                            openSaved = { showDownloads = true }, refresh = { homeRevision++ },
+                            openShelf = { title, id -> openCatalog(CatalogItem(id, cord.kasane.music.model.CatalogKind.PLAYLIST, title)) }))
+                    1 -> if (offlineOnly) OfflineSearchScreen(app.database.trackDao(), playbackState.currentTrack?.id) { app.playbackManager.playTrack(it) }
+                    else CatalogSearchScreen(
                         app.ytProvider.catalog, openCatalog, playbackState.currentTrack?.id, favoriteIds,
                         { track -> scope.launch {
                             app.database.trackDao().insertTrack(track)
                             if (track.id in favoriteIds) app.database.trackDao().removeFavorite(track.id)
                             else app.database.trackDao().addFavorite(FavoriteEntity(track.id))
                         } }, { app.playbackManager.addToQueue(it) }, { app.playbackManager.playNextInQueue(it) },
-                        cachedCatalog = app.cachedCatalog, cacheScope = catalogScope)
+                        cachedCatalog = app.cachedCatalog, cacheScope = catalogScope,
+                        recentSearches = recentSearches, onCommitSearch = app.searchHistory::add,
+                        onRemoveRecent = app.searchHistory::remove, onClearRecent = app.searchHistory::clear)
                     2 -> LibraryScreen(
                         accountState = accountState,
                         accountProvider = app.accountLibraryProvider,
@@ -516,6 +544,7 @@ private fun KasaneContent(app: KasaneApplication) {
                         session = app.accountRepository.session(),
                         favoritesCount = favorites.size,
                         historyCount = history.size,
+                        onOpenSettings = { showSettings = true },
                         onCatalogOpen = { entry -> entry.track()?.let { app.playbackManager.playTrack(it) }
                             ?: run { detailStack = detailStack + entry } },
                         onAddToQueue = { app.playbackManager.addToQueue(it) },
@@ -551,98 +580,31 @@ private fun KasaneContent(app: KasaneApplication) {
                 }
                 }
             }
+          }
+        }
+        val current = playbackState.currentTrack
+        if (current != null) {
+            PlayerSheet(
+                state = playbackState, sheet = playerSheet, isFavorite = favoriteIds.contains(current.id),
+                dockedBottom = with(androidx.compose.ui.platform.LocalDensity.current) { navBarHeightPx.toDp() },
+                actions = PlayerActions(
+                    togglePlay = { app.playbackManager.togglePlayPause() }, next = { app.playbackManager.playNext() },
+                    previous = { app.playbackManager.playPrevious() }, seekTo = { app.playbackManager.seekTo(it) },
+                    shuffle = { app.playbackManager.toggleShuffle() }, repeat = { app.playbackManager.cycleRepeat() },
+                    retry = { app.playbackManager.retryPlayback() }, dismissError = { app.playbackManager.clearError() },
+                    toggleFavorite = { scope.launch {
+                        app.database.trackDao().insertTrack(current)
+                        if (favoriteIds.contains(current.id)) app.database.trackDao().removeFavorite(current.id)
+                        else app.database.trackDao().addFavorite(FavoriteEntity(current.id))
+                    } },
+                    openQueue = { showQueue = true }))
+        }
+        if (showQueue) QueueSheet(playbackState, onPlayIndex = { app.playbackManager.playQueueIndex(it) },
+            onMove = { from, to -> app.playbackManager.moveQueueItem(from, to) },
+            onRemove = { app.playbackManager.removeQueueItem(it) }, onDismiss = { showQueue = false })
         }
         cord.kasane.music.ui.components.PlaylistPickerHost()
     }
-    }
-}
-
-@Composable
-@OptIn(ExperimentalMaterial3Api::class)
-fun HomeScreen(
-    currentTrack: Track?,
-    isPlaying: Boolean,
-    isLoading: Boolean,
-    recentHistory: List<HistoryEntity>,
-    favorites: List<Track>,
-    favoriteIds: Set<String>,
-    recommendations: List<Track>,
-    isHomeLoading: Boolean,
-    onOpenSearch: () -> Unit,
-    onTrackClick: (Track) -> Unit,
-    onAddToQueue: (Track) -> Unit,
-    onToggleFavorite: (Track) -> Unit,
-    onOpenSettings: () -> Unit = {},
-    homeError: String? = null,
-    onRetryHome: () -> Unit = {},
-    catalogShelves: List<CatalogShelf> = emptyList(),
-    onCatalogOpen: (CatalogItem) -> Unit = {},
-    isRefreshing: Boolean = false,
-    onRefresh: () -> Unit = {}
-) {
-    val listenAgain = remember(recentHistory) { HomeFeedPolicy.latestHistory(recentHistory) }
-    val uniqueRecommendations = remember(recommendations) { HomeFeedPolicy.uniqueTracks(recommendations) }
-    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = onRefresh,
-        modifier = Modifier.fillMaxSize(),
-    ) {
-    LazyColumn(state = androidx.compose.foundation.lazy.rememberLazyListState(), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(cord.kasane.music.R.mipmap.ic_launcher), null, modifier = Modifier.size(32.dp))
-                Text("Kasane", color = White, style = KasaneTypography.titleLarge, modifier = Modifier.weight(1f).padding(start = 10.dp))
-                IconButton(onClick = onOpenSearch) { Icon(Icons.Default.Search, "Search", tint = Gray200) }
-                IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Person, "Profile", tint = AccentRose) }
-            }
-        }
-        if (catalogShelves.isNotEmpty()) {
-            catalogShelves.forEach { shelf -> item { CatalogShelfRow(shelf, onCatalogOpen) } }
-            if (isHomeLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(20.dp), color = AccentRose) }
-            if (homeError != null) item {
-                Text(homeError, color = Gray400, modifier = Modifier.padding(20.dp))
-                TextButton(onClick = onRetryHome) { Text("Retry") }
-            }
-        } else {
-        item { SectionTitle("Fast picks", "For the moment") }
-        item {
-            when {
-                isHomeLoading -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(20.dp), color = AccentRose)
-                homeError != null -> Column(Modifier.padding(horizontal = 20.dp)) {
-                    Text(homeError, color = Gray400)
-                    TextButton(onClick = onRetryHome) { Text("Try again") }
-                }
-                uniqueRecommendations.isEmpty() -> Text("No recommendations yet. Find something you love in Search.", color = Gray400, modifier = Modifier.padding(20.dp))
-                else -> LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(uniqueRecommendations, key = { it.id }) { track ->
-                        cord.kasane.music.ui.components.TrackCard(track, 156.dp, onClick = { onTrackClick(track) },
-                            modifier = Modifier.clip(RoundedCornerShape(14.dp)),
-                            onLocalFavorite = { onToggleFavorite(track) }, localFavorite = track.id in favoriteIds)
-                    }
-                }
-            }
-        }
-        }
-        if (listenAgain.isNotEmpty()) {
-            item { SectionTitle("Listen Again", "Recently played") }
-            items(listenAgain.take(15), key = { it.trackId }) { item ->
-                val track = Track(item.trackId, item.title, item.artist, item.album, thumbnailUri = item.thumbnailUri)
-                TrackRow(track = track, isPlaying = currentTrack?.id == track.id && isPlaying,
-                    isLoading = currentTrack?.id == track.id && isLoading,
-                    onClick = { onTrackClick(track) }, onAddToQueue = { onAddToQueue(track) },
-                    onToggleFavorite = { onToggleFavorite(track) }, isFavorite = track.id in favoriteIds,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp).clip(RoundedCornerShape(12.dp)).background(Gray900))
-            }
-        }
-    }
-    }
-}
-
-@Composable
-private fun SectionTitle(title: String, subtitle: String) {
-    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = White, style = KasaneTypography.titleLarge, modifier = Modifier.weight(1f))
-        Text(subtitle, style = KasaneTypography.labelMedium, color = Gray400)
     }
 }
 
@@ -664,9 +626,15 @@ fun LibraryScreen(
     session: AccountSession? = null,
     favoritesCount: Int = 0,
     historyCount: Int = 0,
+    onOpenSettings: () -> Unit = {},
+    savedCount: Int = 0,
+    onOpenDownloads: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize()) {
-        Text("Your library", color = White, style = KasaneTypography.titleLarge, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 12.dp))
+        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Library", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+            IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(listOf("All", "Playlists", "Songs", "Albums", "Artists")) { item ->
                 cord.kasane.music.ui.components.KasaneChoiceChip(item, filter == item, { onFilter(item) })
@@ -674,9 +642,9 @@ fun LibraryScreen(
         }
         when (filter) {
             "Songs" -> {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (showingHistory) "Recently played" else "Favorites", color = White, style = KasaneTypography.titleMedium, modifier = Modifier.weight(1f))
-                    Text("On this device", color = Gray400, style = KasaneTypography.labelMedium)
+                Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    cord.kasane.music.ui.components.KasaneChoiceChip("Favorites · $favoritesCount", !showingHistory, { onSelectHistory(false) })
+                    cord.kasane.music.ui.components.KasaneChoiceChip("History", showingHistory, { onSelectHistory(true) })
                 }
                 Box(Modifier.weight(1f)) { if (showingHistory) historyContent() else favoritesContent() }
             }
@@ -691,14 +659,16 @@ fun LibraryScreen(
             )
             else -> {
                 Column(Modifier.weight(1f).fillMaxWidth()) {
-                    LibraryCollectionRow("Favorites", "$favoritesCount songs · On this device", Icons.Default.Favorite) {
+                    LibraryCollectionRow("Favorites", plural(favoritesCount, "song"), Icons.Default.Favorite) {
                         onFilter("Songs"); onSelectHistory(false)
                     }
-                    LibraryCollectionRow("History", "$historyCount played · On this device", Icons.Default.History) {
+                    LibraryCollectionRow("Saved music", plural(savedCount, "song") + " · offline", Icons.Default.DownloadDone, onOpenDownloads)
+                    LibraryCollectionRow("History", if (historyCount == 0) "Nothing played yet" else "$historyCount recently played", Icons.Default.History) {
                         onFilter("Songs"); onSelectHistory(true)
                     }
-                    Text("YouTube Music", color = Gray400, style = KasaneTypography.labelMedium,
-                        modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 6.dp))
+                    HorizontalDivider(Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    Text("Your YouTube Music playlists", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 4.dp))
                     AccountLibraryScreen(accountState, accountProvider, onSignIn, onCatalogOpen, onAddToQueue, onExpired,
                         modifier = Modifier.weight(1f).fillMaxWidth(), cachedCatalog = cachedCatalog, session = session,
                         selected = cord.kasane.music.provider.AccountCollection.PLAYLISTS)
@@ -710,73 +680,15 @@ fun LibraryScreen(
 
 @Composable
 private fun LibraryCollectionRow(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = AccentRose, modifier = Modifier.size(34.dp))
-        Column(Modifier.weight(1f).padding(start = 14.dp)) {
-            Text(title, color = White, style = KasaneTypography.bodyLarge)
-            Text(subtitle, color = Gray400, style = KasaneTypography.bodySmall)
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(44.dp).background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.small), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(22.dp))
         }
-        Icon(Icons.Default.ChevronRight, null, tint = Gray400)
-    }
-}
-
-@Preview(name = "HomeScreen State Preview", showBackground = true, backgroundColor = 0xFF0C0D10, widthDp = 390, heightDp = 844)
-@Composable
-fun HomeScreenPreview() {
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
-        HomeScreen(
-            currentTrack = Track(
-                id = "prev-current",
-                title = "Beat It",
-                artist = "Michael Jackson",
-                album = "Thriller",
-                durationSeconds = 258.0
-            ),
-            isPlaying = true,
-            isLoading = false,
-            recentHistory = listOf(
-                HistoryEntity(
-                    trackId = "prev-h1",
-                    title = "Midnight City Lights",
-                    artist = "Aether",
-                    album = "Neon Drift"
-                ),
-                HistoryEntity(
-                    trackId = "prev-h2",
-                    title = "Subway Melancholy",
-                    artist = "Dustin Corder",
-                    album = "Echoes of Silence"
-                )
-            ),
-            favorites = listOf(
-                Track(
-                    id = "prev-f1",
-                    title = "Synthetic Dawn",
-                    artist = "Kuro",
-                    album = "Genesis"
-                )
-            ),
-            favoriteIds = setOf("prev-f1"),
-            recommendations = listOf(
-                Track(
-                    id = "prev-r1",
-                    title = "Choosin' Texas",
-                    artist = "Ella Langley",
-                    album = "Hungover"
-                ),
-                Track(
-                    id = "prev-r2",
-                    title = "a thousand years",
-                    artist = "Christina Perri",
-                    album = "Lovestrong"
-                )
-            ),
-            isHomeLoading = false,
-            onOpenSearch = {},
-            onTrackClick = {},
-            onAddToQueue = {},
-            onToggleFavorite = {}
-        )
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -791,31 +703,6 @@ fun FavoritesScreen(
     onRemoveFavorite: (Track) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // Compact Header (52dp)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "Favorites",
-                style = KasaneTypography.titleMedium.copy(fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                color = White
-            )
-            Text(
-                text = "${favorites.size} tracks",
-                style = KasaneTypography.labelMedium,
-                color = Gray400
-            )
-        }
-
-        HorizontalDivider(
-            color = Gray800,
-            thickness = 0.5.dp
-        )
 
         if (favorites.isEmpty()) {
             Box(
@@ -824,8 +711,8 @@ fun FavoritesScreen(
             ) {
                 Text(
                     text = "No favorite tracks yet",
-                    style = KasaneTypography.bodyMedium,
-                    color = Gray400
+                    style = MaterialTheme.typography.bodyMediumMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
@@ -845,7 +732,7 @@ fun FavoritesScreen(
                         useCloudFavorite = false
                     )
                     HorizontalDivider(
-                        color = Gray800,
+                        color = MaterialTheme.colorScheme.outlineVariant,
                         thickness = 0.5.dp,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
@@ -867,31 +754,6 @@ fun HistoryScreen(
     onToggleFavorite: (HistoryEntity) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // Compact Header (52dp)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "History",
-                style = KasaneTypography.titleMedium.copy(fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                color = White
-            )
-            Text(
-                text = "${history.size} played",
-                style = KasaneTypography.labelMedium,
-                color = Gray400
-            )
-        }
-
-        HorizontalDivider(
-            color = Gray800,
-            thickness = 0.5.dp
-        )
 
         if (history.isEmpty()) {
             Box(
@@ -900,8 +762,8 @@ fun HistoryScreen(
             ) {
                 Text(
                     text = "No listening history yet",
-                    style = KasaneTypography.bodyMedium,
-                    color = Gray400
+                    style = MaterialTheme.typography.bodyMediumMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
@@ -927,7 +789,7 @@ fun HistoryScreen(
                         isFavorite = favoriteIds.contains(track.id)
                     )
                     HorizontalDivider(
-                        color = Gray800,
+                        color = MaterialTheme.colorScheme.outlineVariant,
                         thickness = 0.5.dp,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
@@ -940,15 +802,15 @@ fun HistoryScreen(
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 fun SearchScreenPreview() {
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+    KasaneTheme(dynamicColor = false) {
         CatalogSearchScreen(cord.kasane.music.provider.OnlineCatalog(okhttp3.OkHttpClient()), {}, null, emptySet(), {}, {})
     }
 }
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 fun LibraryScreenPreview() {
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
-        Surface(color = Gray950) {
+    KasaneTheme(dynamicColor = false) {
+        Surface(color = MaterialTheme.colorScheme.background) {
             val provider = remember { object : cord.kasane.music.provider.AccountLibraryProvider {
                 override suspend fun collection(collection: cord.kasane.music.provider.AccountCollection, continuation: String?) = cord.kasane.music.model.CatalogPage("", "", null, emptyList())
                 override suspend fun playlist(playlistId: String, continuation: String?) = cord.kasane.music.model.CatalogPage("", "", null, emptyList())
@@ -964,8 +826,8 @@ fun LibraryScreenPreview() {
 @Preview(name = "Library · YouTube Music", showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 fun LibraryOnlinePreview() {
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
-        Surface(color = Gray950) {
+    KasaneTheme(dynamicColor = false) {
+        Surface(color = MaterialTheme.colorScheme.background) {
             val provider = remember { object : cord.kasane.music.provider.AccountLibraryProvider {
                 override suspend fun collection(collection: cord.kasane.music.provider.AccountCollection, continuation: String?) =
                     when (collection) {

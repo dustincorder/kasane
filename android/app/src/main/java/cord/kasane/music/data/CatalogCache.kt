@@ -80,17 +80,20 @@ class RoomCatalogCacheStore(private val dao: KasaneDatabase.CatalogCacheDao) : C
         val links = dao.getShelfItems(scope, key)
         val items = if (links.isEmpty()) emptyMap() else dao.getItems(links.map { it.itemKey }.distinct())
             .associateBy { it.itemKey }
+        val meta = page.meta?.let { runCatching { kotlinx.serialization.json.Json.decodeFromString(cord.kasane.music.model.PageMeta.serializer(), it) }.getOrNull() }
         val resolved = shelves.map { shelf ->
             val rows = links.filter { it.shelfIndex == shelf.shelfIndex }
             val content = rows.mapNotNull { row -> items[row.itemKey]?.let { item ->
                 runCatching { CatalogKind.valueOf(item.kind) }.getOrNull()?.let { kind ->
-                    cord.kasane.music.model.CatalogItem(item.id, kind, item.title, item.subtitle, item.artwork, item.durationSeconds)
+                    cord.kasane.music.model.CatalogItem(item.id, kind, item.title, item.subtitle, item.artwork, item.durationSeconds, item.album)
                 }
             } }
-            CatalogShelf(shelf.title, content)
+            CatalogShelf(shelf.title, content, shelf.moreBrowseId)
         }
         return CacheEntry(CatalogPage(page.title, page.subtitle, page.artwork, resolved,
-            page.continuation, page.description), page.updatedAt)
+            page.continuation, page.description, page.chips.orEmpty().lines().mapNotNull { line ->
+                line.split('\t', limit = 2).takeIf { it.size == 2 && it[1].isNotBlank() }?.let { cord.kasane.music.model.CatalogChip(it[0], it[1]) }
+            }, creators = meta?.creators.orEmpty(), stats = meta?.stats.orEmpty(), owned = meta?.owned == true, listeners = meta?.listeners.orEmpty(), radioPlaylistId = meta?.radioPlaylistId, radioVideoId = meta?.radioVideoId), page.updatedAt)
     }
 
     override suspend fun write(scope: String, key: String, page: CatalogPage, now: Long) = dao.save(scope, key, page, now)

@@ -34,10 +34,32 @@ class SharedOnlineCatalog(private val client: InnerTubeClient, private val sessi
     override suspend fun home(account: AccountSession?): CatalogPage = withContext(Dispatchers.Default) {
         CatalogJsonParser.page(request("browse", buildJsonObject { put("browseId", "FEmusic_home") }, account))
     }
+    /** Home filtered by a mood/activity chip. The response is a full Home feed for that mood. */
+    suspend fun homeFiltered(account: AccountSession?, params: String): CatalogPage = withContext(Dispatchers.Default) {
+        require(params.isNotBlank())
+        CatalogJsonParser.page(request("browse", buildJsonObject { put("browseId", "FEmusic_home"); put("params", params) }, account))
+    }
+    /** Typing suggestions from YouTube Music. Empty on any failure: suggestions are a convenience, never an error. */
+    suspend fun suggestions(query: String): List<String> = withContext(Dispatchers.Default) {
+        if (query.isBlank()) return@withContext emptyList()
+        runCatching {
+            val root = request("music/get_search_suggestions", buildJsonObject { put("input", query.trim().take(100)) }, session())
+            CatalogJsonParser.objects(root, "searchSuggestionRenderer").mapNotNull {
+                CatalogJsonParser.text(it.optJsonObject("suggestion")).takeIf { s -> s.isNotBlank() }
+            }.distinct().take(8)
+        }.getOrDefault(emptyList())
+    }
+    /** Fetches the artist and album links for one song; the response feeds [trackLinks] like any other `next` call. */
+    suspend fun loadTrackLinks(videoId: String) { require(videoId.matches(Regex("[A-Za-z0-9_-]{11}"))); request("next", buildJsonObject { put("videoId", videoId) }, session()) }
     suspend fun radioPage(videoId: String, continuation: String? = null): RadioPage = withContext(Dispatchers.Default) {
         val body = buildJsonObject {
             if (continuation != null) put("continuation", continuation)
-            else { put("videoId", videoId); put("playlistId", "RDAMVM$videoId") }
+            else {
+                // The request YouTube Music's own "Start radio" sends: the seed's automix playlist with the radio
+                // params, audio only. Without them the response is a generic related mix.
+                put("videoId", videoId); put("playlistId", "RDAMVM$videoId"); put("params", "wAEB")
+                put("isAudioOnly", true); put("tunerSettingValue", "AUTOMIX_SETTING_NORMAL")
+            }
         }
         CatalogJsonParser.radio(request("next", body, session()))
     }

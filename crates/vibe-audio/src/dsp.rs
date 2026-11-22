@@ -64,6 +64,7 @@ mod tests {
             mime_type: "audio/webm".into(),
             bitrate_kbps: Some(160),
             expires_at: None,
+            notice: None,
         };
 
         let features = analyzer.analyze_track(&track, &source).await.unwrap();

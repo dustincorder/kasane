@@ -1,6 +1,15 @@
 package cord.kasane.music.ui.components
 
 import androidx.compose.material3.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,13 +37,27 @@ private val EmptyTrackLinks: kotlinx.coroutines.flow.StateFlow<Map<String, cord.
 val LocalTrackNavigation = staticCompositionLocalOf<TrackNavigation?> { null }
 val LocalTrackActions = staticCompositionLocalOf<TrackActions?> { null }
 
-/** Shared menu for track rows, long press, and Now Playing; only wired actions are shown. */
+/** One menu action. `action` never dismisses anything; callers decide what happens around it. */
+class MenuEntry(val label: String, val enabled: Boolean = true, val icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    val group: Int = GROUP_LIBRARY, val action: () -> Unit) {
+    companion object { const val GROUP_PLAYBACK = 0; const val GROUP_LIBRARY = 1; const val GROUP_GO = 2 }
+}
+
+/** The id of the track that is playing now; its menu omits "Play", which would do nothing. */
+val LocalCurrentTrackId = staticCompositionLocalOf<String?> { null }
+
+/**
+ * Single source of truth for a track's actions. The long-press menu, the trailing overflow button and the
+ * TalkBack actions list all render these same entries, so they can never drift apart.
+ */
 @Composable
-fun TrackContextMenu(
-    track: Track, expanded: Boolean, onDismiss: () -> Unit, onPlay: () -> Unit,
+fun rememberTrackMenuEntries(
+    track: Track, onPlay: () -> Unit,
     onNext: (() -> Unit)? = null, onQueue: (() -> Unit)? = null,
     onLocalFavorite: (() -> Unit)? = null, localFavorite: Boolean = false,
-) {
+    extra: List<MenuEntry> = emptyList(),
+    refreshRating: Boolean = false,
+): List<MenuEntry> {
     val navigation = LocalTrackNavigation.current
     val allLinks by key(navigation) { (navigation?.links ?: EmptyTrackLinks).collectAsState() }
     val links = allLinks[track.id]
@@ -44,40 +67,82 @@ fun TrackContextMenu(
     val cloud = LocalCloudLikes.current?.takeIf { !track.isLocal && track.sourceProvider == "youtube" }
     val states by key(cloud) { (cloud?.states ?: EmptyCloudLikes).collectAsState() }
     val pending by key(cloud) { (cloud?.pending ?: EmptyPendingLikes).collectAsState() }
-    LaunchedEffect(expanded, cloud, track.id) { if (expanded) cloud?.refresh(track.id) }
+    LaunchedEffect(refreshRating, cloud, track.id) { if (refreshRating) cloud?.refresh(track.id) }
     val ratings = TrackMenuPolicy.ratings(cloud != null, track.isLocal, states[track.id], cloud?.supportsDislike == true)
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, containerColor = Gray900) {
-        Column(Modifier.widthIn(max = 280.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(track.title, style = KasaneTypography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(track.artist, color = Gray400, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        HorizontalDivider(color = Gray800)
-        DropdownMenuItem(text = { Text("Play") }, onClick = { onDismiss(); onPlay() })
-        val next = onNext ?: actions?.let { { it.next(track) } }
-        val queue = onQueue ?: actions?.let { { it.queue(track) } }
-        if (next != null) DropdownMenuItem(text = { Text("Play next") }, onClick = { onDismiss(); next() })
-        if (queue != null) DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onDismiss(); queue() })
-        if (actions != null && youtube) DropdownMenuItem(text = { Text("Start radio") }, onClick = { onDismiss(); actions.radio(track) })
-        val playlists = LocalPlaylistPicker.current
-        if (youtube && playlists != null) DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onDismiss(); playlists.open(track) })
-        if (ratings.like != null) DropdownMenuItem(
-            text = { Text(ratings.like) },
-            enabled = track.id !in pending && states[track.id] != CloudLikeState.LOADING, onClick = { onDismiss(); cloud?.toggle(track.id) })
-        if (ratings.dislike != null) DropdownMenuItem(
-            text = { Text(ratings.dislike) },
-            enabled = track.id !in pending, onClick = { onDismiss(); cloud?.toggleDislike(track.id) })
-        links?.album?.let { album -> DropdownMenuItem(text = { Text("Go to album") }, onClick = { onDismiss(); navigation?.open?.invoke(album) }) }
-        links?.artist?.let { artist -> DropdownMenuItem(text = { Text("Go to artist") }, onClick = { onDismiss(); navigation?.open?.invoke(artist) }) }
-        if (youtube) DropdownMenuItem(text = { Text("Share") }, onClick = {
-            onDismiss()
+    val offlineActions = LocalOfflineActions.current
+    val offlineBadge = LocalOfflineBadges.current[track.id]
+    val playlists = LocalPlaylistPicker.current
+    val currentId = LocalCurrentTrackId.current
+    val pb = MenuEntry.GROUP_PLAYBACK; val lib = MenuEntry.GROUP_LIBRARY; val go = MenuEntry.GROUP_GO
+    return buildList {
+        if (track.id != currentId) add(MenuEntry("Play", icon = Icons.Outlined.PlayArrow, group = pb, action = onPlay))
+        (onNext ?: actions?.let { { it.next(track) } })?.let { add(MenuEntry("Play next", icon = Icons.Outlined.SkipNext, group = pb, action = it)) }
+        (onQueue ?: actions?.let { { it.queue(track) } })?.let { add(MenuEntry("Add to queue", icon = Icons.AutoMirrored.Outlined.PlaylistAdd, group = pb, action = it)) }
+        if (actions != null && youtube) add(MenuEntry("Start radio", icon = Icons.Outlined.Radio, group = pb) { actions.radio(track) })
+        addAll(extra)
+        ratings.like?.let { add(MenuEntry(it, enabled = track.id !in pending && states[track.id] != CloudLikeState.LOADING,
+            icon = if (states[track.id] == CloudLikeState.LIKED) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, group = lib) { cloud?.toggle(track.id) }) }
+        ratings.dislike?.let { add(MenuEntry(it, enabled = track.id !in pending, icon = Icons.Outlined.ThumbDown, group = lib) { cloud?.toggleDislike(track.id) }) }
+        if (youtube && playlists != null) add(MenuEntry("Add to playlist", icon = Icons.AutoMirrored.Outlined.PlaylistAdd, group = lib) { playlists.open(track) })
+        if (offlineActions != null && cord.kasane.music.offline.OfflinePolicy.canRequestSave(track)) add(when (offlineBadge) {
+            OfflineBadge.SAVED -> MenuEntry("Remove from offline", icon = Icons.Outlined.DownloadDone, group = lib) { offlineActions.remove(track.id) }
+            OfflineBadge.DOWNLOADING -> MenuEntry("Cancel download", icon = Icons.Outlined.Close, group = lib) { offlineActions.remove(track.id) }
+            OfflineBadge.FAILED -> MenuEntry("Retry saving offline", icon = Icons.Outlined.Refresh, group = lib) { offlineActions.retry(track.id) }
+            else -> MenuEntry("Save offline", icon = Icons.Outlined.Download, group = lib) { offlineActions.save(listOf(track)) }
+        })
+        if (onLocalFavorite != null) add(MenuEntry(if (localFavorite) "Remove local favorite" else "Save to local favorites",
+            icon = if (localFavorite) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, group = lib, action = onLocalFavorite))
+        links?.album?.let { album -> add(MenuEntry("Go to album", icon = Icons.Outlined.Album, group = go) { navigation?.open?.invoke(album) }) }
+        links?.artist?.let { artist -> add(MenuEntry("Go to artist", icon = Icons.Outlined.Person, group = go) { navigation?.open?.invoke(artist) }) }
+        if (youtube) add(MenuEntry("Share", icon = Icons.Outlined.Share, group = go) {
             val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, "https://music.youtube.com/watch?v=${track.id}")
             }
             context.startActivity(android.content.Intent.createChooser(intent, "Share song"))
         })
-        if (onLocalFavorite != null) DropdownMenuItem(
-            text = { Text(if (localFavorite) "Remove local favorite" else "Save to local favorites") },
-            onClick = { onDismiss(); onLocalFavorite() })
+    }
+}
+
+/**
+ * Track actions as a modal bottom sheet: header with the track, then grouped, labelled actions with icons.
+ * It scrolls when there are more actions than the screen holds. Used by rows, grid items and the player.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TrackContextMenu(
+    track: Track, expanded: Boolean, onDismiss: () -> Unit, onPlay: () -> Unit,
+    onNext: (() -> Unit)? = null, onQueue: (() -> Unit)? = null,
+    onLocalFavorite: (() -> Unit)? = null, localFavorite: Boolean = false,
+    extra: List<MenuEntry> = emptyList(),
+) {
+    val entries = rememberTrackMenuEntries(track, onPlay, onNext, onQueue, onLocalFavorite, localFavorite, extra, refreshRating = expanded)
+    if (!expanded) return
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        TrackActions(track, entries, onDismiss)
+    }
+}
+
+@Composable
+fun TrackActions(track: Track, entries: List<MenuEntry>, onDismiss: () -> Unit) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 8.dp)) {
+        Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TrackArtwork(track.thumbnailUri, Modifier.size(52.dp))
+            Column(Modifier.padding(start = 14.dp)) {
+                Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(track.artist, style = MaterialTheme.typography.bodyMediumMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        entries.groupBy { it.group }.toSortedMap().values.forEach { group ->
+            HorizontalDivider(Modifier.padding(vertical = 6.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            group.forEach { entry ->
+                ListItem(
+                    headlineContent = { Text(entry.label, style = MaterialTheme.typography.bodyLarge) },
+                    leadingContent = entry.icon?.let { icon -> { Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } },
+                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                        headlineColor = if (entry.enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)),
+                    modifier = Modifier.heightIn(min = 52.dp).clickable(enabled = entry.enabled) { onDismiss(); entry.action() })
+            }
+        }
     }
 }
 
@@ -101,7 +166,7 @@ fun TrackContextMenuPreview() {
     val links = remember { kotlinx.coroutines.flow.MutableStateFlow(mapOf(track.id to cord.kasane.music.provider.TrackLinks(
         cord.kasane.music.model.CatalogItem("UCpreview", cord.kasane.music.model.CatalogKind.ARTIST, "Preview artist"),
         cord.kasane.music.model.CatalogItem("MPREpreview", cord.kasane.music.model.CatalogKind.ALBUM, "Preview album")))) }
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+    KasaneTheme(dynamicColor = false) {
         CompositionLocalProvider(LocalCloudLikes provides cloud, LocalTrackActions provides TrackActions({}, {}, {}, {}),
             LocalPlaylistPicker provides playlists,
             LocalTrackNavigation provides TrackNavigation(links, {})) {
@@ -110,6 +175,26 @@ fun TrackContextMenuPreview() {
                     TrackContextMenu(track, true, {}, {}, onLocalFavorite = {}, localFavorite = false)
                 }
             }
+        }
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, widthDp = 412, heightDp = 700)
+@Composable
+fun TrackActionsPreview() {
+    KasaneTheme(dynamicColor = false) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow) {
+            val t = Track("wzpAehzNCU8", "A long track title that must wrap safely inside the sheet header", "Preview artist")
+            TrackActions(t, listOf(
+                MenuEntry("Play next", icon = Icons.Outlined.SkipNext, group = MenuEntry.GROUP_PLAYBACK) {},
+                MenuEntry("Add to queue", icon = Icons.AutoMirrored.Outlined.PlaylistAdd, group = MenuEntry.GROUP_PLAYBACK) {},
+                MenuEntry("Start radio", icon = Icons.Outlined.Radio, group = MenuEntry.GROUP_PLAYBACK) {},
+                MenuEntry("Like on YouTube Music", icon = Icons.Outlined.FavoriteBorder) {},
+                MenuEntry("Add to playlist", icon = Icons.AutoMirrored.Outlined.PlaylistAdd) {},
+                MenuEntry("Save offline", icon = Icons.Outlined.Download) {},
+                MenuEntry("Go to album", icon = Icons.Outlined.Album, group = MenuEntry.GROUP_GO) {},
+                MenuEntry("Go to artist", icon = Icons.Outlined.Person, group = MenuEntry.GROUP_GO) {},
+                MenuEntry("Share", icon = Icons.Outlined.Share, group = MenuEntry.GROUP_GO) {}), {})
         }
     }
 }
