@@ -55,7 +55,7 @@ import androidx.compose.ui.window.DialogProperties
 import cord.kasane.music.auth.AccountChannel
 import cord.kasane.music.auth.CapturedWebSession
 import cord.kasane.music.auth.WebSessionParser
-import cord.kasane.music.ui.theme.AccentRose
+import cord.kasane.music.ui.theme.KasaneTheme
 import cord.kasane.music.ui.theme.Gray400
 import cord.kasane.music.ui.theme.Gray850
 import cord.kasane.music.ui.theme.Gray950
@@ -126,15 +126,15 @@ fun YtMusicLoginDialog(
                 if (channels == null && sessionCaptured) {
                     Text("YouTube Music session detected. Checking your channel…", color = Gray400,
                         modifier = Modifier.padding(20.dp), style = MaterialTheme.typography.bodyMedium)
-                    if (isCheckingChannels) LinearProgressIndicator(Modifier.fillMaxWidth(), color = AccentRose)
-                    errorMessage?.let { Text(it, color = AccentRose, modifier = Modifier.padding(horizontal = 20.dp)) }
+                    if (isCheckingChannels) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary)
+                    errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp)) }
                     if (!isCheckingChannels && errorMessage != null) {
                         TextButton(onClick = onRetryChannels, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Retry channel check") }
                     }
                     androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
                 } else if (channels == null) {
-                    if (progress) LinearProgressIndicator(Modifier.fillMaxWidth(), color = AccentRose)
-                    (pageError ?: errorMessage)?.let { Text(it, color = AccentRose, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+                    if (progress) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary)
+                    (pageError ?: errorMessage)?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
                     AndroidView(factory = { ctx ->
                         WebView(ctx).apply {
                             settings.javaScriptEnabled = true
@@ -303,16 +303,16 @@ fun YtMusicLoginDialog(
                         color = White, modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
                     if (channels.size == 1) {
                         Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            if (isCheckingChannels) CircularProgressIndicator(color = AccentRose)
-                            errorMessage?.let { Text(it, color = AccentRose, modifier = Modifier.padding(vertical = 12.dp)) }
+                            if (isCheckingChannels) CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                            errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 12.dp)) }
                             if (!isCheckingChannels && errorMessage != null) {
                                 Button(onClick = { currentOnConfirmChannel(channels.single()) }) { Text("Retry") }
                             }
                         }
                     } else if (isCheckingChannels) Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        CircularProgressIndicator(color = AccentRose); Text("Checking your YouTube session…", color = Gray400, modifier = Modifier.padding(12.dp))
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary); Text("Checking your YouTube session…", color = Gray400, modifier = Modifier.padding(12.dp))
                     } else {
-                        errorMessage?.let { Text(it, color = AccentRose, modifier = Modifier.padding(horizontal = 16.dp)) }
+                        errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
                         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                             items(channels, key = { channel -> channel.pageId ?: channel.dataSyncId ?: channel.title }) { channel ->
                                 val key = channel.pageId ?: channel.dataSyncId ?: channel.title
@@ -353,7 +353,7 @@ fun clearYtMusicWebSession(onComplete: (() -> Unit)? = null) {
 @Preview(showBackground = true, widthDp = 390, heightDp = 800)
 @Composable
 private fun LoginDialogPreview() {
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+    KasaneTheme(dynamicColor = false) {
         Surface(color = Gray950) {
             YtMusicLoginDialog(
                 channels = listOf(
@@ -374,7 +374,7 @@ private fun LoginDialogPreview() {
 @Preview(showBackground = true, widthDp = 390, heightDp = 800)
 @Composable
 private fun SingleChannelLoginPreview() {
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+    KasaneTheme(dynamicColor = false) {
         Surface(color = Gray950) {
             YtMusicLoginDialog(
                 channels = listOf(AccountChannel("Kasane Preview", "YouTube channel", "UCpreview", "preview||user", null, true)),

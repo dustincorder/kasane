@@ -1,7 +1,14 @@
 package cord.kasane.music.ui.theme
 
+import android.os.Build
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -9,99 +16,104 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// Neutral, quiet dark theme: Deep slate and onyx, no neon purple or loud gradients
-val Gray950 = Color(0xFF0C0D10) // App base background
-val Gray900 = Color(0xFF13151A) // Elevated surfaces (navigation bar, app bar, bottom sheets)
-val Gray850 = Color(0xFF1B1E26) // Player bar & secondary containers
-val Gray800 = Color(0xFF262A35) // Outlines, borders, subtle separators
-val Gray700 = Color(0xFF383E4E) // Subtle divider lines
-val Gray500 = Color(0xFF7E859C) // Tertiary metadata & icons (WCAG AA compliant: 5.29:1 on bg, 4.97:1 on surface)
-val Gray400 = Color(0xFF9FA6B7) // Secondary metadata (artist, duration, hints: 7.96:1 on bg, 7.48:1 on surface)
-val Gray200 = Color(0xFFD6DAE3) // Primary text & active icons
-val White = Color(0xFFF4F5F8)   // Titles & prominent typography
+// Charcoal surfaces with a single cold-blue accent. Neutrals carry a slight blue cast so they sit
+// with the accent; contrast ratios are measured against Gray950/Gray900.
+val Gray950 = Color(0xFF0F1012) // App base background
+val Gray900 = Color(0xFF151619) // Surfaces (navigation bar, sheets)
+val Gray850 = Color(0xFF1B1D21) // Player bar & secondary containers
+val Gray800 = Color(0xFF26292E) // Outlines, borders, separators
+val Gray700 = Color(0xFF3A3E45) // Dividers, disabled content
+val Gray500 = Color(0xFF858B96) // Tertiary metadata & icons (>= 5:1 on Gray950)
+val Gray400 = Color(0xFFA6ACB6) // Secondary metadata (>= 7.5:1 on Gray950)
+val Gray200 = Color(0xFFD9DCE2) // Primary text & active icons
+val White = Color(0xFFF2F4F7)   // Titles & prominent typography
 
-// Kasane Signature Palette:
-// Derived from the official Kasane logo spiral:
-// - KasaneRose (#EF5C7D): lighter rose face / primary accent (6.01:1 contrast on onyx bg)
-// - KasaneCrimson (#D52F58): rich raspberry crimson ribbon
-// - KasaneWine (#790F32): deep wine return surfaces
-// - KasaneWineSubtle (#31101B): dark container tint
-val KasaneRose = Color(0xFFEF5C7D)
-val KasaneCrimson = Color(0xFFD52F58)
-val KasaneWine = Color(0xFF790F32)
-val KasaneWineSubtle = Color(0xFF2B121B)
-
-// Accent tokens aliasing the signature rose palette
-val AccentRose = KasaneRose
-val AccentRoseSubtle = KasaneWineSubtle
+val KasaneBlue = Color(0xFF8AB6F9)          // Primary accent
+val KasaneBlueStrong = Color(0xFF5B8FE0)    // Pressed / emphasis
+val KasaneBlueContainer = Color(0xFF1C2E47) // Selected & tonal containers
+val OnKasaneBlue = Color(0xFF07203F)
+val OnKasaneBlueContainer = Color(0xFFD3E3FD)
+val KasaneSlate = Color(0xFFA9BFD8)         // Secondary accent
+val KasaneIce = Color(0xFF7FD3D8)           // Tertiary accent (cold cyan, used sparingly)
 
 val KasaneDarkColorScheme = darkColorScheme(
-    primary = KasaneRose,
-    secondary = KasaneRose,
-    onSecondary = White,
-    secondaryContainer = KasaneWineSubtle,
-    onSecondaryContainer = Color(0xFFFFD9E2),
-    tertiary = KasaneRose,
-    onPrimary = White,
-    primaryContainer = KasaneWineSubtle,
-    onPrimaryContainer = Color(0xFFFFD9E2),
-    surface = Gray900,
+    primary = KasaneBlue,
+    onPrimary = OnKasaneBlue,
+    primaryContainer = KasaneBlueContainer,
+    onPrimaryContainer = OnKasaneBlueContainer,
+    secondary = KasaneSlate,
+    onSecondary = Color(0xFF0E2236),
+    secondaryContainer = Color(0xFF232C38),
+    onSecondaryContainer = Color(0xFFD5E3F5),
+    tertiary = KasaneIce,
+    onTertiary = Color(0xFF00363A),
+    tertiaryContainer = Color(0xFF16383B),
+    onTertiaryContainer = Color(0xFFBFF0F3),
+    background = Gray950,
+    onBackground = White,
+    surface = Gray950,
     onSurface = Gray200,
     surfaceVariant = Gray850,
     onSurfaceVariant = Gray400,
-    background = Gray950,
-    onBackground = White,
-    outline = Gray800,
-    outlineVariant = Color(0xFF1E212A)
+    surfaceTint = KasaneBlue,
+    surfaceDim = Gray950,
+    surfaceBright = Color(0xFF2B2E34),
+    surfaceContainerLowest = Color(0xFF0B0C0E),
+    surfaceContainerLow = Gray900,
+    surfaceContainer = Color(0xFF181A1E),
+    surfaceContainerHigh = Gray850,
+    surfaceContainerHighest = Color(0xFF22252A),
+    outline = Gray700,
+    outlineVariant = Gray800,
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
+    errorContainer = Color(0xFF93000A),
+    onErrorContainer = Color(0xFFFFDAD6),
+)
+
+/** Restrained shape scale: small radii for content, larger only for sheets and the player. */
+val KasaneShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(24.dp),
+)
+
+private fun style(size: Int, line: Int, weight: FontWeight, spacing: Double, color: Color) = TextStyle(
+    fontFamily = FontFamily.SansSerif, fontWeight = weight, fontSize = size.sp,
+    lineHeight = line.sp, letterSpacing = spacing.sp, color = color,
 )
 
 val KasaneTypography = Typography(
-    headlineMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize = 24.sp,
-        lineHeight = 30.sp,
-        letterSpacing = (-0.5).sp,
-        color = White
-    ),
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 20.sp,
-        lineHeight = 26.sp,
-        letterSpacing = (-0.3).sp,
-        color = White
-    ),
-    titleMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        lineHeight = 20.sp,
-        letterSpacing = 0.sp,
-        color = White
-    ),
-    bodyMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 13.sp,
-        lineHeight = 18.sp,
-        letterSpacing = 0.1.sp,
-        color = Gray400
-    ),
-    labelMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 15.sp,
-        letterSpacing = 0.2.sp,
-        color = Gray400
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 10.sp,
-        lineHeight = 14.sp,
-        letterSpacing = 0.2.sp,
-        color = Gray500
-    )
+    headlineMedium = style(26, 32, FontWeight.Bold, -0.4, White),
+    headlineSmall = style(22, 28, FontWeight.Bold, -0.3, White),
+    titleLarge = style(20, 26, FontWeight.SemiBold, -0.2, White),
+    titleMedium = style(15, 20, FontWeight.SemiBold, 0.0, White),
+    titleSmall = style(14, 19, FontWeight.Medium, 0.0, White),
+    bodyLarge = style(15, 21, FontWeight.Normal, 0.0, Gray200),
+    bodyMedium = style(13, 18, FontWeight.Normal, 0.1, Gray400),
+    bodySmall = style(12, 16, FontWeight.Normal, 0.1, Gray500),
+    labelLarge = style(13, 18, FontWeight.SemiBold, 0.1, Gray200),
+    labelMedium = style(12, 16, FontWeight.Medium, 0.2, Gray400),
+    labelSmall = style(11, 15, FontWeight.Normal, 0.2, Gray500),
 )
+
+/**
+ * Material You is optional. Only the accent roles follow the wallpaper; surfaces stay charcoal so
+ * contrast and hierarchy do not depend on the user's wallpaper.
+ */
+@Composable
+fun KasaneTheme(dynamicColor: Boolean, content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val scheme = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        dynamicDarkColorScheme(context).copy(
+            background = Gray950, surface = Gray950, onSurface = Gray200, onBackground = White,
+            surfaceVariant = Gray850, onSurfaceVariant = Gray400, surfaceContainerLow = Gray900,
+            surfaceContainer = KasaneDarkColorScheme.surfaceContainer, surfaceContainerHigh = Gray850,
+            surfaceContainerHighest = KasaneDarkColorScheme.surfaceContainerHighest,
+            outline = Gray700, outlineVariant = Gray800,
+        )
+    } else KasaneDarkColorScheme
+    MaterialTheme(colorScheme = scheme, typography = KasaneTypography, shapes = KasaneShapes, content = content)
+}

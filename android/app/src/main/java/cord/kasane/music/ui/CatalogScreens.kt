@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -41,17 +42,18 @@ private object MessageDigestCompat {
 @Composable
 fun CatalogShelfRow(shelf: CatalogShelf, onOpen: (CatalogItem) -> Unit) {
     Column {
-        if (shelf.title.isNotBlank()) Text(shelf.title, style = KasaneTypography.titleLarge, color = White,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp))
+        if (shelf.title.isNotBlank()) Text(shelf.title, style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 10.dp))
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(HomeFeedPolicy.uniqueShelfItems(shelf.items), key = { "${it.kind}:${it.id}" }) { item ->
                 val track = item.track()
                 if (track != null) TrackCard(track, 148.dp, onClick = { onOpen(item) })
                 else Column(Modifier.width(148.dp).clickable { onOpen(item) }) {
                     TrackArtwork(item.artwork, Modifier.size(148.dp))
-                    Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis, color = White,
-                        style = KasaneTypography.bodyLarge, modifier = Modifier.padding(top = 8.dp))
-                    Text(item.subtitle.ifBlank { item.kind.label }, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Gray400)
+                    Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
+                    Text(item.subtitle.ifBlank { item.kind.label }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -95,11 +97,17 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
         } catch (e: Exception) { error = e.message ?: "Search unavailable. Try again."
         } finally { loading = false; handledRevision = revision }
     }
-    Column(Modifier.fillMaxSize().background(Gray950)) {
-        OutlinedTextField(query, { query = it }, singleLine = true,
-            placeholder = { Text("Search YouTube Music") }, leadingIcon = { Icon(Icons.Default.Search, null) },
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        TextField(query, { query = it }, singleLine = true, shape = MaterialTheme.shapes.medium,
+            placeholder = { Text("Search songs, albums, artists") }, leadingIcon = { Icon(Icons.Default.Search, null) },
             trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Clear, "Clear search") } },
-            modifier = Modifier.fillMaxWidth().padding(16.dp).focusRequester(requester),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).focusRequester(requester),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { revision++; focus.clearFocus() }))
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -107,7 +115,8 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
                 KasaneChoiceChip(kind.label, category == kind, { category = kind })
             }
         }
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp), color = AccentRose)
+        Spacer(Modifier.height(4.dp))
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.primary)
         if (query.isBlank()) Text("Songs, albums, artists and playlists. Find your next listen.", color = Gray400, modifier = Modifier.padding(24.dp))
         else if (!loading && error == null && items.isEmpty()) Text("No results for “$query”. Try another search.", color = Gray400, modifier = Modifier.padding(24.dp))
         error?.let { message ->
@@ -151,13 +160,13 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
 
 @Composable
 private fun CatalogResult(item: CatalogItem, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-        TrackArtwork(item.artwork, Modifier.size(56.dp))
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        TrackArtwork(item.artwork, Modifier.size(52.dp))
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis, color = White)
-            Text(item.subtitle.ifBlank { item.kind.label }, maxLines = 2, overflow = TextOverflow.Ellipsis, color = Gray400)
+            Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+            Text(item.subtitle.ifBlank { item.kind.label }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
         }
-        Icon(Icons.Default.ChevronRight, null, tint = Gray400)
+        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -222,32 +231,39 @@ fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () ->
 @Composable
 fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean, error: String?,
     loadingMore: Boolean, onBack: () -> Unit, onRetry: () -> Unit, onOpen: (CatalogItem) -> Unit,
-    onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit, onLoadMore: () -> Unit) {
-    Column(Modifier.fillMaxSize().background(Gray950)) {
+    onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
+    detailActions: @Composable RowScope.(List<Track>) -> Unit = {}, onLoadMore: () -> Unit) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = White) }
-            Text(item.kind.label, style = KasaneTypography.titleMedium)
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+            Text(item.kind.label, style = MaterialTheme.typography.titleMedium)
         }
         LazyColumn(state = rememberLazyListState(), modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
-                Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TrackArtwork(page?.artwork ?: item.artwork, Modifier.widthIn(max = 240.dp).fillMaxWidth().aspectRatio(1f))
-                    Text(page?.title?.ifBlank { item.title } ?: item.title, style = KasaneTypography.titleLarge, color = White)
-                    Text(page?.subtitle?.ifBlank { item.subtitle } ?: item.subtitle, color = Gray400)
-                    if (!page?.description.isNullOrBlank()) Text(page!!.description, color = Gray400)
+                Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TrackArtwork(page?.artwork ?: item.artwork, Modifier.widthIn(max = 220.dp).fillMaxWidth().aspectRatio(1f),
+                        shape = MaterialTheme.shapes.medium)
+                    Text(page?.title?.ifBlank { item.title } ?: item.title, style = MaterialTheme.typography.headlineSmall)
+                    Text(page?.subtitle?.ifBlank { item.subtitle } ?: item.subtitle, style = MaterialTheme.typography.bodyMedium)
+                    if (!page?.description.isNullOrBlank()) Text(page!!.description, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis)
                     val tracks = page?.tracks.orEmpty()
                     if (tracks.isNotEmpty()) {
                         val duration = tracks.sumOf { it.durationSeconds }
-                        Text("${tracks.size} loaded tracks" + if (duration > 0) " · ${formatDuration(duration)}" else "", color = Gray400)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { onPlay(tracks, false) }) { Text("Play", color = Gray950) }
-                            OutlinedButton(onClick = { onPlay(tracks, true) }) { Text("Shuffle", color = AccentRose) }
+                        Text("${tracks.size} loaded tracks" + if (duration > 0) " · ${formatDuration(duration)}" else "", style = MaterialTheme.typography.labelMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Button(onClick = { onPlay(tracks, false) }, shape = MaterialTheme.shapes.small) {
+                                Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text("Play")
+                            }
+                            FilledTonalButton(onClick = { onPlay(tracks, true) }, shape = MaterialTheme.shapes.small) {
+                                Icon(Icons.Default.Shuffle, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text("Shuffle")
+                            }
+                            detailActions(tracks)
                         }
                         TextButton(onClick = { tracks.forEach(onQueue) }) { Text("Add loaded tracks to queue") }
                     }
                 }
             }
-            if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(20.dp), color = AccentRose) }
+            if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(20.dp)) }
             if (error != null) item {
                 Text(error, color = Gray400, modifier = Modifier.padding(20.dp))
                 TextButton(onClick = if (page != null && page.continuation != null) onLoadMore else onRetry, enabled = !loadingMore) { Text("Retry") }
@@ -276,10 +292,10 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 fun CatalogDetailPreview() {
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+    KasaneTheme(dynamicColor = false) {
         val item = CatalogItem("preview-album", CatalogKind.ALBUM, "Evening sessions", "Kasane Preview")
         val page = CatalogPage(item.title, item.subtitle, null, listOf(CatalogShelf("Tracks", listOf(
             CatalogItem("preview-track", CatalogKind.SONG, "A very long song title across the evening", "Preview artist", durationSeconds = 180.0)))))
-        Surface(color = Gray950) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, {}) }
+        Surface(color = Gray950) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, onLoadMore = {}) }
     }
 }

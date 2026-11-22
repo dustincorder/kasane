@@ -58,9 +58,9 @@ fun PlaylistPickerContent(state: PlaylistPickerState, onClose: () -> Unit, onRef
                 style = KasaneTypography.bodyMedium, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 12.dp))
         }
         HorizontalDivider(color = Gray800)
-        if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = AccentRose)
+        if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary)
         state.error?.let { message ->
-            Text(message, style = KasaneTypography.bodyMedium, color = AccentRose,
+            Text(message, style = KasaneTypography.bodyMedium, color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
         }
         if (!state.loading && state.error == null && state.options.isEmpty()) {
@@ -87,14 +87,14 @@ fun PlaylistPickerContent(state: PlaylistPickerState, onClose: () -> Unit, onRef
                             else -> "YouTube Music"
                         }, style = KasaneTypography.labelMedium, color = Gray400)
                     }
-                    if (busy) CircularProgressIndicator(Modifier.size(22.dp), color = AccentRose, strokeWidth = 2.dp)
-                    else if (playlist.alreadyAdded) Icon(Icons.Default.Check, "Already in playlist", tint = AccentRose)
+                    if (busy) CircularProgressIndicator(Modifier.size(22.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
+                    else if (playlist.alreadyAdded) Icon(Icons.Default.Check, "Already in playlist", tint = MaterialTheme.colorScheme.primary)
                 }
             }
         }
         TextButton(onClick = onRefresh, enabled = !state.loading && state.pendingPlaylist == null,
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp).heightIn(min = 48.dp)) {
-            Text(if (state.loading) "Loading playlists…" else "Refresh playlists", color = if (state.loading || state.pendingPlaylist != null) Gray500 else AccentRose)
+            Text(if (state.loading) "Loading playlists…" else "Refresh playlists", color = if (state.loading || state.pendingPlaylist != null) Gray500 else MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -102,7 +102,7 @@ fun PlaylistPickerContent(state: PlaylistPickerState, onClose: () -> Unit, onRef
 @Preview(showBackground = true, widthDp = 390, heightDp = 570)
 @Composable
 fun PlaylistPickerPreview() {
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+    KasaneTheme(dynamicColor = false) {
         Surface(color = Gray900) {
             PlaylistPickerContent(PlaylistPickerState(visible = true,
                 track = Track("preview0001", "A track title with enough words to wrap naturally", "Preview artist"),
@@ -117,7 +117,7 @@ fun PlaylistPickerPreview() {
 @Preview(showBackground = true, widthDp = 320, heightDp = 420)
 @Composable
 fun PlaylistPickerErrorPreview() {
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+    KasaneTheme(dynamicColor = false) {
         Surface(color = Gray900) {
             PlaylistPickerContent(PlaylistPickerState(visible = true, track = Track("preview0001", "Track title", "Preview artist"),
                 error = "Could not confirm the addition. Refresh the list before trying again.", refreshRequired = true), {}, {}, {})
@@ -128,7 +128,7 @@ fun PlaylistPickerErrorPreview() {
 @Preview(showBackground = true, widthDp = 320, heightDp = 420)
 @Composable
 fun PlaylistPickerLoadingPreview() {
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+    KasaneTheme(dynamicColor = false) {
         Surface(color = Gray900) {
             PlaylistPickerContent(PlaylistPickerState(visible = true, loading = true,
                 track = Track("preview0001", "A track", "Preview artist")), {}, {}, {})

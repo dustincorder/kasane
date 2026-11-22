@@ -46,12 +46,12 @@ fun TrackContextMenu(
     val pending by key(cloud) { (cloud?.pending ?: EmptyPendingLikes).collectAsState() }
     LaunchedEffect(expanded, cloud, track.id) { if (expanded) cloud?.refresh(track.id) }
     val ratings = TrackMenuPolicy.ratings(cloud != null, track.isLocal, states[track.id], cloud?.supportsDislike == true)
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, containerColor = Gray900) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Column(Modifier.widthIn(max = 280.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(track.title, style = KasaneTypography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(track.artist, color = Gray400, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        HorizontalDivider(color = Gray800)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         DropdownMenuItem(text = { Text("Play") }, onClick = { onDismiss(); onPlay() })
         val next = onNext ?: actions?.let { { it.next(track) } }
         val queue = onQueue ?: actions?.let { { it.queue(track) } }
@@ -101,7 +101,7 @@ fun TrackContextMenuPreview() {
     val links = remember { kotlinx.coroutines.flow.MutableStateFlow(mapOf(track.id to cord.kasane.music.provider.TrackLinks(
         cord.kasane.music.model.CatalogItem("UCpreview", cord.kasane.music.model.CatalogKind.ARTIST, "Preview artist"),
         cord.kasane.music.model.CatalogItem("MPREpreview", cord.kasane.music.model.CatalogKind.ALBUM, "Preview album")))) }
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+    KasaneTheme(dynamicColor = false) {
         CompositionLocalProvider(LocalCloudLikes provides cloud, LocalTrackActions provides TrackActions({}, {}, {}, {}),
             LocalPlaylistPicker provides playlists,
             LocalTrackNavigation provides TrackNavigation(links, {})) {

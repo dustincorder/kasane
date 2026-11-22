@@ -32,12 +32,12 @@ fun TrackLikeButton(track: Track, localFavorite: Boolean, onLocalToggle: () -> U
         else if (liked) "Remove YouTube Music like" else "Like on YouTube Music"
     IconButton(modifier = Modifier.semantics { contentDescription = label; stateDescription = if (cloud == null) { if (liked) "Saved" else "Not saved" } else state.name },
         enabled = track.id !in pending, onClick = { if (cloud != null) cloud.toggle(track.id) else onLocalToggle() }) {
-        if (cloud != null && state == CloudLikeState.LOADING) CircularProgressIndicator(Modifier.size(20.dp), color = AccentRose, strokeWidth = 2.dp)
+        if (cloud != null && state == CloudLikeState.LOADING) CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
         else Icon(
             if (unknown) Icons.Default.QuestionMark else if (cloud != null && state == CloudLikeState.DISLIKED) Icons.Default.ThumbDown
             else if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
             contentDescription = null,
-            tint = if (liked) AccentRose else Gray400,
+            tint = if (liked) MaterialTheme.colorScheme.primary else Gray400,
         )
     }
 }
@@ -47,7 +47,7 @@ fun TrackLikeButton(track: Track, localFavorite: Boolean, onLocalToggle: () -> U
 fun UnknownCloudLikePreview() {
     val cloud = remember { CloudLikes({ CloudLikeState.UNKNOWN }, { _, _ -> }, dispatcher = kotlinx.coroutines.Dispatchers.Unconfined) }
     DisposableEffect(cloud) { onDispose { cloud.close() } }
-    MaterialTheme(colorScheme = KasaneDarkColorScheme, typography = KasaneTypography) {
+    KasaneTheme(dynamicColor = false) {
         Surface {
             CompositionLocalProvider(LocalCloudLikes provides cloud) {
                 TrackRow(Track("preview", "Unknown cloud like", "YouTube Music"), onClick = {}, onToggleFavorite = {})

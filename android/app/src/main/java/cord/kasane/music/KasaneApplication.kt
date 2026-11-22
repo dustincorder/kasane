@@ -15,6 +15,9 @@ class KasaneApplication : Application() {
     lateinit var database: KasaneDatabase
         private set
 
+    lateinit var settings: cord.kasane.music.settings.AppSettings
+        private set
+
     lateinit var playbackManager: PlaybackManager
         private set
 
@@ -35,6 +38,7 @@ class KasaneApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        settings = cord.kasane.music.settings.AppSettings(this)
 
         database = Room.databaseBuilder(
             applicationContext,
