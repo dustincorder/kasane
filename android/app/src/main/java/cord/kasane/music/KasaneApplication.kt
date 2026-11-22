@@ -45,6 +45,7 @@ class KasaneApplication : Application() {
         ytProvider = YouTubeMusicProvider(
             playerDiagnostic = { if (BuildConfig.DEBUG) android.util.Log.d("KasanePlayback", it) },
             accountSession = { accountRepository.session() },
+            verificationRuntime = cord.kasane.music.provider.verification.WebViewVerificationRuntime(applicationContext),
         )
         accountLibraryProvider = ytProvider.catalog
         catalogCache = CatalogCache(RoomCatalogCacheStore(database.catalogCacheDao()))

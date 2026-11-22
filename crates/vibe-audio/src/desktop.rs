@@ -9,6 +9,7 @@ use vibe_core::model::{PlaybackProgress, PlaybackState, StreamSource};
 use vibe_core::traits::PlaybackBackend;
 
 const MAX_DOWNLOAD_BYTES: usize = 64 * 1024 * 1024;
+const DOWNLOAD_CHUNK_BYTES: usize = 1024 * 1024;
 
 enum Media {
     File(String),
@@ -80,6 +81,7 @@ impl AudioWorker {
             duration_secs: self.duration.as_secs_f64(),
             state,
             current_track: None,
+            notice: None,
         }
     }
 
@@ -198,37 +200,65 @@ impl DesktopAudioBackend {
         response.await.map_err(|_| worker_closed())?
     }
 
+    /// Downloads in bounded byte ranges so throttled CDNs (YouTube serves a
+    /// whole-file request at roughly playback speed) finish within the timeout.
     async fn download(&self, url: &str) -> Result<Vec<u8>> {
-        let mut response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .map_err(|_| VibeError::Network("Could not reach the audio server".into()))?;
-        if !response.status().is_success() {
-            return Err(VibeError::Playback(format!(
-                "Audio server returned HTTP {}",
-                response.status()
-            )));
-        }
-        if response
-            .content_length()
-            .is_some_and(|size| size > MAX_DOWNLOAD_BYTES as u64)
-        {
-            return Err(VibeError::Playback("Audio stream is too large".into()));
-        }
         let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| VibeError::Network("Could not download audio".into()))?
-        {
-            if chunk.len() > MAX_DOWNLOAD_BYTES - bytes.len() {
+        loop {
+            let start = bytes.len();
+            let mut response = self
+                .client
+                .get(url)
+                .header(
+                    reqwest::header::RANGE,
+                    format!("bytes={start}-{}", start + DOWNLOAD_CHUNK_BYTES - 1),
+                )
+                .send()
+                .await
+                .map_err(|_| VibeError::Network("Could not reach the audio server".into()))?;
+            let status = response.status();
+            if !status.is_success() {
+                return Err(VibeError::Playback(format!(
+                    "Audio server returned HTTP {status}"
+                )));
+            }
+            let partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
+            if !partial && start > 0 {
+                return Err(VibeError::Playback(
+                    "Audio server stopped honoring byte ranges".into(),
+                ));
+            }
+            let total = if partial {
+                response
+                    .headers()
+                    .get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.rsplit('/').next())
+                    .and_then(|value| value.parse::<u64>().ok())
+            } else {
+                response.content_length()
+            };
+            if total.is_some_and(|size| size > MAX_DOWNLOAD_BYTES as u64) {
                 return Err(VibeError::Playback("Audio stream is too large".into()));
             }
-            bytes.extend_from_slice(&chunk);
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|_| VibeError::Network("Could not download audio".into()))?
+            {
+                if chunk.len() > MAX_DOWNLOAD_BYTES - bytes.len() {
+                    return Err(VibeError::Playback("Audio stream is too large".into()));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            let received = bytes.len() - start;
+            let done = !partial
+                || received == 0
+                || total.map_or(received < DOWNLOAD_CHUNK_BYTES, |size| bytes.len() as u64 >= size);
+            if done {
+                return Ok(bytes);
+            }
         }
-        Ok(bytes)
     }
 }
 
@@ -319,6 +349,44 @@ mod tests {
             .try_seek(duration - Duration::from_millis(1))
             .unwrap();
         assert!(decoder.next().is_some());
+    }
+
+    #[tokio::test]
+    async fn download_reassembles_byte_ranges() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let body: Vec<u8> = (0..(DOWNLOAD_CHUNK_BYTES * 2 + 1234)).map(|i| (i % 251) as u8).collect();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/audio", listener.local_addr().unwrap());
+        let served = body.clone();
+        let server = tokio::spawn(async move {
+            let mut ranges = Vec::new();
+            for _ in 0..3 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut head = Vec::new();
+                while !head.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0; 1];
+                    socket.read_exact(&mut byte).await.unwrap();
+                    head.push(byte[0]);
+                }
+                let head = String::from_utf8(head).unwrap().to_lowercase();
+                let range = head.lines().find_map(|l| l.strip_prefix("range: bytes=")).unwrap().to_owned();
+                let (start, end) = range.split_once('-').unwrap();
+                let start: usize = start.parse().unwrap();
+                let end = end.parse::<usize>().unwrap().min(served.len() - 1);
+                let header = format!(
+                    "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {start}-{end}/{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    served.len(),
+                    end - start + 1
+                );
+                socket.write_all(header.as_bytes()).await.unwrap();
+                socket.write_all(&served[start..=end]).await.unwrap();
+                ranges.push(range);
+            }
+            ranges
+        });
+        let backend = DesktopAudioBackend::new().unwrap();
+        assert_eq!(backend.download(&url).await.unwrap(), body);
+        assert_eq!(server.await.unwrap()[2], format!("{}-{}", DOWNLOAD_CHUNK_BYTES * 2, DOWNLOAD_CHUNK_BYTES * 3 - 1));
     }
 
     #[tokio::test]

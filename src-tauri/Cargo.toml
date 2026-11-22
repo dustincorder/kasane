@@ -20,6 +20,7 @@ vibe-db = { path = "../crates/vibe-db" }
 tauri = { version = "2.2", features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+async-trait.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

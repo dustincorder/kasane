@@ -1,19 +1,27 @@
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
+use std::sync::Arc;
 use std::time::Duration;
 use vibe_core::error::{Result, VibeError};
 use vibe_core::model::{Album, Artist, ProviderType, StreamSource, Track};
 use vibe_core::traits::MusicProvider;
 
+use crate::verification::WebPlaybackVerifier;
+
 pub struct YouTubeMusicProvider {
     client: reqwest::Client,
     player_url: String,
+    verifier: Option<Arc<WebPlaybackVerifier>>,
 }
 
 const IOS_VERSION: &str = "21.26.4";
 const IOS_USER_AGENT: &str =
     "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_5 like Mac OS X;)";
+
+fn fallback_notice(error: &VibeError) -> String {
+    format!("Verified playback unavailable ({error}). Playing the iOS HLS stream instead.")
+}
 
 fn provider_error(message: impl Into<String>) -> VibeError {
     VibeError::Provider {
@@ -49,7 +57,52 @@ impl YouTubeMusicProvider {
         Self {
             client,
             player_url: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false".into(),
+            verifier: None,
         }
+    }
+
+    /// Enables verified WEB_REMIX playback through an app-owned browser runtime.
+    pub fn with_verifier(mut self, verifier: Arc<WebPlaybackVerifier>) -> Self {
+        self.verifier = Some(verifier);
+        self
+    }
+
+    async fn resolve_ios(&self, track: &Track) -> Result<StreamSource> {
+        let body = serde_json::json!({
+            "videoId": track.id, "context": {"client": {
+                "clientName": "IOS", "clientVersion": IOS_VERSION,
+                "deviceModel": "iPhone16,2", "osName": "iPhone",
+                "osVersion": "18.5.0.22F76", "hl": "en", "gl": "US"
+            }}
+        });
+        let response = self
+            .client
+            .post(&self.player_url)
+            .header(USER_AGENT, IOS_USER_AGENT)
+            .header("X-YouTube-Client-Name", "5")
+            .header("X-YouTube-Client-Version", IOS_VERSION)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|_| provider_error("Player request failed"))?;
+        if !response.status().is_success() {
+            return Err(provider_error(format!(
+                "Player request returned HTTP {}",
+                response.status()
+            )));
+        }
+        let root: Value = response
+            .json()
+            .await
+            .map_err(|_| provider_error("Invalid player JSON response"))?;
+        if root
+            .pointer("/videoDetails/videoId")
+            .and_then(Value::as_str)
+            .is_some_and(|id| id != track.id)
+        {
+            return Err(provider_error("Player returned a different video ID"));
+        }
+        parse_player(&root)
     }
 }
 
@@ -129,41 +182,28 @@ impl MusicProvider for YouTubeMusicProvider {
         {
             return Err(provider_error("Invalid YouTube video ID"));
         }
-        let body = serde_json::json!({
-            "videoId": track.id, "context": {"client": {
-                "clientName": "IOS", "clientVersion": IOS_VERSION,
-                "deviceModel": "iPhone16,2", "osName": "iPhone",
-                "osVersion": "18.5.0.22F76", "hl": "en", "gl": "US"
-            }}
-        });
-        let response = self
-            .client
-            .post(&self.player_url)
-            .header(USER_AGENT, IOS_USER_AGENT)
-            .header("X-YouTube-Client-Name", "5")
-            .header("X-YouTube-Client-Version", IOS_VERSION)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|_| provider_error("Player request failed"))?;
-        if !response.status().is_success() {
-            return Err(provider_error(format!(
-                "Player request returned HTTP {}",
-                response.status()
-            )));
+        let Some(verifier) = &self.verifier else {
+            return self.resolve_ios(track).await;
+        };
+        let verified_error = match verifier.resolve(&track.id).await {
+            Ok(source) => {
+                tracing::info!("YouTube playback: verified WEB_REMIX AAC stream");
+                return Ok(source);
+            }
+            Err(error) => error,
+        };
+        // A second real source (iOS HLS) is tried and the user is told; when both
+        // fail both reasons are reported. No placeholder audio is substituted.
+        tracing::warn!("Verified YouTube playback unavailable: {verified_error}");
+        match self.resolve_ios(track).await {
+            Ok(mut source) => {
+                source.notice = Some(fallback_notice(&verified_error));
+                Ok(source)
+            }
+            Err(ios_error) => Err(provider_error(format!(
+                "{verified_error}; iOS HLS: {ios_error}"
+            ))),
         }
-        let root: Value = response
-            .json()
-            .await
-            .map_err(|_| provider_error("Invalid player JSON response"))?;
-        if root
-            .pointer("/videoDetails/videoId")
-            .and_then(Value::as_str)
-            .is_some_and(|id| id != track.id)
-        {
-            return Err(provider_error("Player returned a different video ID"));
-        }
-        parse_player(&root)
     }
 }
 
@@ -304,6 +344,7 @@ fn parse_player(root: &Value) -> Result<StreamSource> {
                     mime_type: "application/vnd.apple.mpegurl".into(),
                     bitrate_kbps: None,
                     expires_at: None,
+                    notice: None,
                 });
             }
             if root

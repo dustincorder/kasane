@@ -18,6 +18,7 @@ pub struct PlayerManager {
     queue: Mutex<QueueState>,
     transition: Mutex<()>,
     provider: Arc<dyn MusicProvider>,
+    notice: Mutex<Option<String>>,
 }
 
 impl PlayerManager {
@@ -32,6 +33,7 @@ impl PlayerManager {
             }),
             transition: Mutex::new(()),
             provider,
+            notice: Mutex::new(None),
         }
     }
 
@@ -91,6 +93,7 @@ impl PlayerManager {
                     mime_type: String::new(),
                     bitrate_kbps: None,
                     expires_at: None,
+                    notice: None,
                 }
             }
             ProviderType::Mock => {
@@ -100,6 +103,7 @@ impl PlayerManager {
 
         let mut backend = self.backend.lock().await;
         backend.play_stream(&stream).await?;
+        *self.notice.lock().await = stream.notice.clone();
         if track.provider == ProviderType::LocalLibrary {
             if let Ok(progress) = backend.get_progress().await {
                 track.duration_secs = progress.duration_secs.round() as u64;
@@ -208,6 +212,7 @@ impl PlayerManager {
                 }
             }
         }
+        progress.notice = self.notice.lock().await.clone();
         Ok(progress)
     }
 
@@ -245,6 +250,7 @@ mod tests {
                 mime_type: String::new(),
                 bitrate_kbps: None,
                 expires_at: None,
+                notice: track.uri.as_ref().map(|_| "fallback".into()),
             })
         }
     }
@@ -289,6 +295,7 @@ mod tests {
                 duration_secs: 0.0,
                 state: self.get_state().await?,
                 current_track: None,
+                notice: None,
             })
         }
         async fn get_state(&self) -> Result<PlaybackState> {
@@ -326,6 +333,20 @@ mod tests {
             ),
             ended,
         )
+    }
+
+    #[tokio::test]
+    async fn fallback_notice_follows_the_playing_source() {
+        let (player, _) = player();
+        let mut fallback = track("fallback");
+        fallback.uri = Some("ios".into());
+        player.play_track_now(fallback).await.unwrap();
+        assert_eq!(
+            player.get_progress().await.unwrap().notice.as_deref(),
+            Some("fallback")
+        );
+        player.play_track_now(track("verified")).await.unwrap();
+        assert!(player.get_progress().await.unwrap().notice.is_none());
     }
 
     #[tokio::test]

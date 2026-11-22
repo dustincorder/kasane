@@ -7,6 +7,8 @@ class PlayerStore {
   isPaused = $state<boolean>(false);
   isBusy = $state(false);
   error = $state<string | null>(null);
+  notice = $state<string | null>(null);
+  private dismissedNotice: string | null = null;
   positionSecs = $state<number>(0);
   durationSecs = $state<number>(0);
   volume = $state<number>(1.0);
@@ -63,6 +65,9 @@ class PlayerStore {
     this.positionSecs = progress.position_secs;
     this.durationSecs = progress.duration_secs;
     this.currentTrack = progress.current_track;
+    const notice = progress.notice ?? null;
+    this.notice = notice !== this.dismissedNotice ? notice : null;
+    if (notice === null) this.dismissedNotice = null;
     this.isPlaying = progress.state === 'Playing';
     this.isPaused = progress.state === 'Paused';
     this.queue = queue.items;
@@ -153,6 +158,11 @@ class PlayerStore {
     } catch (e) {
       console.error('Toggle favorite failed:', e);
     }
+  }
+
+  dismissNotice() {
+    this.dismissedNotice = this.notice;
+    this.notice = null;
   }
 
   isFavorite(trackId: string): boolean {

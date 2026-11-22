@@ -34,6 +34,7 @@ Application ID: `cord.kasane.music`
 - `provider/sabr/SabrWire.kt`, `SabrSession.kt`: ограниченный SABR/UMP AAC/fMP4 транспорт, ephemeral context, server protection handling.
 - `playback/SabrDataSource.kt`: внутренний on-demand HLS/fMP4 bridge для существующего Media3, без файлов/HTTP proxy.
 - Статус и ограничения: `docs/sabr-playback.md` (полное YouTube-воспроизведение ещё не подтверждено).
+- `provider/verification/`: верифицированный WEB_REMIX (BotGuard в System WebView + официальный player JS), см. `docs/playback-verification.md`. Linux-аналог: `crates/vibe-providers/src/verification.rs`, `src-tauri/src/verifier.rs`, общий JS — `verifier/entry.js`.
 - `GuestPlayerResolver.kt`:
   - Класс: `GuestPlayerResolver(client: OkHttpClient)`
   - Резолв гостевых потоков через клиент `ANDROID_VR` (`1.65.10`) с автоматическим `visitorData` handshake.

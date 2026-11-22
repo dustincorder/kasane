@@ -48,6 +48,9 @@ pub struct StreamSource {
     pub mime_type: String,
     pub bitrate_kbps: Option<u32>,
     pub expires_at: Option<u64>,
+    /// User-visible note when this source is not the preferred one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,4 +84,6 @@ pub struct PlaybackProgress {
     pub duration_secs: f64,
     pub state: PlaybackState,
     pub current_track: Option<Track>,
+    #[serde(default)]
+    pub notice: Option<String>,
 }
