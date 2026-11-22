@@ -48,10 +48,15 @@ fun SettingsScreen(
     onRetry: () -> Unit,
     onCancel: () -> Unit,
     onExportLocalData: () -> Unit,
+    onManageSaved: () -> Unit,
 ) {
     val dynamic by app.settings.dynamicColor.collectAsState()
     SettingsContent(state, onBack, onSignIn, onSignOut, onRetry, onCancel, onExportLocalData,
-        dynamicColor = dynamic, onDynamicColor = app.settings::setDynamicColor)
+        dynamicColor = dynamic, onDynamicColor = app.settings::setDynamicColor,
+        extraSections = {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            StorageSection(app, onManageSaved)
+        })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

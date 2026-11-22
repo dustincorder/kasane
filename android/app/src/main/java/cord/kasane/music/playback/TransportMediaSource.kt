@@ -18,6 +18,7 @@ class TransportMediaSource(
     private val resolve: suspend (String) -> PlaybackStream,
     private val network: DataSource.Factory,
     private val playbackPositionMs: (() -> Long)? = null,
+    private val offline: cord.kasane.music.offline.OfflinePlayback? = null,
 ) : CompositeMediaSource<Unit>() {
     private var child: MediaSource? = null
     private var job: Job? = null
@@ -32,14 +33,26 @@ class TransportMediaSource(
         val handler = Handler(requireNotNull(Looper.myLooper()))
         val current = ++generation
         job = CoroutineScope(Dispatchers.IO).launch {
-            val result = try { resolve(item.mediaId) } catch (e: CancellationException) { throw e
-            } catch (e: Exception) { playbackFailure(e) }
+            // Offline-first: a complete local copy never needs a player request or any network access.
+            val local = try { offline?.local(item.mediaId) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            val result: PlaybackStream = when {
+                local != null -> UnavailableStream("", "LOCAL")
+                offline?.offlineOnly == true -> UnavailableStream(
+                    "Offline Only is on and this track is not saved or cached. Turn it off in Settings to stream.", "OFFLINE_ONLY")
+                else -> try { resolve(item.mediaId) } catch (e: CancellationException) { throw e
+                } catch (e: Exception) { playbackFailure(e) }
+            }
             handler.post {
                 if (current != generation) {
                     (result as? SabrStream)?.session?.close()
                     return@post
                 }
-                when (result) {
+                if (local != null && offline != null) {
+                    child = ProgressiveMediaSource.Factory(offline.cacheOnlyFactory())
+                        .setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy()).createMediaSource(
+                            item.buildUpon().setUri("kasane-cache://audio/${item.mediaId}")
+                                .setMimeType(local.mimeType.substringBefore(';').trim()).setCustomCacheKey(local.cacheKey).build())
+                } else when (result) {
                     is SabrStream -> {
                         sabrSession = result.session
                         if (playbackPositionMs != null) {
@@ -76,13 +89,18 @@ class TransportMediaSource(
                         child = androidx.media3.exoplayer.hls.HlsMediaSource.Factory(network)
                             .setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy()).createMediaSource(resolved)
                     }
-                    is ProgressiveStream -> child = ProgressiveMediaSource.Factory(network)
-                        .setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy()).createMediaSource(
-                            item.buildUpon().setUri(result.audio.url).setMimeType(result.audio.mimeType.substringBefore(';').trim()).build())
+                    is ProgressiveStream -> {
+                        offline?.resolved(item.mediaId, result.audio)
+                        val key = cord.kasane.music.offline.OfflinePolicy.cacheKey(item.mediaId, result.audio.itag)
+                        child = ProgressiveMediaSource.Factory(offline?.playbackFactory(network) ?: network)
+                            .setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy()).createMediaSource(
+                                item.buildUpon().setUri(result.audio.url).setMimeType(result.audio.mimeType.substringBefore(';').trim())
+                                    .setCustomCacheKey(if (offline != null) key else null).build())
+                    }
                     is UnavailableStream -> failure = TransportUnavailableException(result.reason)
                 }
-                val profile = if (result is SabrStream) result.session.config.profile else if (result is HlsStream) result.clientProfile else if (result is ProgressiveStream) result.clientProfile else "none"
-                val transport = if (result is SabrStream) "SABR" else if (result is HlsStream) "HLS" else if (result is ProgressiveStream) "PROGRESSIVE" else "UNAVAILABLE"
+                val profile = if (local != null) "LOCAL" else if (result is SabrStream) result.session.config.profile else if (result is HlsStream) result.clientProfile else if (result is ProgressiveStream) result.clientProfile else "none"
+                val transport = if (local != null) "CACHE" else if (result is SabrStream) "SABR" else if (result is HlsStream) "HLS" else if (result is ProgressiveStream) "PROGRESSIVE" else "UNAVAILABLE"
                 android.util.Log.i("KasanePlayback", "videoId=${item.mediaId} client=$profile transport=$transport reason=${if (result is UnavailableStream) result.code else "selected"} mime=${if (result is HlsStream) MimeTypes.APPLICATION_M3U8 else if (result is ProgressiveStream) result.audio.mimeType else "unknown"}")
                 child?.let { source ->
                     var loadIndex = 0

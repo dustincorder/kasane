@@ -20,6 +20,15 @@ enum class OfflineBadge(val label: String) {
 
 val LocalOfflineBadges = staticCompositionLocalOf<Map<String, OfflineBadge>> { emptyMap() }
 
+/** Actions the UI may request from the offline library. Absent (null) in previews and tests. */
+class OfflineActions(
+    val save: (List<cord.kasane.music.model.Track>) -> Unit,
+    val remove: (String) -> Unit,
+    val retry: (String) -> Unit,
+)
+
+val LocalOfflineActions = staticCompositionLocalOf<OfflineActions?> { null }
+
 @Composable
 fun OfflineBadgeIcon(badge: OfflineBadge) {
     val colors = MaterialTheme.colorScheme

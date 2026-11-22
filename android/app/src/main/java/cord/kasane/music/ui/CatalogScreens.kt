@@ -232,7 +232,7 @@ fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () ->
 fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean, error: String?,
     loadingMore: Boolean, onBack: () -> Unit, onRetry: () -> Unit, onOpen: (CatalogItem) -> Unit,
     onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
-    detailActions: @Composable RowScope.(List<Track>) -> Unit = {}, onLoadMore: () -> Unit) {
+    onLoadMore: () -> Unit) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
@@ -257,7 +257,10 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                             FilledTonalButton(onClick = { onPlay(tracks, true) }, shape = MaterialTheme.shapes.small) {
                                 Icon(Icons.Default.Shuffle, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text("Shuffle")
                             }
-                            detailActions(tracks)
+                            val offline = cord.kasane.music.ui.components.LocalOfflineActions.current
+                            if (offline != null) FilledTonalIconButton(onClick = { offline.save(tracks) }) {
+                                Icon(Icons.Default.Download, "Save loaded tracks offline")
+                            }
                         }
                         TextButton(onClick = { tracks.forEach(onQueue) }) { Text("Add loaded tracks to queue") }
                     }
@@ -296,6 +299,6 @@ fun CatalogDetailPreview() {
         val item = CatalogItem("preview-album", CatalogKind.ALBUM, "Evening sessions", "Kasane Preview")
         val page = CatalogPage(item.title, item.subtitle, null, listOf(CatalogShelf("Tracks", listOf(
             CatalogItem("preview-track", CatalogKind.SONG, "A very long song title across the evening", "Preview artist", durationSeconds = 180.0)))))
-        Surface(color = Gray950) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, onLoadMore = {}) }
+        Surface(color = Gray950) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, {}) }
     }
 }

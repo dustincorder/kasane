@@ -19,12 +19,16 @@ class AppSettings(context: Context) {
     private val cacheOn = MutableStateFlow(prefs.getBoolean(CACHE_ENABLED, true))
     private val cacheLimit = MutableStateFlow(prefs.getInt(CACHE_LIMIT_MB, DEFAULT_CACHE_MB).coerceIn(MIN_CACHE_MB, MAX_CACHE_MB))
     private val location = MutableStateFlow(StorageLocation.fromKey(prefs.getString(CACHE_LOCATION, null)))
+    private val wifiOnly = MutableStateFlow(prefs.getBoolean(WIFI_ONLY_DOWNLOADS, true))
+    private val consent = MutableStateFlow(prefs.getBoolean(OFFLINE_NOTICE_ACCEPTED, false))
 
     val dynamicColor: StateFlow<Boolean> = dynamic.asStateFlow()
     val offlineOnly: StateFlow<Boolean> = offline.asStateFlow()
     val cacheEnabled: StateFlow<Boolean> = cacheOn.asStateFlow()
     val cacheLimitMb: StateFlow<Int> = cacheLimit.asStateFlow()
     val cacheLocation: StateFlow<StorageLocation> = location.asStateFlow()
+    val wifiOnlyDownloads: StateFlow<Boolean> = wifiOnly.asStateFlow()
+    val offlineNoticeAccepted: StateFlow<Boolean> = consent.asStateFlow()
 
     fun setDynamicColor(value: Boolean) { prefs.edit().putBoolean(DYNAMIC_COLOR, value).apply(); dynamic.value = value }
     fun setOfflineOnly(value: Boolean) { prefs.edit().putBoolean(OFFLINE_ONLY, value).apply(); offline.value = value }
@@ -33,6 +37,8 @@ class AppSettings(context: Context) {
         val clamped = value.coerceIn(MIN_CACHE_MB, MAX_CACHE_MB)
         prefs.edit().putInt(CACHE_LIMIT_MB, clamped).apply(); cacheLimit.value = clamped
     }
+    fun setWifiOnlyDownloads(value: Boolean) { prefs.edit().putBoolean(WIFI_ONLY_DOWNLOADS, value).apply(); wifiOnly.value = value }
+    fun acceptOfflineNotice() { prefs.edit().putBoolean(OFFLINE_NOTICE_ACCEPTED, true).apply(); consent.value = true }
     fun setCacheLocation(value: StorageLocation) { prefs.edit().putString(CACHE_LOCATION, value.key).apply(); location.value = value }
 
     companion object {
@@ -44,5 +50,7 @@ class AppSettings(context: Context) {
         private const val CACHE_ENABLED = "cacheEnabled"
         private const val CACHE_LIMIT_MB = "cacheLimitMb"
         private const val CACHE_LOCATION = "cacheLocation"
+        private const val WIFI_ONLY_DOWNLOADS = "wifiOnlyDownloads"
+        private const val OFFLINE_NOTICE_ACCEPTED = "offlineNoticeAccepted"
     }
 }

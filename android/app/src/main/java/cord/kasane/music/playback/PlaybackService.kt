@@ -139,7 +139,8 @@ class PlaybackService : MediaSessionService() {
             override fun createMediaSource(item: MediaItem): androidx.media3.exoplayer.source.MediaSource =
                 if (item.localConfiguration?.uri?.scheme == "kasane")
                     TransportMediaSource(item, app.ytProvider.hlsResolver::resolve, network,
-                        playbackPositionMs = { if (player.currentMediaItem?.mediaId == item.mediaId) player.currentPosition else 0L })
+                        playbackPositionMs = { if (player.currentMediaItem?.mediaId == item.mediaId) player.currentPosition else 0L },
+                        offline = app.offline)
                 else DefaultMediaSourceFactory(DefaultDataSource.Factory(this@PlaybackService))
                     .setLoadErrorHandlingPolicy(BoundedStreamLoadPolicy()).createMediaSource(item)
         }

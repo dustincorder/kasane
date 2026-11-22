@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.*
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.ChevronRight
@@ -97,7 +98,13 @@ fun AccountLibraryScreen(state: AccountState, provider: AccountLibraryProvider, 
         } else {
             if (selectedPlaylist != null) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 TextButton(onClick = { selectedPlaylistId = null; selectedPlaylistTitle = ""; selectedPlaylistSubtitle = ""; selectedPlaylistArtwork = null }) { Text("Back to playlists") }
-                Text(selectedPlaylist?.title.orEmpty(), color = White, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Text(selectedPlaylist?.title.orEmpty(), color = White, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f))
+                val offline = cord.kasane.music.ui.components.LocalOfflineActions.current
+                val loaded = page?.tracks.orEmpty()
+                if (offline != null && loaded.isNotEmpty()) IconButton(onClick = { offline.save(loaded) }) {
+                    Icon(Icons.Default.Download, "Save loaded tracks offline")
+                }
             }
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.primary)
             error?.let { Text(it, color = Gray400, modifier = Modifier.padding(20.dp)); TextButton(onClick = { revision++ }) { Text("Retry") } }

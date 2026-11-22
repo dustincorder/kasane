@@ -58,6 +58,15 @@ fun TrackContextMenu(
         if (next != null) DropdownMenuItem(text = { Text("Play next") }, onClick = { onDismiss(); next() })
         if (queue != null) DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onDismiss(); queue() })
         if (actions != null && youtube) DropdownMenuItem(text = { Text("Start radio") }, onClick = { onDismiss(); actions.radio(track) })
+        val offlineActions = LocalOfflineActions.current
+        if (offlineActions != null && cord.kasane.music.offline.OfflinePolicy.canRequestSave(track)) {
+            when (LocalOfflineBadges.current[track.id]) {
+                OfflineBadge.SAVED -> DropdownMenuItem(text = { Text("Remove from offline") }, onClick = { onDismiss(); offlineActions.remove(track.id) })
+                OfflineBadge.DOWNLOADING -> DropdownMenuItem(text = { Text("Cancel download") }, onClick = { onDismiss(); offlineActions.remove(track.id) })
+                OfflineBadge.FAILED -> DropdownMenuItem(text = { Text("Retry saving offline") }, onClick = { onDismiss(); offlineActions.retry(track.id) })
+                else -> DropdownMenuItem(text = { Text("Save offline") }, onClick = { onDismiss(); offlineActions.save(listOf(track)) })
+            }
+        }
         val playlists = LocalPlaylistPicker.current
         if (youtube && playlists != null) DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { onDismiss(); playlists.open(track) })
         if (ratings.like != null) DropdownMenuItem(

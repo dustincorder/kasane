@@ -74,6 +74,10 @@ interface TrackDao {
     @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE trackId = :trackId)")
     fun isFavorite(trackId: String): Flow<Boolean>
 
+    /** Tracks whose audio is saved on this device. Pattern is a pre-escaped LIKE pattern (escape char \\). */
+    @Query("SELECT * FROM tracks WHERE (title LIKE :pattern ESCAPE '\\' OR artist LIKE :pattern ESCAPE '\\') AND id IN (SELECT videoId FROM audio_files WHERE pinned = 1 AND state = 'saved') ORDER BY title COLLATE NOCASE LIMIT 100")
+    fun searchSaved(pattern: String): Flow<List<Track>>
+
     @Insert
     suspend fun insertHistory(history: HistoryEntity)
 
@@ -96,12 +100,14 @@ interface TrackDao {
 
 @Database(
     entities = [TrackRecord::class, FavoriteEntity::class, HistoryEntity::class, CachedCatalogPageRecord::class,
-        CachedCatalogShelfRecord::class, CachedCatalogItemEntity::class, CachedCatalogShelfItemRecord::class],
-    version = 3,
+        CachedCatalogShelfRecord::class, CachedCatalogItemEntity::class, CachedCatalogShelfItemRecord::class,
+        cord.kasane.music.offline.AudioFileRecord::class],
+    version = 4,
     exportSchema = false
 )
 abstract class KasaneDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
+    abstract fun audioDao(): cord.kasane.music.offline.AudioFileDao
 
     @Dao
     interface CatalogCacheDao {
@@ -209,6 +215,12 @@ abstract class KasaneDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_catalog_cache_updatedAt ON catalog_cache(updatedAt)")
             }
         }
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(cord.kasane.music.offline.AudioFileRecord.CREATE_TABLE_SQL)
+            }
+        }
+
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS catalog_cache")

@@ -161,6 +161,7 @@ dependencies {
     testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("org.robolectric:robolectric:4.14.1") // JVM tests of real Media3 cache classes need android.net.Uri
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
