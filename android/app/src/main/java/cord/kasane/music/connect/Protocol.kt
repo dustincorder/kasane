@@ -202,7 +202,9 @@ object ConnectJson {
     val json = Json {
         classDiscriminator = "type"
         ignoreUnknownKeys = true
-        encodeDefaults = false
+        // Peers must see every field (e.g. TrackMeta.source) even when it
+        // equals our local default; Rust requires some of them.
+        encodeDefaults = true
     }
 
     /** Known `type` tags, checked before sealed dispatch so unknown frames get `unknown_type`. */

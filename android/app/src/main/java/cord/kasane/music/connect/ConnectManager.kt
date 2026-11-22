@@ -228,9 +228,11 @@ class ConnectManager(private val config: ConnectConfig) {
             return
         }
         session.peerFp = tls.peerFingerprint(socket) ?: ""
-        link.start()
         // Both sides announce themselves immediately (protocol §Transport).
+        // Queue our hello before the reader starts: the client's hello may
+        // already be buffered, and authOk must never overtake our hello.
         link.send(Frame.Hello(PROTOCOL, PROTOCOL, deviceInfo))
+        link.start()
         // Unauthenticated idle cutoff.
         scope.launch {
             delay(AUTH_IDLE_MS)
@@ -639,8 +641,8 @@ class ConnectManager(private val config: ConnectConfig) {
         session = Session(link, clientMode = true, socket)
         session.peerFp = tls.peerFingerprint(socket) ?: ""
         wantId?.let { expectedBySession[session] = it }
-        link.start()
         link.send(Frame.Hello(PROTOCOL, PROTOCOL, deviceInfo))
+        link.start()
         // Wait for authOk/authRequired.
         val authed = withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
             var outcome: Boolean? = null

@@ -29,7 +29,12 @@ pub struct TrackMeta {
     pub duration_ms: u64,
     #[serde(default)]
     pub artwork_url: Option<String>,
+    #[serde(default = "default_source")]
     pub source: String,
+}
+
+fn default_source() -> String {
+    "youtube".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

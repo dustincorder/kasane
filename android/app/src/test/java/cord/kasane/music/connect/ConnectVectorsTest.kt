@@ -73,4 +73,13 @@ class ConnectVectorsTest {
         assertTrue(decoded is ConnectJson.Decoded.UnknownType)
         assertEquals("futureThing", (decoded as ConnectJson.Decoded.UnknownType).type)
     }
+
+    @Test
+    fun encodedStateCarriesFieldsEqualToLocalDefaults() {
+        // Rust requires TrackMeta.source; a default-valued field must still be sent.
+        val line = ConnectJson.encode(Frame.State(rev = 1, queueRev = 1, playback = "paused",
+            track = TrackMeta("a0nze6VvaXY", "Аполлинария"), queue = emptyList()))
+        assertTrue(line, line.contains("\"source\":\"youtube\""))
+        assertTrue(line, line.contains("\"positionMs\":0"))
+    }
 }
