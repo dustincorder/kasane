@@ -5,20 +5,23 @@
   import { Search as SearchIcon, Play, Plus, Loader2 } from 'lucide-svelte';
 
   let query = $state('');
-  let useMock = $state(false);
   let loading = $state(false);
   let results = $state<Track[]>([]);
+  let searched = $state(false);
+  let error = $state<string | null>(null);
 
   async function handleSearch() {
-    if (!query.trim()) return;
+    if (loading || !query.trim()) return;
     loading = true;
+    searched = true;
+    error = null;
+    results = [];
     try {
       results = await invoke<Track[]>('search_tracks', {
         query: query.trim(),
-        useMock: useMock,
       });
     } catch (e) {
-      console.error('Search failed:', e);
+      error = String(e);
     } finally {
       loading = false;
     }
@@ -47,6 +50,7 @@
 
     <button
       onclick={handleSearch}
+      disabled={loading || !query.trim()}
       class="bg-accent-subtle hover:bg-surface-hover text-text-primary text-sm font-medium px-5 py-2.5 rounded-lg border border-surface-border transition flex items-center gap-2"
     >
       {#if loading}
@@ -57,24 +61,17 @@
     </button>
   </div>
 
-  <!-- Source toggle -->
-  <div class="flex items-center gap-2 text-xs text-text-secondary">
-    <label class="flex items-center gap-1.5 cursor-pointer">
-      <input type="checkbox" bind:checked={useMock} class="rounded border-surface-border bg-surface-elevated text-accent-active" />
-      <span>Offline Mock Catalog Mode</span>
-    </label>
-  </div>
-
   <!-- Search Results Table -->
   <div class="space-y-2">
-    <h2 class="text-xs uppercase font-mono tracking-wider text-text-muted">
-      {#if results.length > 0}
-        Found {results.length} Tracks
-      {:else if !loading}
-        No search results yet
-      {/if}
-    </h2>
+    {#if error}
+      <p role="alert" class="text-sm text-accent-highlight">{error}</p>
+    {:else if searched && !loading && !results.length}
+      <p role="status" class="text-sm text-text-secondary">No tracks found.</p>
+    {:else if results.length}
+      <h2 class="text-xs uppercase tracking-wider text-text-muted">Found {results.length} tracks</h2>
+    {/if}
 
+    {#if results.length}
     <div class="divide-y divide-surface-border/50 border border-surface-border rounded-lg overflow-hidden bg-surface-elevated">
       {#each results as track}
         <div class="flex items-center justify-between p-3 hover:bg-surface-hover transition group">
@@ -103,6 +100,7 @@
             </button>
             <button
               onclick={() => player.playTrack(track)}
+              disabled={player.isBusy}
               class="p-2 text-surface-base bg-text-primary rounded-full hover:opacity-90 active:scale-95 transition"
               title="Play now"
             >
@@ -112,5 +110,6 @@
         </div>
       {/each}
     </div>
+    {/if}
   </div>
 </div>

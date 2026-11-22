@@ -53,6 +53,7 @@ pub struct StreamSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlaybackState {
     Stopped,
+    Ended,
     Playing,
     Paused,
     Buffering,

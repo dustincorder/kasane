@@ -1,12 +1,20 @@
 <script lang="ts">
   import { player } from '$lib/stores/player.svelte';
-  import { Play, Heart, Clock } from 'lucide-svelte';
+  import { Play, Heart, Clock, FolderOpen } from 'lucide-svelte';
 
   let favorites = $derived(player.favorites);
   let history = $derived(player.history);
 </script>
 
 <div class="p-6 max-w-5xl mx-auto space-y-8 select-none">
+  <button
+    onclick={() => player.openAudioFile()}
+    disabled={player.isBusy}
+    class="inline-flex items-center gap-2 rounded-lg border border-surface-border bg-surface-elevated px-4 py-2 text-sm text-text-primary hover:bg-surface-hover disabled:opacity-50"
+  >
+    <FolderOpen size={16} />
+    Open audio file
+  </button>
   <!-- Favorites Section -->
   <section class="space-y-3">
     <div class="flex items-center gap-2 text-text-primary font-semibold text-lg">
@@ -39,6 +47,7 @@
             <div class="flex items-center gap-2">
               <button
                 onclick={() => player.playTrack(track)}
+                disabled={player.isBusy}
                 class="p-2 text-surface-base bg-text-primary rounded-full hover:opacity-90 active:scale-95 transition"
                 title="Play track"
               >
@@ -84,6 +93,7 @@
               <span class="text-xs font-mono text-text-muted">{player.formatTime(track.duration_secs)}</span>
               <button
                 onclick={() => player.playTrack(track)}
+                disabled={player.isBusy}
                 class="p-1.5 text-text-secondary hover:text-text-primary rounded hover:bg-surface-border transition"
                 title="Play again"
               >
