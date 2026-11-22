@@ -164,6 +164,7 @@ private fun KasaneContent(app: KasaneApplication) {
         var showDownloads by remember { mutableStateOf(false) }
         var pendingSave by remember { mutableStateOf<List<Track>?>(null) }
         val offlineOnly by app.settings.offlineOnly.collectAsState()
+        val recentSearches by app.searchHistory.recent.collectAsState()
         val offlineRecords by app.offline.all.collectAsState(initial = emptyList())
         val savedCount = remember(offlineRecords) { offlineRecords.count { it.pinned && it.audioState == cord.kasane.music.offline.AudioState.SAVED } }
         val offlineBadges = remember(offlineRecords) {
@@ -494,7 +495,9 @@ private fun KasaneContent(app: KasaneApplication) {
                             if (track.id in favoriteIds) app.database.trackDao().removeFavorite(track.id)
                             else app.database.trackDao().addFavorite(FavoriteEntity(track.id))
                         } }, { app.playbackManager.addToQueue(it) }, { app.playbackManager.playNextInQueue(it) },
-                        cachedCatalog = app.cachedCatalog, cacheScope = catalogScope)
+                        cachedCatalog = app.cachedCatalog, cacheScope = catalogScope,
+                        recentSearches = recentSearches, onCommitSearch = app.searchHistory::add,
+                        onRemoveRecent = app.searchHistory::remove, onClearRecent = app.searchHistory::clear)
                     2 -> LibraryScreen(
                         accountState = accountState,
                         accountProvider = app.accountLibraryProvider,

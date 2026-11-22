@@ -10,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -63,7 +64,9 @@ fun CatalogShelfRow(shelf: CatalogShelf, onOpen: (CatalogItem) -> Unit) {
 @Composable
 fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
     currentTrackId: String?, favoriteIds: Set<String>, onFavorite: (Track) -> Unit, onQueue: (Track) -> Unit, onPlayNext: ((Track) -> Unit)? = null,
-    cachedCatalog: CachedCatalogRepository? = null, cacheScope: String = "guest") {
+    cachedCatalog: CachedCatalogRepository? = null, cacheScope: String = "guest",
+    recentSearches: List<String> = emptyList(), onCommitSearch: (String) -> Unit = {},
+    onRemoveRecent: (String) -> Unit = {}, onClearRecent: () -> Unit = {}) {
     var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf(CatalogKind.SONG) }
     var revision by remember { mutableIntStateOf(0) }
@@ -109,7 +112,7 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
                 disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).focusRequester(requester),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { revision++; focus.clearFocus() }))
+            keyboardActions = KeyboardActions(onSearch = { onCommitSearch(query); revision++; focus.clearFocus() }))
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(CatalogKind.entries) { kind ->
                 KasaneChoiceChip(kind.label, category == kind, { category = kind })
@@ -117,19 +120,35 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
         }
         Spacer(Modifier.height(4.dp))
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.primary)
-        if (query.isBlank()) Text("Songs, albums, artists and playlists. Find your next listen.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
+        if (query.isBlank() && recentSearches.isEmpty()) Text("Songs, albums, artists and playlists. Find your next listen.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
+        if (query.isBlank() && recentSearches.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Recent searches", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                TextButton(onClick = onClearRecent) { Text("Clear") }
+            }
+            recentSearches.forEach { recent ->
+                ListItem(
+                    headlineContent = { Text(recent, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    leadingContent = { Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    trailingContent = { IconButton(onClick = { onRemoveRecent(recent) }) { Icon(Icons.Default.Close, "Remove $recent from recent searches", Modifier.size(20.dp)) } },
+                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    modifier = Modifier.clickable(onClickLabel = "Search for $recent") { query = recent; onCommitSearch(recent); focus.clearFocus() })
+            }
+        }
         else if (!loading && error == null && items.isEmpty()) Text("No results for “$query”. Try another search.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
         error?.let { message ->
             Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
             TextButton(onClick = { revision++ }) { Text("Retry search") }
         }
         LazyColumn(Modifier.weight(1f)) {
-            items(items, key = { "${it.kind}:${it.id}" }) { item ->
+            // Continuation pages can repeat items; duplicate keys would crash the list.
+            items(items.distinctBy { it.kind to it.id }, key = { "${it.kind}:${it.id}" }) { item ->
                 val track = item.track()
                 if (track != null) TrackRow(track, isPlaying = track.id == currentTrackId,
-                    onClick = { onOpen(item); focus.clearFocus() }, onPlayNext = onPlayNext?.let { action -> { action(track) } }, onAddToQueue = { onQueue(track) },
+                    onClick = { onCommitSearch(query); onOpen(item); focus.clearFocus() }, onPlayNext = onPlayNext?.let { action -> { action(track) } }, onAddToQueue = { onQueue(track) },
                     onToggleFavorite = { onFavorite(track) }, isFavorite = track.id in favoriteIds)
-                else CatalogResult(item) { onOpen(item); focus.clearFocus() }
+                else CatalogResult(item) { onCommitSearch(query); onOpen(item); focus.clearFocus() }
             }
             if (continuation != null && items.size < 2000) item {
                 TextButton(enabled = !loadingMore, onClick = {
@@ -236,7 +255,7 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            Text(item.kind.label, style = MaterialTheme.typography.titleMedium)
+            Text(item.kind.label.removeSuffix("s"), style = MaterialTheme.typography.titleMedium)
         }
         LazyColumn(state = rememberLazyListState(), modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
@@ -257,12 +276,12 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                             FilledTonalButton(onClick = { onPlay(tracks, true) }, shape = MaterialTheme.shapes.small) {
                                 Icon(Icons.Default.Shuffle, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text("Shuffle")
                             }
+                            IconButton(onClick = { tracks.forEach(onQueue) }) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "Add loaded tracks to queue") }
                             val offline = cord.kasane.music.ui.components.LocalOfflineActions.current
                             if (offline != null) FilledTonalIconButton(onClick = { offline.save(tracks) }) {
                                 Icon(Icons.Default.Download, "Save loaded tracks offline")
                             }
                         }
-                        TextButton(onClick = { tracks.forEach(onQueue) }) { Text("Add loaded tracks to queue") }
                     }
                 }
             }
@@ -278,8 +297,9 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                 val playable = shelf.items.all { it.track() != null }
                 if (playable) {
                     if (shelf.title.isNotBlank()) item { Text(shelf.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(20.dp)) }
-                    items(shelf.items, key = { "$index:${it.kind}:${it.id}" }) { entry ->
-                        val track = entry.track() ?: return@items
+                    // A playlist may legitimately contain the same video twice, so the position is part of the key.
+                    itemsIndexed(shelf.items, key = { position, it -> "$index:$position:${it.kind}:${it.id}" }) { _, entry ->
+                        val track = entry.track() ?: return@itemsIndexed
                         TrackRow(track, onClick = { onPlay(page.tracks.dropWhile { it.id != track.id }, false) },
                             onAddToQueue = { onQueue(track) })
                     }

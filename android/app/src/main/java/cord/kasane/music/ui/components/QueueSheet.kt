@@ -65,6 +65,9 @@ fun QueueContent(state: PlaybackUiState, onPlayIndex: (Int) -> Unit, onMove: (In
         if (f in upNext.indices && t in upNext.indices) upNext = upNext.toMutableList().apply { add(t, removeAt(f)) }
     }
     val haptics = LocalHapticFeedback.current
+    // Ids are stable keys for drag-and-drop; fall back to positions if a queue ever contains a duplicate.
+    val idsUnique = remember(state.queue) { state.queue.map { it.id }.toSet().size == state.queue.size }
+    fun key(prefix: String, queueIndex: Int) = if (idsUnique) prefix + state.queue[queueIndex].id else "$prefix#$queueIndex"
     Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).navigationBarsPadding()) {
         Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Queue", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
@@ -82,9 +85,9 @@ fun QueueContent(state: PlaybackUiState, onPlayIndex: (Int) -> Unit, onMove: (In
                     modifier = Modifier.background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)))
             }
             item(key = "h-up") { SectionLabel(if (upNext.isEmpty()) "Up next · nothing yet" else "Up next") }
-            itemsIndexed(upNext, key = { _, queueIndex -> "q:" + state.queue[queueIndex].id }) { position, queueIndex ->
+            itemsIndexed(upNext, key = { _, queueIndex -> key("q:", queueIndex) }) { position, queueIndex ->
                 val track = state.queue[queueIndex]
-                ReorderableItem(reorderState, key = "q:" + track.id) { dragging ->
+                ReorderableItem(reorderState, key = key("q:", queueIndex)) { dragging ->
                     val moveEntries = buildList {
                         if (reorderable && position > 0) add(MenuEntry("Move up") { onMove(queueIndex, queueIndex - 1) })
                         if (reorderable && position < upNext.lastIndex) add(MenuEntry("Move down") { onMove(queueIndex, queueIndex + 1) })
@@ -121,7 +124,7 @@ fun QueueContent(state: PlaybackUiState, onPlayIndex: (Int) -> Unit, onMove: (In
                         Icon(if (showPlayed) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (showPlayed) "Hide played" else "Show played")
                     }
                 }
-                if (showPlayed) itemsIndexed(sections.played, key = { _, i -> "p:" + state.queue[i].id }) { _, queueIndex ->
+                if (showPlayed) itemsIndexed(sections.played, key = { _, i -> key("p:", i) }) { _, queueIndex ->
                     TrackRow(state.queue[queueIndex], onClick = { onPlayIndex(queueIndex) },
                         extraMenu = listOf(MenuEntry("Remove from queue") { onRemove(queueIndex) }))
                 }

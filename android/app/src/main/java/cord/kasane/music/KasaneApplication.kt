@@ -22,6 +22,9 @@ class KasaneApplication : Application() {
     lateinit var offline: cord.kasane.music.offline.OfflineManager
         private set
 
+    lateinit var searchHistory: cord.kasane.music.settings.SearchHistory
+        private set
+
     private val applicationScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 
     lateinit var playbackManager: PlaybackManager
@@ -45,6 +48,7 @@ class KasaneApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         settings = cord.kasane.music.settings.AppSettings(this)
+        searchHistory = cord.kasane.music.settings.SearchHistory(this)
 
         database = Room.databaseBuilder(
             applicationContext,

@@ -73,3 +73,15 @@ class HomeComposerTest {
         assertEquals(1, sections.size); assertTrue(sections.single() is HomeSection.Videos)
     }
 }
+
+class SearchHistoryPolicyTest {
+    @Test fun recentSearchesAreNewestFirstDeduplicatedAndBounded() {
+        val p = cord.kasane.music.settings.SearchHistoryPolicy
+        var list = emptyList<String>()
+        (1..10).forEach { list = p.add(list, "query $it") }
+        assertEquals(p.LIMIT, list.size); assertEquals("query 10", list.first())
+        list = p.add(list, "QUERY 5")
+        assertEquals("QUERY 5", list.first()); assertEquals(1, list.count { it.equals("query 5", true) })
+        assertEquals(list, p.add(list, "   ")); assertFalse(p.add(list, "a\nb").first().contains('\n'))
+    }
+}
