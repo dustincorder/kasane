@@ -31,3 +31,6 @@ This document establishes the collaboration contract between the lead developer 
    - Core playback must never depend on an AI provider or cloud connection being available.
    - Local-first architecture: full offline functionality for local tracks and cached metadata.
    - Single source of truth: refer to `docs/agent-map.md` before navigating the codebase.
+
+## Build notes
+- Desktop release binary: `npx tauri build --no-bundle` → `target/release/vibeplayer`. A plain `cargo build --release -p vibeplayer` omits Tauri's `custom-protocol` feature, so the binary loads the dev server (`localhost:5173`) and shows "Connection refused".
