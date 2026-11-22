@@ -50,3 +50,6 @@ brain/
 # Codex local state
 .codex/
 .impeccable/
+
+# Connect loopback-test fixtures are generated test data, not secrets
+!android/app/src/test/resources/connect/*.p12
