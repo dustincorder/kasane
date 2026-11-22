@@ -12,7 +12,9 @@ import java.security.cert.X509Certificate
 import java.util.Date
 import javax.security.auth.x500.X500Principal
 
-private const val KEY_ALIAS = "kasane_connect_identity"
+// v1 keys only allowed SHA-256 digests; Conscrypt signs the TLS handshake with
+// NONEwithECDSA over a precomputed hash, so they could never complete TLS.
+private const val KEY_ALIAS = "kasane_connect_identity_v2"
 private const val PREFS = "kasane_connect_profile"
 
 private class PrefsProfileStore(context: Context) : DeviceProfileStore {
@@ -38,7 +40,7 @@ object AndroidConnect {
         val now = System.currentTimeMillis()
         val spec = KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_SIGN)
             .setAlgorithmParameterSpec(java.security.spec.ECGenParameterSpec("secp256r1"))
-            .setDigests(KeyProperties.DIGEST_SHA256)
+            .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256)
             .setCertificateSubject(X500Principal("CN=Kasane Connect"))
             .setCertificateSerialNumber(BigInteger.ONE)
             .setCertificateNotBefore(Date(now))

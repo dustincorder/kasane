@@ -38,6 +38,8 @@ class VerifiedPlayerResolver(
     private val youtubeBase: String = "https://www.youtube.com",
     private val musicBase: String = "https://music.youtube.com",
     private val now: () -> Long = System::currentTimeMillis,
+    /** Signed-in request headers (cookie + SAPISIDHASH), or null when browsing as a guest. */
+    private val accountHeaders: () -> Map<String, String>? = { null },
 ) {
     private val lock = Mutex()
     private var protocolChecked = false
@@ -48,7 +50,17 @@ class VerifiedPlayerResolver(
 
     suspend fun resolve(videoId: String): PlaybackStream = withContext(Dispatchers.IO) {
         try {
-            lock.withLock { resolveLocked(videoId) }
+            lock.withLock {
+                try {
+                    resolveLocked(videoId, null)
+                } catch (e: UnplayableException) {
+                    // Age-restricted and account-only tracks: repeat the verified
+                    // request with the signed-in session instead of failing.
+                    val headers = accountHeaders()
+                    if (e.status !in ACCOUNT_STATUSES || headers == null) throw e
+                    resolveLocked(videoId, headers)
+                }
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: UnplayableException) {
@@ -60,7 +72,7 @@ class VerifiedPlayerResolver(
         }
     }
 
-    private suspend fun resolveLocked(videoId: String): PlaybackStream {
+    private suspend fun resolveLocked(videoId: String, account: Map<String, String>?): PlaybackStream {
         if (!protocolChecked) {
             if ((runtime.call("protocol", JSONArray()) as? Number)?.toInt() != PROTOCOL) throw VerificationException("verification runtime version mismatch")
             protocolChecked = true
@@ -72,7 +84,8 @@ class VerifiedPlayerResolver(
             .put("context", JSONObject().put("client", JSONObject().put("clientName", "WEB_REMIX")
                 .put("clientVersion", WEB_REMIX_VERSION).put("hl", "en").put("gl", "US")))
             .put("playbackContext", JSONObject().put("contentPlaybackContext", JSONObject().put("signatureTimestamp", sts))),
-            mapOf("X-YouTube-Client-Name" to "67", "X-YouTube-Client-Version" to WEB_REMIX_VERSION, "Origin" to "https://music.youtube.com"),
+            mapOf("X-YouTube-Client-Name" to "67", "X-YouTube-Client-Version" to WEB_REMIX_VERSION, "Origin" to "https://music.youtube.com") +
+                account.orEmpty(),
             "player") as JSONObject
         val format = selectAudioFormat(root, videoId)
         val n = format.url.queryParameter("n")
@@ -140,6 +153,8 @@ class VerifiedPlayerResolver(
         }
     } catch (e: VerificationException) { throw e
     } catch (e: java.io.IOException) { throw VerificationException("could not download the YouTube player") }
+
+    private val ACCOUNT_STATUSES = setOf("LOGIN_REQUIRED", "AGE_CHECK_REQUIRED", "AGE_VERIFICATION_REQUIRED")
 
     class UnplayableException(val status: String, reason: String) : Exception("Unplayable ($status): $reason")
 

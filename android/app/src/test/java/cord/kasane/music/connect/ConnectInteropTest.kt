@@ -123,6 +123,7 @@ class ConnectInteropTest {
             runCatching { awaitTrue { kotlin.prompts.value.isNotEmpty() } }.onFailure {
                 pair.destroy(); pair.waitFor(5, TimeUnit.SECONDS); error("no prompt; rust said: " + logOf(pair))
             }
+            delay(3000)
             kotlin.confirmPairing(kotlin.prompts.value.first().promptId, true)
             val (code, out) = finish(pair)
             assertEquals(out, 0, code)

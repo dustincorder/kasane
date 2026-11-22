@@ -235,8 +235,14 @@ class ConnectManager(private val config: ConnectConfig) {
         link.start()
         // Unauthenticated idle cutoff.
         scope.launch {
-            delay(AUTH_IDLE_MS)
-            if (!session.authed) link.close()
+            while (true) {
+                delay(AUTH_IDLE_MS)
+                if (session.authed || session.closed) break
+                // A pairing has its own 120 s deadline while the users compare codes.
+                if (serverPairing?.session === session) continue
+                link.close()
+                break
+            }
         }
     }
 
@@ -249,6 +255,19 @@ class ConnectManager(private val config: ConnectConfig) {
         if (!session.closed) {
             session.closed = true
             session.dead.complete(Unit)
+        }
+        // An in-flight pairing on this connection can never finish: end it so
+        // the prompt disappears and the next pairing is not refused as busy.
+        serverPairing?.takeIf { it.session === session }?.let { pairing ->
+            if (pairing.peerAccepted == null) pairing.peerAccepted = false
+            val prompt = pairing.localAccepted
+            if (prompt == null) {
+                // Closed before the prompt existed: nothing else will clean up.
+                serverPairing = null
+                pairSlot.unlock()
+            } else {
+                prompt.complete(false)
+            }
         }
         session.pending.values.forEach { it.complete(false to FrameError("failed", "connection closed")) }
         session.pending.clear()
@@ -444,7 +463,8 @@ class ConnectManager(private val config: ConnectConfig) {
                 while (pairing.peerAccepted == null) delay(50)
                 pairing.peerAccepted!!
             } ?: false
-            if (peer) {
+            // Never trust a peer that is gone before it can learn the result.
+            if (peer && !session.closed) {
                 session.peer?.let { dev ->
                     trust.put(TrustedDevice(dev.id, dev.name, dev.platform,
                         session.peerFp, System.currentTimeMillis() / 1000))
@@ -468,6 +488,8 @@ class ConnectManager(private val config: ConnectConfig) {
         val pairing = serverPairing ?: return
         if (pairing.session !== session) return
         pairing.peerAccepted = confirm.accepted
+        // A peer rejection ends the pairing now and withdraws our prompt.
+        if (!confirm.accepted) pairing.localAccepted?.complete(false)
     }
 
     private fun failServerPairing(reason: String) {
@@ -660,6 +682,15 @@ class ConnectManager(private val config: ConnectConfig) {
             job.cancel()
             outcome
         } ?: false
+        // authOk only means the peer trusts us; we must also have pinned its
+        // certificate, or an impostor could accept our commands.
+        val peer = session.peer
+        if (authed && (peer == null || !trust.isTrusted(peer.id, session.peerFp))) {
+            session.authed = false
+            link.close()
+            val name = peer?.name ?: "The other device"
+            throw ConnectException("$name trusts this device, but this device has no matching record of it. Remove this device on $name and pair again.")
+        }
         if (authed) {
             session.authed = true
             subscribeRemote(session)

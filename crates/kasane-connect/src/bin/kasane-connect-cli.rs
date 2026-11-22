@@ -125,9 +125,28 @@ async fn main() {
                         svc.confirm_pairing(&p.prompt_id, yes);
                         println!("{}", if yes { "confirmed" } else { "rejected" });
                     }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                    for d in svc.devices().borrow().iter().filter(|d| d.trusted) {
-                        println!("paired: {} ({})", d.name, d.id.as_deref().unwrap_or("?"));
+                    // The other side may take a while to confirm; keep the
+                    // connection open until the pairing result arrives.
+                    let deadline = std::time::Instant::now() + Duration::from_secs(120);
+                    let paired = loop {
+                        let trusted: Vec<String> = svc
+                            .devices()
+                            .borrow()
+                            .iter()
+                            .filter(|d| d.trusted)
+                            .map(|d| format!("{} ({})", d.name, d.id.as_deref().unwrap_or("?")))
+                            .collect();
+                        if !trusted.is_empty() || std::time::Instant::now() > deadline {
+                            break trusted;
+                        }
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    };
+                    if paired.is_empty() {
+                        eprintln!("not paired (rejected or timed out)");
+                        std::process::exit(1);
+                    }
+                    for d in paired {
+                        println!("paired: {d}");
                     }
                 }
                 Err(e) => {

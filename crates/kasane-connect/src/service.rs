@@ -576,6 +576,21 @@ impl ConnectService {
         link.send(hello).ok();
         // Read until the peer's hello and auth verdict arrive.
         let (peer_hello, authed) = handshake_wait(&mut link).await?;
+        // authOk only means the peer trusts us; we must also have pinned its
+        // certificate, or an impostor could accept our commands.
+        let pinned = self
+            .inner
+            .trust
+            .lock()
+            .unwrap()
+            .get(&peer_hello.id)
+            .is_some_and(|t| t.fingerprint == hex::encode(peer_fp));
+        if authed && !pinned {
+            let name = &peer_hello.name;
+            return Err(ConnError::Protocol(format!(
+                "{name} trusts this device, but this device has no matching record of it. Remove this device on {name} and pair again."
+            )));
+        }
         let (ready_tx, _) = watch::channel(Some(authed));
         let (pair_tx, _) = tokio::sync::broadcast::channel::<Frame>(64);
         let (state_tx, _) = watch::channel(None);
@@ -1095,7 +1110,8 @@ async fn server_session(
                     }
                 }
             }
-            _ = &mut idle_fut, if !s.authed => {
+            // A pairing has its own 120 s deadline while the users compare codes.
+            _ = &mut idle_fut, if !s.authed && s.pairing.is_none() => {
                 break;
             }
             changed = published.changed() => {
@@ -1326,6 +1342,10 @@ async fn handle_frame(
         Frame::PairConfirm { accepted } => {
             if let Some(p) = s.pairing.as_mut() {
                 p.peer = Some(accepted);
+                // A peer rejection ends the pairing now; our prompt is withdrawn.
+                if !accepted && p.local.is_none() {
+                    p.local = Some(false);
+                }
                 return finish_pairing(inner, s, link, peer).await;
             }
         }
