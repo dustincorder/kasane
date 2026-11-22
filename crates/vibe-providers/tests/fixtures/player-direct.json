@@ -1,0 +1,8 @@
+{
+  "playabilityStatus": { "status": "OK" },
+  "streamingData": { "adaptiveFormats": [
+    { "itag": 141, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 256000, "url": "https://example.com/high" },
+    { "itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 128000, "url": "https://example.com/aac" },
+    { "itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 160000, "url": "https://example.com/opus" }
+  ] }
+}
