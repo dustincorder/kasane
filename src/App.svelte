@@ -8,9 +8,13 @@
   import PairingDialog from '$lib/components/PairingDialog.svelte';
   import { player } from '$lib/stores/player.svelte';
   import { connect } from '$lib/stores/connect.svelte';
-  import { Search, Library, ListMusic, MonitorSmartphone } from 'lucide-svelte';
+  import SettingsView from '$lib/components/SettingsView.svelte';
+  import { account } from '$lib/stores/account.svelte';
+  import { Search, Library, ListMusic, MonitorSmartphone, Settings } from 'lucide-svelte';
+  import { onMount } from 'svelte';
 
-  type Tab = 'search' | 'library' | 'queue' | 'devices';
+  type Tab = 'search' | 'library' | 'queue' | 'devices' | 'settings';
+  onMount(() => { void account.init(); });
   let activeTab = $state<Tab>('search');
 </script>
 
@@ -59,6 +63,14 @@
             <MonitorSmartphone size={16} />
             <span class="sr-only sm:not-sr-only">Devices</span>
           </button>
+
+          <button
+            onclick={() => (activeTab = 'settings')}
+            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition {activeTab === 'settings' ? 'bg-surface-hover text-accent-highlight' : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover/50'}"
+          >
+            <Settings size={16} />
+            <span class="sr-only sm:not-sr-only">Settings</span>
+          </button>
         </nav>
       </div>
 
@@ -83,6 +95,8 @@
         <QueueView />
       {:else if activeTab === 'devices'}
         <DevicesView />
+      {:else if activeTab === 'settings'}
+        <SettingsView />
       {/if}
     </main>
   </div>

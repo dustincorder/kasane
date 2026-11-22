@@ -13,3 +13,4 @@ async-trait.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+sha1 = "0.10"

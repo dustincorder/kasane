@@ -7,12 +7,17 @@ use vibe_core::error::{Result, VibeError};
 use vibe_core::model::{Album, Artist, ProviderType, StreamSource, Track};
 use vibe_core::traits::MusicProvider;
 
+use crate::account::{
+    auth_headers, read_session, write_session, AccountClient, AccountIdentity, AccountSession,
+    LibraryPlaylist, SessionStore,
+};
 use crate::verification::WebPlaybackVerifier;
 
 pub struct YouTubeMusicProvider {
     client: reqwest::Client,
     player_url: String,
     verifier: Option<Arc<WebPlaybackVerifier>>,
+    sessions: SessionStore,
 }
 
 const IOS_VERSION: &str = "21.26.4";
@@ -58,13 +63,62 @@ impl YouTubeMusicProvider {
             client,
             player_url: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false".into(),
             verifier: None,
+            sessions: crate::account::session_store(),
         }
     }
 
     /// Enables verified WEB_REMIX playback through an app-owned browser runtime.
+    /// The verifier shares this provider's session store so the signed-in
+    /// playback retry uses the same credentials.
     pub fn with_verifier(mut self, verifier: Arc<WebPlaybackVerifier>) -> Self {
+        verifier.attach_sessions(self.sessions.clone());
         self.verifier = Some(verifier);
         self
+    }
+
+    /// Sets or clears the signed-in account session (None = sign out).
+    pub fn set_session(&self, session: Option<AccountSession>) {
+        write_session(&self.sessions, session);
+    }
+
+    pub fn session(&self) -> Option<AccountSession> {
+        read_session(&self.sessions)
+    }
+
+    fn require_session(&self) -> Result<AccountSession> {
+        self.session()
+            .ok_or_else(|| provider_error("not signed in to YouTube Music"))
+    }
+
+    /// Validates a candidate session against account/account_menu WITHOUT
+    /// storing it — used by the sign-in flow before persisting anything.
+    pub async fn validate_session(&self, session: &AccountSession) -> Result<AccountIdentity> {
+        AccountClient::new(self.client.clone()).identity(session).await
+    }
+
+    /// Validates the stored session and returns the account identity.
+    pub async fn account_identity(&self) -> Result<AccountIdentity> {
+        let session = self.require_session()?;
+        AccountClient::new(self.client.clone()).identity(&session).await
+    }
+
+    pub async fn account_liked_music(&self) -> Result<Vec<Track>> {
+        let session = self.require_session()?;
+        AccountClient::new(self.client.clone())
+            .liked_music(&session)
+            .await
+    }
+
+    pub async fn account_playlists(&self) -> Result<Vec<LibraryPlaylist>> {
+        let session = self.require_session()?;
+        AccountClient::new(self.client.clone()).playlists(&session).await
+    }
+
+    pub async fn account_playlist_tracks(&self, playlist_id: &str) -> Result<Vec<Track>> {
+        let session = self.require_session()?;
+        AccountClient::new(self.client.clone())
+            .playlist_tracks(playlist_id, &session)
+            .await
     }
 
     async fn resolve_ios(&self, track: &Track) -> Result<StreamSource> {
@@ -133,10 +187,13 @@ impl MusicProvider for YouTubeMusicProvider {
             "params": "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"
         });
 
-        let resp = self
-            .client
-            .post(url)
-            .json(&body)
+        // Signed-in sessions get the full authenticated header set so home
+        // feed/search personalize; anonymous requests stay untouched.
+        let mut request = self.client.post(url).json(&body);
+        if let Some(session) = self.session() {
+            request = request.headers(auth_headers(&session)?);
+        }
+        let resp = request
             .send()
             .await
             .map_err(|e| VibeError::Provider {

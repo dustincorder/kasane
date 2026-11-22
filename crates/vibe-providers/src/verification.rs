@@ -10,11 +10,13 @@
 use async_trait::async_trait;
 use reqwest::Url;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use vibe_core::error::{Result, VibeError};
 use vibe_core::model::StreamSource;
+
+use crate::account::{auth_headers, read_session, AccountSession, SessionStore};
 
 /// A browser engine that has loaded `kasane-verifier.js` and answers
 /// `KasaneVerifier.run(id, method, args)` calls.
@@ -58,6 +60,7 @@ pub struct WebPlaybackVerifier {
     youtube_base: String,
     music_base: String,
     state: Mutex<State>,
+    sessions: RwLock<Option<SessionStore>>,
 }
 
 impl WebPlaybackVerifier {
@@ -86,7 +89,24 @@ impl WebPlaybackVerifier {
             youtube_base,
             music_base,
             state: Mutex::new(State::default()),
+            sessions: RwLock::new(None),
         }
+    }
+
+    /// Shares a session store so playability statuses that require sign-in can
+    /// be retried once with authenticated headers. Attached lazily because the
+    /// verifier is built before the provider.
+    pub fn attach_sessions(&self, store: SessionStore) {
+        if let Ok(mut guard) = self.sessions.write() {
+            *guard = Some(store);
+        }
+    }
+
+    fn current_session(&self) -> Option<AccountSession> {
+        self.sessions
+            .read()
+            .ok()
+            .and_then(|guard| guard.as_ref().and_then(read_session))
     }
 
     /// Resolves a verified, directly playable AAC (itag 140) URL for `video_id`.
@@ -101,7 +121,23 @@ impl WebPlaybackVerifier {
         }
         let signature_timestamp = self.ensure_player(&mut state).await?;
         self.ensure_integrity(&mut state).await?;
-        let root = self.player_response(video_id, signature_timestamp).await?;
+        // Anonymous verified request first — nothing that plays today regresses.
+        let mut root = self
+            .player_response(video_id, signature_timestamp, None)
+            .await?;
+        if needs_session_retry(&root) {
+            if let Some(session) = self.current_session() {
+                let status = root
+                    .pointer("/playabilityStatus/status")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                tracing::info!("YouTube playback {video_id}: {status} anonymously; retrying signed-in");
+                root = self
+                    .player_response(video_id, signature_timestamp, Some(&session))
+                    .await?;
+            }
+        }
         let format = select_audio_format(&root, video_id)?;
         let n = format.url.query_pairs().find(|(k, _)| k == "n").map(|(_, v)| v.into_owned());
         let prepared = match (&n, &format.signature) {
@@ -222,7 +258,12 @@ impl WebPlaybackVerifier {
             .map_err(|_| verification_error(format!("invalid BotGuard {method} response")))
     }
 
-    async fn player_response(&self, video_id: &str, signature_timestamp: u64) -> Result<Value> {
+    async fn player_response(
+        &self,
+        video_id: &str,
+        signature_timestamp: u64,
+        session: Option<&AccountSession>,
+    ) -> Result<Value> {
         let body = json!({
             "videoId": video_id,
             "context": {"client": {
@@ -233,13 +274,17 @@ impl WebPlaybackVerifier {
                 "signatureTimestamp": signature_timestamp
             }}
         });
-        let response = self
+        let mut request = self
             .client
             .post(format!("{}/youtubei/v1/player?prettyPrint=false", self.music_base))
             .header("X-YouTube-Client-Name", "67")
             .header("X-YouTube-Client-Version", WEB_REMIX_VERSION)
             .header("Origin", "https://music.youtube.com")
-            .json(&body)
+            .json(&body);
+        if let Some(session) = session {
+            request = request.headers(auth_headers(session)?);
+        }
+        let response = request
             .send()
             .await
             .map_err(|_| verification_error("player request failed"))?;
@@ -306,6 +351,15 @@ fn signature_timestamp(source: &str) -> Option<u64> {
             let digits: String = source[start..].chars().take_while(char::is_ascii_digit).collect();
             digits.parse().ok()
         })
+}
+
+/// Playability statuses where a signed-in retry can unlock playback
+/// (per the Kotlin retry on these exact codes).
+fn needs_session_retry(root: &Value) -> bool {
+    matches!(
+        root.pointer("/playabilityStatus/status").and_then(Value::as_str),
+        Some("LOGIN_REQUIRED") | Some("AGE_CHECK_REQUIRED") | Some("AGE_VERIFICATION_REQUIRED")
+    )
 }
 
 fn select_audio_format(root: &Value, video_id: &str) -> Result<AudioFormat> {

@@ -1,7 +1,12 @@
+pub mod account;
 pub mod mock;
 pub mod verification;
 pub mod ytmusic;
 
+pub use account::{
+    read_session, session_store, write_session, AccountClient, AccountIdentity, AccountSession,
+    LibraryPage, LibraryPlaylist, SessionStore,
+};
 pub use mock::MockProvider;
 pub use verification::{VerificationRuntime, WebPlaybackVerifier};
 pub use ytmusic::YouTubeMusicProvider;

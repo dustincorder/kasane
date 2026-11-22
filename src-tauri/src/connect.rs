@@ -355,6 +355,7 @@ pub fn spawn_update_forwarder(
             tokio::select! {
                 changed = devices.changed() => if changed.is_err() { break },
                 changed = prompts.changed() => if changed.is_err() { break },
+                _ = service.wait_shutdown() => break,
             }
         }
     });
@@ -369,26 +370,26 @@ pub mod commands {
 
     #[tauri::command]
     pub async fn connect_local(state: State<'_, AppState>) -> Result<LocalDevice, String> {
-        let device = state.connect.local_device();
+        let device = state.connect.read().await.local_device();
         Ok(LocalDevice {
             id: device.id,
             name: device.name,
             platform: device.platform,
-            port: state.connect.port(),
-            fingerprint: state.connect.fingerprint(),
+            port: state.connect.read().await.port(),
+            fingerprint: state.connect.read().await.fingerprint(),
         })
     }
 
     #[tauri::command]
     pub async fn connect_devices(state: State<'_, AppState>) -> Result<Vec<DeviceView>, String> {
-        Ok(state.connect.devices().borrow().clone())
+        Ok(state.connect.read().await.devices().borrow().clone())
     }
 
     #[tauri::command]
     pub async fn connect_prompts(
         state: State<'_, AppState>,
     ) -> Result<Vec<PairingPrompt>, String> {
-        Ok(state.connect.pairing_prompts().borrow().clone())
+        Ok(state.connect.read().await.pairing_prompts().borrow().clone())
     }
 
     #[tauri::command]
@@ -397,7 +398,7 @@ pub mod commands {
         target: String,
     ) -> Result<Option<String>, String> {
         state
-            .connect
+            .connect.read().await
             .pair(&target)
             .await
             .map_err(|e| e.to_string())
@@ -409,7 +410,7 @@ pub mod commands {
         prompt_id: String,
         accepted: bool,
     ) -> Result<(), String> {
-        state.connect.confirm_pairing(&prompt_id, accepted);
+        state.connect.read().await.confirm_pairing(&prompt_id, accepted);
         Ok(())
     }
 
@@ -421,7 +422,7 @@ pub mod commands {
         args: Option<Map<String, Value>>,
     ) -> Result<(), String> {
         state
-            .connect
+            .connect.read().await
             .send_command(&device_id, &action, args.unwrap_or_default())
             .await
             .map_err(|e| format!("{}: {}", e.code, e.message))
@@ -434,7 +435,7 @@ pub mod commands {
         request: HandoffRequest,
     ) -> Result<(), String> {
         state
-            .connect
+            .connect.read().await
             .handoff(&device_id, request)
             .await
             .map_err(|e| format!("{}: {}", e.code, e.message))
@@ -446,7 +447,7 @@ pub mod commands {
         device_id: String,
     ) -> Result<Option<StateFrame>, String> {
         Ok(state
-            .connect
+            .connect.read().await
             .remote_state(&device_id)
             .and_then(|rx| rx.borrow().clone()))
     }
@@ -458,7 +459,7 @@ pub mod commands {
         device_id: String,
     ) -> Result<(), String> {
         let frame = state
-            .connect
+            .connect.read().await
             .remote_state(&device_id)
             .and_then(|rx| rx.borrow().clone())
             .ok_or("the device is not connected")?;
@@ -494,7 +495,73 @@ pub mod commands {
 
     #[tauri::command]
     pub async fn connect_unpair(state: State<'_, AppState>, device_id: String) -> Result<(), String> {
-        state.connect.unpair(&device_id).await;
+        state.connect.read().await.unpair(&device_id).await;
         Ok(())
+    }
+
+    #[derive(serde::Serialize)]
+    pub struct ConnectStatus {
+        enabled: bool,
+        device_name: String,
+        device_id: String,
+        port: u16,
+    }
+
+    /// Connect on/off + this device's name — for the Settings view. The name
+    /// stays available while the service is stopped.
+    #[tauri::command]
+    pub async fn connect_status(state: State<'_, AppState>) -> Result<ConnectStatus, String> {
+        let svc = state.connect.read().await;
+        let device = svc.local_device();
+        Ok(ConnectStatus {
+            enabled: svc.is_running(),
+            device_name: device.name,
+            device_id: device.id,
+            port: svc.port(),
+        })
+    }
+
+    /// Settings toggle: stops the running service (listener, mDNS, sessions)
+    /// or starts a fresh one from the saved config.
+    #[tauri::command]
+    pub async fn connect_set_enabled(
+        app: tauri::AppHandle,
+        state: State<'_, AppState>,
+        enabled: bool,
+    ) -> Result<ConnectStatus, String> {
+        let mut guard = state.connect.write().await;
+        if enabled == guard.is_running() {
+            let device = guard.local_device();
+            return Ok(ConnectStatus {
+                enabled: guard.is_running(),
+                device_name: device.name,
+                device_id: device.id,
+                port: guard.port(),
+            });
+        }
+        if !enabled {
+            guard.stop();
+        } else {
+            let cfg = &state.connect_cfg;
+            let service = kasane_connect::ConnectService::start(
+                &cfg.data_dir,
+                &cfg.device_name,
+                cfg.platform,
+                cfg.app_version,
+                cfg.adapter.clone(),
+                true,
+            )
+            .await
+            .map_err(|e| format!("Kasane Connect could not start: {e}"))?;
+            spawn_update_forwarder(app.clone(), service.clone());
+            *guard = service;
+        }
+        let device = guard.local_device();
+        Ok(ConnectStatus {
+            enabled: guard.is_running(),
+            device_name: device.name,
+            device_id: device.id,
+            port: guard.port(),
+        })
     }
 }

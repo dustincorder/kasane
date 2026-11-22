@@ -8,14 +8,29 @@ use vibe_core::traits::MusicProvider;
 use vibe_db::Database;
 use vibe_providers::{WebPlaybackVerifier, YouTubeMusicProvider};
 
+mod account;
 mod connect;
 mod verifier;
+
+/// Everything needed to re-create the ConnectService when the Settings
+/// toggle switches it back on.
+pub struct ConnectCfg {
+    pub data_dir: PathBuf,
+    pub device_name: String,
+    pub platform: &'static str,
+    pub app_version: &'static str,
+    pub adapter: Arc<connect::DesktopPlayerAdapter>,
+}
 
 pub struct AppState {
     pub player: Arc<PlayerManager>,
     pub db: Arc<Database>,
     pub yt_provider: Arc<YouTubeMusicProvider>,
-    pub connect: kasane_connect::ConnectService,
+    /// The live service while Connect is on; a stopped service while off
+    /// (`is_running()` false). Replaced on re-enable.
+    pub connect: tokio::sync::RwLock<kasane_connect::ConnectService>,
+    pub connect_cfg: ConnectCfg,
+    pub account: account::AccountRuntime,
 }
 
 mod commands {
@@ -233,17 +248,17 @@ pub fn run() {
                 Box::new(DesktopAudioBackend::new()?),
                 yt_provider.clone(),
             ));
-            let connect = {
-                let adapter = Arc::new(connect::DesktopPlayerAdapter::new(
-                    player.clone(),
-                    db.clone(),
-                ));
-                let data_dir = app
+            let adapter = Arc::new(connect::DesktopPlayerAdapter::new(
+                player.clone(),
+                db.clone(),
+            ));
+            let connect_cfg = ConnectCfg {
+                data_dir: app
                     .path()
                     .app_data_dir()
                     .map(|dir| dir.join("connect"))
-                    .unwrap_or_else(|_| std::env::temp_dir().join("kasane-connect"));
-                let host = std::env::var("HOSTNAME")
+                    .unwrap_or_else(|_| std::env::temp_dir().join("kasane-connect")),
+                device_name: std::env::var("HOSTNAME")
                     .ok()
                     .filter(|name| !name.is_empty())
                     .or_else(|| {
@@ -252,41 +267,57 @@ pub fn run() {
                             .map(|name| name.trim().to_string())
                             .filter(|name| !name.is_empty())
                     })
-                    .unwrap_or_else(|| "Kasane PC".into());
-                match tauri::async_runtime::block_on(kasane_connect::ConnectService::start(
-                    &data_dir,
-                    &host,
-                    "linux",
-                    env!("CARGO_PKG_VERSION"),
-                    adapter.clone(),
+                    .unwrap_or_else(|| "Kasane PC".into()),
+                platform: "linux",
+                app_version: env!("CARGO_PKG_VERSION"),
+                adapter,
+            };
+            let connect = match tauri::async_runtime::block_on(
+                kasane_connect::ConnectService::start(
+                    &connect_cfg.data_dir,
+                    &connect_cfg.device_name,
+                    connect_cfg.platform,
+                    connect_cfg.app_version,
+                    connect_cfg.adapter.clone(),
                     true,
-                )) {
-                    Ok(service) => service,
-                    Err(error) => {
-                        eprintln!("Kasane Connect could not start: {error}. Remote control is disabled for this session.");
-                        tauri::async_runtime::block_on(kasane_connect::ConnectService::start(
-                            &data_dir,
-                            &host,
-                            "linux",
-                            env!("CARGO_PKG_VERSION"),
-                            adapter,
-                            false,
-                        ))?
-                    }
+                ),
+            ) {
+                Ok(service) => service,
+                Err(error) => {
+                    eprintln!("Kasane Connect could not start: {error}. Remote control is disabled for this session.");
+                    tauri::async_runtime::block_on(kasane_connect::ConnectService::start(
+                        &connect_cfg.data_dir,
+                        &connect_cfg.device_name,
+                        connect_cfg.platform,
+                        connect_cfg.app_version,
+                        connect_cfg.adapter.clone(),
+                        false,
+                    ))?
                 }
             };
             connect::spawn_update_forwarder(app.handle().clone(), connect.clone());
             app.manage(AppState {
                 player,
                 db,
-                yt_provider,
-                connect,
+                yt_provider: yt_provider.clone(),
+                connect: tokio::sync::RwLock::new(connect),
+                connect_cfg,
+                account: account::AccountRuntime::new(),
             });
+            account::restore(app.handle().clone(), yt_provider);
             Ok(())
         })
         .on_window_event(|window, event| {
-            // The hidden verification window must not keep the app alive.
+            // The hidden verification window and the sign-in popup are
+            // auxiliary — they must not terminate the app on close.
+            if window.label() == account::LOGIN_LABEL
+                && matches!(event, tauri::WindowEvent::Destroyed)
+            {
+                account::wipe_login_data(window.app_handle());
+                return;
+            }
             if window.label() != verifier::LABEL
+                && window.label() != account::LOGIN_LABEL
                 && matches!(event, tauri::WindowEvent::Destroyed)
             {
                 window.app_handle().exit(0);
@@ -318,7 +349,16 @@ pub fn run() {
             connect::commands::connect_handoff,
             connect::commands::connect_remote_state,
             connect::commands::connect_pull,
-            connect::commands::connect_unpair
+            connect::commands::connect_unpair,
+            connect::commands::connect_status,
+            connect::commands::connect_set_enabled,
+            account::commands::account_status,
+            account::commands::account_sign_in,
+            account::commands::account_sign_out,
+            account::commands::account_liked_music,
+            account::commands::account_playlists,
+            account::commands::account_playlist_tracks,
+            account::commands::storage_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

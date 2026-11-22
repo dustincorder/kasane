@@ -184,6 +184,10 @@ struct Inner {
     /// Unauthenticated inbound sessions per source IP and total — admission
     /// control so unauthenticated peers can never starve paired devices.
     pending_auth: Mutex<(HashMap<std::net::IpAddr, u32>, u32)>,
+    /// Set false by `stop()`: all service loops exit and no new work spawns.
+    alive: AtomicBool,
+    shutdown: Notify,
+    discovery: Mutex<Option<Discovery>>,
     port: u16,
     app_version: String,
     platform: String,
@@ -233,6 +237,9 @@ impl ConnectService {
             pair_slot: Arc::new(tokio::sync::Mutex::new(())),
             mdns_trigger: mdns_tx,
             pending_auth: Mutex::new((HashMap::new(), 0)),
+            alive: AtomicBool::new(true),
+            shutdown: Notify::new(),
+            discovery: Mutex::new(None),
             port,
             app_version: app_version.into(),
             platform: platform.into(),
@@ -270,9 +277,9 @@ impl ConnectService {
                 &fp,
                 tx,
             ) {
-                Ok(_discovery) => {
-                    // The daemon must outlive this function.
-                    std::mem::forget(_discovery);
+                Ok(discovery) => {
+                    // Kept so stop() can unregister and shut the daemon down.
+                    *inner.discovery.lock().unwrap() = Some(discovery);
                     tokio::task::spawn_blocking({
                         let inner = inner.clone();
                         move || mdns_events(inner, rx)
@@ -286,6 +293,37 @@ impl ConnectService {
 
     pub fn port(&self) -> u16 {
         self.inner.port
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.inner.alive.load(Ordering::SeqCst)
+    }
+
+    /// Resolves once `stop()` fires — lets forwarders/listeners wind down.
+    pub async fn wait_shutdown(&self) {
+        self.inner.shutdown.notified().await
+    }
+
+    /// Graceful shutdown: stops the listener and mDNS, closes every session
+    /// and ends the background loops. The service object stays usable for
+    /// reads (device list, identity) but accepts no new work.
+    pub fn stop(&self) {
+        if !self.inner.alive.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        if let Some(discovery) = self.inner.discovery.lock().unwrap().take() {
+            discovery.stop();
+        }
+        {
+            let mut book = self.inner.book.lock().unwrap();
+            book.wanted.clear();
+            book.sessions.clear();
+            for entry in book.entries.values_mut() {
+                entry.conn = "disconnected";
+            }
+        }
+        self.inner.shutdown.notify_waiters();
+        self.inner.refresh_devices();
     }
 
     /// Lowercase hex SHA-256 fingerprint of our leaf certificate.
@@ -322,6 +360,9 @@ impl ConnectService {
     /// starting one if necessary.
     pub async fn connect(&self, target: &str) -> Result<Arc<ClientHandle>, ConnError> {
         let inner = &self.inner;
+        if !inner.alive.load(Ordering::SeqCst) {
+            return Err(ConnError::Protocol("service stopped".into()));
+        }
         let (id_or_addr, addr_hint) = resolve_target(inner, target);
         if id_or_addr.is_none() {
             Self::validate_manual_target(target)?;
@@ -732,7 +773,11 @@ async fn handshake_wait(link: &mut Link) -> Result<(DeviceInfo, bool), ConnError
 
 /// The dispatch loop of an outbound session.
 async fn client_dispatch(inner: Arc<Inner>, conn: Arc<ClientHandle>, mut rx: mpsc::UnboundedReceiver<Inbound>) {
-    while let Some(inbound) = rx.recv().await {
+    while inner.alive.load(Ordering::SeqCst) {
+        let Some(inbound) = (tokio::select! {
+            i = rx.recv() => i,
+            _ = inner.shutdown.notified() => break,
+        }) else { break };
         match inbound {
             Inbound::Closed => break,
             Inbound::Frame(frame) => match frame {
@@ -870,6 +915,7 @@ async fn publisher(inner: Arc<Inner>) {
         tokio::select! {
             _ = tick.tick() => {}
             r = changed.changed() => { if r.is_err() { return; } }
+            _ = inner.shutdown.notified() => return,
         }
         let snap = inner.adapter.snapshot().await;
         let meaningful = match &last {
@@ -902,7 +948,11 @@ async fn publisher(inner: Arc<Inner>) {
 
 async fn accept_loop(inner: Arc<Inner>, listener: TcpListener) {
     loop {
-        let Ok((stream, addr)) = listener.accept().await else {
+        let accepted = tokio::select! {
+            r = listener.accept() => r,
+            _ = inner.shutdown.notified() => break,
+        };
+        let Ok((stream, addr)) = accepted else {
             continue;
         };
         // Admission control: at most 2 pending (unauthenticated) sessions per
@@ -1127,6 +1177,10 @@ async fn server_session(
                     inner.note_pair_failure();
                 }
             }
+            _ = inner.shutdown.notified() => break,
+        }
+        if !inner.alive.load(Ordering::SeqCst) {
+            break;
         }
     }
     // If a pairing was in-flight its prompt must not linger.
@@ -1513,6 +1567,7 @@ async fn maintain(inner: Arc<Inner>, mut mdns_rx: mpsc::UnboundedReceiver<String
                 // Fresh resolve resets the backoff for wanted devices.
                 attempts.clear();
             }
+            _ = inner.shutdown.notified() => return,
         }
         let wanted: Vec<(String, String)> = {
             let book = inner.book.lock().unwrap();

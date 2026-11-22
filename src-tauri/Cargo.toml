@@ -26,3 +26,4 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tauri-plugin-dialog = "2"
+keyring = "=4.2.0"
