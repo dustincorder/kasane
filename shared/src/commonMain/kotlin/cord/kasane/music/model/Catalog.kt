@@ -38,14 +38,19 @@ data class CatalogPage(val title: String, val subtitle: String, val artwork: Str
     /** YouTube's own second subtitle, e.g. "11 songs • 37 minutes" or "107M views • 64 tracks • 3 hours". */
     val stats: String = "",
     /** True when YouTube returned the editable (owner) header: the signed-in account owns this playlist. */
-    val owned: Boolean = false) {
+    val owned: Boolean = false,
+    /** Artist pages: YouTube's audience line ("301K monthly audience") and its own Mix radio target. */
+    val listeners: String = "",
+    val radioPlaylistId: String? = null,
+    val radioVideoId: String? = null) {
     val tracks: List<Track> get() = shelves.flatMap { it.items }.mapNotNull { it.track() }.distinctBy { it.id }
 }
 
 /** The header facts of a page that the cache stores next to its shelves. */
 @Serializable
-data class PageMeta(val creators: List<CatalogCreator> = emptyList(), val stats: String = "", val owned: Boolean = false) {
+data class PageMeta(val creators: List<CatalogCreator> = emptyList(), val stats: String = "", val owned: Boolean = false,
+    val listeners: String = "", val radioPlaylistId: String? = null, val radioVideoId: String? = null) {
     companion object {
-        fun of(page: CatalogPage) = PageMeta(page.creators, page.stats, page.owned).takeIf { it.creators.isNotEmpty() || it.stats.isNotBlank() || it.owned }
+        fun of(page: CatalogPage) = PageMeta(page.creators, page.stats, page.owned, page.listeners, page.radioPlaylistId, page.radioVideoId).takeIf { it.creators.isNotEmpty() || it.stats.isNotBlank() || it.owned || it.listeners.isNotBlank() || it.radioPlaylistId != null }
     }
 }

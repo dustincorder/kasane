@@ -134,3 +134,31 @@ class TrackMetadataTest {
         assertFalse(links.artist!!.title == "Artist" || links.album!!.title == "Album")
     }
 }
+
+class ApollinariyaAlbumMetadataTest {
+    /** Real album page for "Имена, животные и бабка без квартиры" (Электрослабость), guest capture. */
+    private val page = CatalogJsonParser.page(Json.parseToJsonElement(
+        checkNotNull(javaClass.getResourceAsStream("/captured/album_apollinariya_guest.json")).readBytes().decodeToString()) as JsonObject)
+
+    @Test fun everyAlbumTrackCarriesTheAlbumsArtistAndTitle() {
+        assertEquals("Электрослабость", page.creators.single().name)
+        assertEquals("Имена, животные и бабка без квартиры", page.title)
+        assertTrue(page.tracks.isNotEmpty())
+        assertTrue(page.tracks.all { it.artist == "Электрослабость" }, page.tracks.map { it.artist }.toString())
+        assertTrue(page.tracks.all { it.album == page.title })
+    }
+
+}
+
+class ArtistHeaderCaptureTest {
+    private val page = CatalogJsonParser.page(Json.parseToJsonElement(
+        checkNotNull(javaClass.getResourceAsStream("/captured/artist_elektroslabost_guest.json")).readBytes().decodeToString()) as JsonObject)
+
+    @Test fun artistPageProvidesBannerListenersAndItsOwnMix() {
+        assertTrue(page.artwork!!.contains("w1400-h583"), page.artwork!!)
+        assertEquals("301K monthly audience", page.listeners)
+        assertEquals("RDEM_Y_JoQPOG68N_4jNsP71rw", page.radioPlaylistId)
+        assertEquals("4KxGttnDGw4", page.radioVideoId)
+        assertTrue(page.shelves.any { it.title == "Albums" })
+    }
+}

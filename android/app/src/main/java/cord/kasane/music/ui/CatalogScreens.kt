@@ -2,6 +2,8 @@ package cord.kasane.music.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -242,6 +244,29 @@ private fun CreatorLine(credits: Credits, start: Boolean, onOpen: (CatalogItem) 
     }
 }
 
+@Composable
+private fun ExpandableDescription(description: String?) {
+    if (description.isNullOrBlank()) return
+    var open by remember { mutableStateOf(false) }
+    Column {
+        Text(description, style = MaterialTheme.typography.bodySmallMuted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        TextButton(onClick = { open = true }, contentPadding = PaddingValues(0.dp), modifier = Modifier.heightIn(min = 36.dp)) { Text("Read more") }
+    }
+    if (open) AlertDialog(
+        onDismissRequest = { open = false },
+        confirmButton = { TextButton(onClick = { open = false }) { Text("Close") } },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(description, style = MaterialTheme.typography.bodyMedium) } })
+}
+
+/** YouTube artwork URLs carry their size; a wide banner is only used when the source really is wide. */
+internal fun isWideArtwork(url: String?): Boolean {
+    if (url == null) return false
+    val match = Regex("[-=]w(\\d+)-h(\\d+)").find(url) ?: return false
+    val w = match.groupValues[1].toIntOrNull() ?: return false
+    val h = match.groupValues[2].toIntOrNull() ?: return false
+    return h > 0 && w.toFloat() / h >= 1.6f
+}
+
 internal fun Track.withCover(cover: String?): Track = if (thumbnailUri.isNullOrBlank() && !cover.isNullOrBlank()) copy(thumbnailUri = cover) else this
 
 @Composable
@@ -301,7 +326,13 @@ fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () ->
         catch (e: Exception) { error = e.message ?: "This page is unavailable." }
         finally { loading = false; handledRevision = revision }
     }
-    CatalogDetailContent(item, page, loading, error, loadingMore, onBack, { revision++ }, onOpen, onPlay, onQueue, owner = accountIdentity) {
+    CatalogDetailContent(item, page, loading, error, loadingMore, onBack, { revision++ }, onOpen, onPlay, onQueue, owner = accountIdentity, onMix = {
+        val playlist = page?.radioPlaylistId ?: return@CatalogDetailContent
+        scope.launch {
+            try { val radio = if (accountSession != null) cachedCatalog?.library(cacheScope, accountSession, cord.kasane.music.provider.AccountCollection.PLAYLISTS, playlist) ?: catalog.playlist(playlist) else catalog.playlist(playlist); if (radio.tracks.isNotEmpty()) onPlay(radio.tracks, false) }
+            catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message ?: "Could not start the artist mix." }
+        }
+    }) {
         val current = page ?: return@CatalogDetailContent
         val token = current.continuation ?: return@CatalogDetailContent
         loadingMore = true; error = null
@@ -330,6 +361,7 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
     loadingMore: Boolean, onBack: () -> Unit, onRetry: () -> Unit, onOpen: (CatalogItem) -> Unit,
     onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
     owner: cord.kasane.music.auth.AccountIdentity? = null,
+    onMix: () -> Unit = {},
     onLoadMore: () -> Unit) {
     // Album rows carry no artwork of their own, so they show (and queue with) the album cover instead of a placeholder note.
     val albumCover = if (item.kind == CatalogKind.ALBUM) page?.artwork ?: item.artwork else null
@@ -342,7 +374,9 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
         // Large playlists continue loading as the end approaches, so they are never silently cut short.
         val nearEnd by remember { derivedStateOf { val info = listState.layoutInfo; info.totalItemsCount > 0 && (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 4 } }
         LaunchedEffect(nearEnd, page?.continuation, loadingMore, loading) { if (nearEnd && page?.continuation != null && !loadingMore && !loading && error == null) onLoadMore() }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        val bannerArtist = item.kind == CatalogKind.ARTIST && isWideArtwork(page?.artwork ?: item.artwork)
+        // Over a wide artist banner the back button sits on the image itself; the bar only appears once collapsed.
+        if (!bannerArtist || heroGone) Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             Text(if (heroGone) (page?.title?.ifBlank { item.title } ?: item.title) else item.kind.label.removeSuffix("s"),
                 style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -351,7 +385,7 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
             item(key = "hero") {
                 val tracks = shownTracks
                 val title = page?.title?.ifBlank { item.title } ?: item.title
-                val subtitle = page?.subtitle?.ifBlank { item.subtitle } ?: item.subtitle
+                val subtitle = page?.listeners?.takeIf { it.isNotBlank() } ?: page?.subtitle?.ifBlank { item.subtitle } ?: item.subtitle
                 val offline = cord.kasane.music.ui.components.LocalOfflineActions.current
                 var more by remember { mutableStateOf(false) }
                 val artwork: @Composable (Modifier) -> Unit = { m ->
@@ -381,6 +415,9 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                         FilledTonalIconButton(onClick = { onPlay(tracks, true) }, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
                             Icon(Icons.Default.Shuffle, "Shuffle play")
                         }
+                        if (page?.radioPlaylistId != null) FilledTonalIconButton(onClick = onMix, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
+                            Icon(Icons.Default.Radio, "Start artist mix")
+                        }
                         FilledTonalIconButton(onClick = { more = true }, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
                             Icon(Icons.Default.MoreVert, "More actions for this ${item.kind.label.removeSuffix("s").lowercase()}")
                         }
@@ -389,20 +426,40 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
                     val widthDp = maxWidth
                     if (item.kind == CatalogKind.ARTIST) {
-                        // Full-width banner: the image is cropped to fill, a gradient into the background keeps the name readable.
-                        Column {
-                            Box(Modifier.fillMaxWidth().height(minOf(widthDp * 0.72f, 300.dp))) {
-                                TrackArtwork(page?.artwork ?: item.artwork, Modifier.fillMaxSize(), minPixels = 1200, shape = androidx.compose.ui.graphics.RectangleShape)
-                                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
-                                    0.35f to androidx.compose.ui.graphics.Color.Transparent, 1f to MaterialTheme.colorScheme.background)))
-                                Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 20.dp, vertical = 12.dp)) {
-                                    Text(title, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onBackground)
-                                    if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val art = page?.artwork ?: item.artwork
+                        if (isWideArtwork(art)) {
+                            // Wide banner, edge to edge, with a gradient into the page and a scrimmed back button.
+                            Column {
+                                Box(Modifier.fillMaxWidth().height(minOf(widthDp * 0.66f, 280.dp))) {
+                                    TrackArtwork(art, Modifier.fillMaxSize(), minPixels = 1200, shape = androidx.compose.ui.graphics.RectangleShape)
+                                    Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
+                                        0.3f to androidx.compose.ui.graphics.Color.Transparent, 1f to MaterialTheme.colorScheme.background)))
+                                    IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
+                                        .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.35f), androidx.compose.foundation.shape.CircleShape)) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = androidx.compose.ui.graphics.Color.White)
+                                    }
+                                    Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 20.dp, vertical = 12.dp)) {
+                                        Text(title, style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onBackground)
+                                        if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                Column(Modifier.padding(horizontal = 20.dp).widthIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    actions()
+                                    ExpandableDescription(page?.description)
                                 }
                             }
-                            Column(Modifier.padding(horizontal = 20.dp).widthIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                actions()
-                                if (!page?.description.isNullOrBlank()) Text(page!!.description, style = MaterialTheme.typography.bodySmallMuted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        } else {
+                            // Square portrait fallback: a modest rounded image beside the name, never a giant stretched circle.
+                            Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    TrackArtwork(art, Modifier.size(144.dp), shape = MaterialTheme.shapes.medium, minPixels = 544)
+                                    Column(Modifier.weight(1f)) {
+                                        Text(title, style = MaterialTheme.typography.headlineMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodyMediumMuted)
+                                    }
+                                }
+                                Box(Modifier.widthIn(max = 520.dp)) { actions() }
+                                ExpandableDescription(page?.description)
                             }
                         }
                     } else {
@@ -414,7 +471,7 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                                 Box(Modifier.weight(1f)) { info(true) }
                             }
                             Box(Modifier.widthIn(max = 520.dp)) { actions() }
-                            if (!page?.description.isNullOrBlank()) Text(page!!.description, style = MaterialTheme.typography.bodySmallMuted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            ExpandableDescription(page?.description)
                         }
                     }
                 }
@@ -442,10 +499,12 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                 if (playable) {
                     if (shelf.title.isNotBlank()) item { Text(shelf.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(20.dp)) }
                     // A playlist may legitimately contain the same video twice, so the position is part of the key.
-                    itemsIndexed(shelf.items, key = { position, it -> "$index:$position:${it.kind}:${it.id}" }) { _, entry ->
+                    itemsIndexed(shelf.items, key = { position, it -> "$index:$position:${it.kind}:${it.id}" }) { position, entry ->
                         val track = entry.track()?.withCover(albumCover) ?: return@itemsIndexed
                         TrackRow(track, onClick = { onPlay(shownTracks.dropWhile { it.id != track.id }, false) },
-                            onAddToQueue = { onQueue(track) })
+                            onAddToQueue = { onQueue(track) }, leading = if (item.kind == CatalogKind.ALBUM) ({
+                                Text("${position + 1}", style = MaterialTheme.typography.labelMediumMuted, modifier = Modifier.width(24.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            }) else null)
                     }
                 } else item { CatalogShelfRow(shelf, onOpen) }
             }
@@ -463,8 +522,9 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
 fun CatalogDetailPreview() {
     KasaneTheme(dynamicColor = false) {
         val item = CatalogItem("UCpreview", CatalogKind.ARTIST, "KIRA", "Artist")
-        val page = CatalogPage(item.title, "1.2M subscribers", null, listOf(CatalogShelf("Songs", (1..4).map {
-            CatalogItem("song$it", CatalogKind.SONG, "Popular song number $it", "KIRA", durationSeconds = 180.0 + it) })))
+        val page = CatalogPage(item.title, "", "https://yt3.googleusercontent.com/x=w540-h225-l90-rj", listOf(CatalogShelf("Songs", (1..4).map {
+            CatalogItem("song$it", CatalogKind.SONG, "Popular song number $it", "KIRA", durationSeconds = 180.0 + it) })),
+            listeners = "301K monthly audience", radioPlaylistId = "RDEM_test", description = "A long artist biography that should be expandable. ".repeat(8))
         Surface(color = MaterialTheme.colorScheme.background) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, onLoadMore = {}) }
     }
 }

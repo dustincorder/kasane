@@ -49,8 +49,8 @@ fun TrackRow(
     useCloudFavorite: Boolean = true,
     showLike: Boolean = true,
     showMenuButton: Boolean = true,
-    extraMenu: List<MenuEntry> = emptyList(),
     leading: (@Composable () -> Unit)? = null,
+    extraMenu: List<MenuEntry> = emptyList(),
     trailing: (@Composable () -> Unit)? = null,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }

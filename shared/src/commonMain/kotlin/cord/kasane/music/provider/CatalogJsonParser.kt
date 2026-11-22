@@ -204,9 +204,14 @@ object CatalogJsonParser {
         } else shelves
         return CatalogPage(pageTitle,
             text(header?.optJsonObject("subtitle")), header?.let(ThumbnailJsonParser::bestUrl), filled, nextToken,
-            text(header?.optJsonObject("description")), chips(root),
+            text(header?.optJsonObject("description")).ifBlank {
+                objects(root, "musicDescriptionShelfRenderer").firstOrNull()?.optJsonObject("description")?.let(::text).orEmpty()
+            }, chips(root),
             creators, text(header?.optJsonObject("secondSubtitle")),
-            objects(root, "musicEditablePlaylistDetailHeaderRenderer").isNotEmpty())
+            objects(root, "musicEditablePlaylistDetailHeaderRenderer").isNotEmpty(),
+            text(header?.optJsonObject("monthlyListenerCount")),
+            objects(header?.optJsonObject("startRadioButton"), "watchEndpoint").firstOrNull()?.optString("playlistId")?.takeIf { it.isNotBlank() },
+            objects(header?.optJsonObject("startRadioButton"), "watchEndpoint").firstOrNull()?.optString("videoId")?.takeIf { it.isNotBlank() })
     }
 
     private val SEPARATORS = setOf("&", ",", "•", "and", "·")

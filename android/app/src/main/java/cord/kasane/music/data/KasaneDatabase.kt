@@ -247,6 +247,9 @@ abstract class KasaneDatabase : RoomDatabase() {
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `catalog_cache_item` ADD COLUMN `album` TEXT")
+                // Entries written before artist/album metadata existed would keep showing blank artists.
+                // Mark every cached page stale: it is still readable offline, but refetched on the next view.
+                db.execSQL("UPDATE catalog_cache_page SET updatedAt = 0")
             }
         }
 
