@@ -4815,6 +4815,7 @@ dependencies = [
 name = "vibeplayer"
 version = "0.1.1-alpha"
 dependencies = [
+ "async-trait",
  "serde",
  "serde_json",
  "tauri",

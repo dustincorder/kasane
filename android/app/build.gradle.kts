@@ -33,6 +33,8 @@ android {
 
     // Instrumentation is debug-only and isolated from the user's release package/data.
     testBuildType = "debug"
+    // Shared verification runtime (built by `npm ci && npm run build:verifier` at the repo root).
+    sourceSets.getByName("main").assets.srcDir(rootProject.file("../verifier/dist"))
     if (providers.gradleProperty("kasaneProofProbe").orNull == "true") {
         sourceSets.getByName("androidTest").assets.srcDir(layout.buildDirectory.dir("generated/attestationProbeAssets"))
     }
@@ -161,4 +163,13 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+}
+
+val verifierBundle = rootProject.file("../verifier/dist/kasane-verifier.js")
+tasks.named("preBuild") {
+    doFirst {
+        if (!verifierBundle.isFile) {
+            throw GradleException("Missing ${verifierBundle.path}: run `npm ci && npm run build:verifier` in the repository root.")
+        }
+    }
 }

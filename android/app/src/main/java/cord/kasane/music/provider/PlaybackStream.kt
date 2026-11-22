@@ -30,6 +30,7 @@ class HlsPlayerResolver(
     private val endpoint: String = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
     private val diagnostic: (String) -> Unit = {},
     private val progressiveCheck: (suspend (String, ResolvedAudioStream) -> Boolean)? = null,
+    private val verified: (suspend (String) -> PlaybackStream)? = null,
     private val authenticatedPlayer: suspend (String) -> JSONObject? = { null },
 ) {
     init {
@@ -57,6 +58,19 @@ class HlsPlayerResolver(
                 diagnostic("videoId=$videoId client=WEB_REMIX event=direct_rejected fallback=IOS_HLS")
             }
         }
+        // Verified WEB_REMIX (real BotGuard proof + official player transform).
+        // On failure the iOS HLS profile is tried and both outcomes are reported.
+        val verification = verified?.invoke(videoId)
+        if (verification is ProgressiveStream) {
+            diagnostic("videoId=$videoId client=${verification.clientProfile} event=verified")
+            return@withContext verification
+        }
+        if (verification is UnavailableStream) diagnostic("videoId=$videoId client=WEB_REMIX_VERIFIED event=unavailable code=${verification.code}")
+        val ios = resolveIos(videoId)
+        if (ios is UnavailableStream && verification is UnavailableStream)
+            UnavailableStream("${verification.reason} iOS: ${ios.reason}", verification.code) else ios
+    }
+    private suspend fun resolveIos(videoId: String): PlaybackStream {
         val body = JSONObject().put("videoId", videoId).put("context", JSONObject().put("client", JSONObject()
             .put("clientName", "IOS").put("clientVersion", "21.26.4").put("deviceModel", "iPhone16,2")
             .put("osName", "iPhone").put("osVersion", "18.5.0.22F76").put("hl", "en").put("gl", "US")))
@@ -65,15 +79,15 @@ class HlsPlayerResolver(
             .header("X-Youtube-Client-Name", "5").header("X-Youtube-Client-Version", "21.26.4")
             .post(body.toString().toRequestBody("application/json".toMediaType())).build()
         await(client.newCall(request)).use { response ->
-            if (!response.isSuccessful) return@withContext UnavailableStream("YouTube player request failed (${response.code}).", "PLAYER_HTTP_${response.code}")
+            if (!response.isSuccessful) return UnavailableStream("YouTube player request failed (${response.code}).", "PLAYER_HTTP_${response.code}")
             val root = JSONObject(response.body?.source()?.let { source ->
                 source.request(2L * 1024 * 1024 + 1)
-                if (source.buffer.size > 2L * 1024 * 1024) return@withContext UnavailableStream("Player response is too large.")
+                if (source.buffer.size > 2L * 1024 * 1024) return UnavailableStream("Player response is too large.")
                 source.readUtf8()
-            } ?: return@withContext UnavailableStream("Empty player response."))
+            } ?: return UnavailableStream("Empty player response."))
             report(videoId, "IOS", root)
             val selected = select(root, videoId)
-            if (selected is HlsStream) selected else prepareSabr(root, videoId, "IOS") ?: selected
+            return if (selected is HlsStream) selected else prepareSabr(root, videoId, "IOS") ?: selected
         }
     }
     private suspend fun prepareSabr(root: JSONObject, videoId: String, profile: String): PlaybackStream? {

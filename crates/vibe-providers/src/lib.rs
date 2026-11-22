@@ -1,7 +1,9 @@
 pub mod mock;
+pub mod verification;
 pub mod ytmusic;
 
 pub use mock::MockProvider;
+pub use verification::{VerificationRuntime, WebPlaybackVerifier};
 pub use ytmusic::YouTubeMusicProvider;
 
 #[cfg(test)]

@@ -23,6 +23,7 @@ class YouTubeMusicProvider(
         .build(),
     private val playerDiagnostic: (String) -> Unit = {},
     accountSession: () -> cord.kasane.music.auth.AccountSession? = { null },
+    verificationRuntime: cord.kasane.music.provider.verification.VerificationRuntime? = null,
 ) : MusicProvider {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -31,10 +32,15 @@ class YouTubeMusicProvider(
     override suspend fun search(query: String, limit: Int): List<Track> =
         catalog.search(query, cord.kasane.music.model.CatalogKind.SONG).tracks.take(limit)
 
-    val hlsResolver = HlsPlayerResolver(client, diagnostic = { android.util.Log.i("KasanePlayback", it) }) { videoId ->
-        accountSession()?.let { account -> catalog.request("player", JSONObject().put("videoId", videoId), account,
-            clientVersion = "1.20260707.12.00") }
+    private val verifiedResolver = verificationRuntime?.let {
+        cord.kasane.music.provider.verification.VerifiedPlayerResolver(client, it)
     }
+    val hlsResolver = HlsPlayerResolver(client, diagnostic = { android.util.Log.i("KasanePlayback", it) },
+        authenticatedPlayer = { videoId ->
+            accountSession()?.let { account -> catalog.request("player", JSONObject().put("videoId", videoId), account,
+                clientVersion = "1.20260707.12.00") }
+        },
+        verified = verifiedResolver?.let { resolver -> resolver::resolve })
     val playerResolver = GuestPlayerResolver(client, diagnostic = playerDiagnostic)
 
     override suspend fun resolveStreamUrl(trackId: String): String? = playerResolver.resolve(trackId).url

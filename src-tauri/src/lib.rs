@@ -5,7 +5,9 @@ use vibe_audio::{DesktopAudioBackend, PlayerManager};
 use vibe_core::model::{PlaybackProgress, ProviderType, QueueState, Track};
 use vibe_core::traits::MusicProvider;
 use vibe_db::Database;
-use vibe_providers::YouTubeMusicProvider;
+use vibe_providers::{WebPlaybackVerifier, YouTubeMusicProvider};
+
+mod verifier;
 
 pub struct AppState {
     pub player: Arc<PlayerManager>,
@@ -199,13 +201,20 @@ mod commands {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = tracing_subscriber::fmt::try_init();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_dir)?;
             let db = Arc::new(Database::open(app_dir.join("vibeplayer.db"))?);
-            let yt_provider = Arc::new(YouTubeMusicProvider::new());
+            let replies = verifier::Replies::default();
+            app.manage(replies.clone());
+            let runtime = Arc::new(verifier::WebviewRuntime::new(app.handle().clone(), replies));
+            let yt_provider = Arc::new(
+                YouTubeMusicProvider::new()
+                    .with_verifier(Arc::new(WebPlaybackVerifier::new(runtime))),
+            );
             let player = Arc::new(PlayerManager::new(
                 Box::new(DesktopAudioBackend::new()?),
                 yt_provider.clone(),
@@ -216,6 +225,14 @@ pub fn run() {
                 yt_provider,
             });
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // The hidden verification window must not keep the app alive.
+            if window.label() != verifier::LABEL
+                && matches!(event, tauri::WindowEvent::Destroyed)
+            {
+                window.app_handle().exit(0);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::search_tracks,
@@ -232,7 +249,8 @@ pub fn run() {
             commands::get_queue,
             commands::get_favorites,
             commands::toggle_favorite,
-            commands::get_history
+            commands::get_history,
+            verifier::verifier_reply
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
