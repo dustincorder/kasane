@@ -34,6 +34,8 @@ class KasaneApplication : Application() {
     var connect: cord.kasane.music.connect.ConnectService? = null
         private set
 
+    val remote = kotlinx.coroutines.flow.MutableStateFlow<cord.kasane.music.connect.RemoteController?>(null)
+
     lateinit var ytProvider: YouTubeMusicProvider
         private set
 
@@ -103,10 +105,15 @@ class KasaneApplication : Application() {
                 if (enabled && connect == null) {
                     connect = cord.kasane.music.connect.AndroidConnect
                         .createService(applicationContext, playbackManager, BuildConfig.VERSION_NAME, applicationScope)
-                        .also { it.start() }
+                        .also {
+                            it.start()
+                            remote.value = cord.kasane.music.connect.RemoteController(
+                                it.manager, playbackManager, applicationScope)
+                        }
                 } else if (!enabled) {
                     connect?.stop()
                     connect = null
+                    remote.value = null
                 }
             }
         }

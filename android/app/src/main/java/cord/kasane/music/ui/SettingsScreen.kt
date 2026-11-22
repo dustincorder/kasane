@@ -62,6 +62,13 @@ fun SettingsScreen(
         onAccent = { app.settings.setAccentColor(it.toArgb()) },
         extraSections = {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            SettingsSection("Devices") {
+                val connectOn by app.settings.connectEnabled.collectAsState()
+                SettingsSwitchRow("Kasane Connect",
+                    "Control playback between this phone and your PC on the same network.",
+                    connectOn, onChange = app.settings::setConnectEnabled)
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             StorageSection(app, onManageSaved)
         })
 }

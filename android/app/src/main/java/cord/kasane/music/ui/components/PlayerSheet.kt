@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.outlined.QueueMusic
+import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -145,6 +146,8 @@ fun PlayerSheet(
     actions: PlayerActions,
     isFavorite: Boolean,
     dockedBottom: Dp,
+    remoteName: String? = null,
+    onOpenDevices: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val track = state.currentTrack ?: return
@@ -171,9 +174,9 @@ fun PlayerSheet(
                 .draggable(drag, Orientation.Vertical, onDragStopped = { velocity -> scope.launch { sheet.settle(-velocity / travel) } })
         ) {
             Box(Modifier.fillMaxSize()) {
-                if (p < 0.6f) MiniContent(state, track, actions, Modifier.graphicsLayer { alpha = (1f - p * 2.2f).coerceIn(0f, 1f) },
+                if (p < 0.6f) MiniContent(state, track, actions, remoteName, Modifier.graphicsLayer { alpha = (1f - p * 2.2f).coerceIn(0f, 1f) },
                     onOpen = sheet::expand, coverStart = 0.dp)
-                if (p > 0.02f) FullContent(state, track, actions, isFavorite, onCollapse = sheet::collapse,
+                if (p > 0.02f) FullContent(state, track, actions, isFavorite, remoteName, onOpenDevices, onCollapse = sheet::collapse,
                     topInset = statusTop, bottomInset = navBottom, coverSize = cover, gapTop = g.gapTop, gap = g.gap,
                     modifier = Modifier.graphicsLayer { alpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) })
 
@@ -209,7 +212,7 @@ private fun CoverArtwork(track: Track, queueIndex: Int, size: Dp, playing: Boole
 }
 
 @Composable
-private fun MiniContent(state: PlaybackUiState, track: Track, actions: PlayerActions, modifier: Modifier, onOpen: () -> Unit, coverStart: Dp) {
+private fun MiniContent(state: PlaybackUiState, track: Track, actions: PlayerActions, remoteName: String?, modifier: Modifier, onOpen: () -> Unit, coverStart: Dp) {
     val haptics = LocalHapticFeedback.current
     Column(modifier.fillMaxSize()) {
         Row(
@@ -228,8 +231,12 @@ private fun MiniContent(state: PlaybackUiState, track: Track, actions: PlayerAct
         ) {
             Column(Modifier.weight(1f)) {
                 Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(state.errorMessage ?: track.artist, style = MaterialTheme.typography.bodySmallMuted.let {
-                    if (state.errorMessage != null) it.copy(color = MaterialTheme.colorScheme.error) else it }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    state.errorMessage ?: remoteName?.let { "$it · ${track.artist}" } ?: track.artist,
+                    style = MaterialTheme.typography.bodySmallMuted.let {
+                        if (state.errorMessage != null) it.copy(color = MaterialTheme.colorScheme.error)
+                        else if (remoteName != null) it.copy(color = MaterialTheme.colorScheme.primary) else it },
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             FilledIconButton(onClick = actions.togglePlay, modifier = Modifier.size(40.dp)) {
                 if (state.isLoading) CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
@@ -246,7 +253,8 @@ private fun MiniContent(state: PlaybackUiState, track: Track, actions: PlayerAct
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun FullContent(
-    state: PlaybackUiState, track: Track, actions: PlayerActions, isFavorite: Boolean, onCollapse: () -> Unit,
+    state: PlaybackUiState, track: Track, actions: PlayerActions, isFavorite: Boolean,
+    remoteName: String?, onOpenDevices: (() -> Unit)?, onCollapse: () -> Unit,
     topInset: Dp, bottomInset: Dp, coverSize: Dp, gapTop: Dp, gap: Dp, modifier: Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -258,8 +266,13 @@ private fun FullContent(
         // Title is centred on the screen, independent of how wide the action group is.
         Box(Modifier.fillMaxWidth().padding(top = topInset).height(56.dp).padding(horizontal = 4.dp)) {
             IconButton(onClick = onCollapse, modifier = Modifier.align(Alignment.CenterStart)) { Icon(Icons.Default.KeyboardArrowDown, "Minimize player") }
-            Text("Now playing", Modifier.align(Alignment.Center), style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
+            Text(remoteName?.let { "Controlling $it" } ?: "Now playing", Modifier.align(Alignment.Center),
+                style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center,
+                color = if (remoteName != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
             Row(Modifier.align(Alignment.CenterEnd)) {
+                if (onOpenDevices != null) {
+                    IconButton(onClick = onOpenDevices) { Icon(Icons.Outlined.Devices, "Devices") }
+                }
                 Box {
                     IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "More options") }
                     TrackContextMenu(track, menuOpen, { menuOpen = false }, onPlay = { if (!state.isPlaying) actions.togglePlay() },

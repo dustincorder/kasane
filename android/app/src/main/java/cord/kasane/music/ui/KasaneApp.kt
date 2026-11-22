@@ -105,7 +105,10 @@ fun KasaneApp(app: KasaneApplication) {
     CompositionLocalProvider(cord.kasane.music.ui.components.LocalCloudLikes provides cloud,
         cord.kasane.music.ui.components.LocalPlaylistPicker provides playlists,
         cord.kasane.music.ui.components.LocalTrackActions provides cord.kasane.music.ui.components.TrackActions(
-            app.playbackManager::playTrack, app.playbackManager::playNextInQueue, app.playbackManager::addToQueue, app.playbackManager::startRadio)) { KasaneContent(app) }
+            play = { t -> app.remote.value?.takeIf { it.target.value != null && !t.isLocal }?.playTrack(t) ?: app.playbackManager.playTrack(t) },
+            next = { t -> app.remote.value?.takeIf { it.target.value != null && !t.isLocal }?.playNext(t) ?: app.playbackManager.playNextInQueue(t) },
+            queue = { t -> app.remote.value?.takeIf { it.target.value != null && !t.isLocal }?.addToQueue(t) ?: app.playbackManager.addToQueue(t) },
+            radio = { t -> app.remote.value?.takeIf { it.target.value != null && !t.isLocal }?.playTrack(t) ?: app.playbackManager.startRadio(t) })) { KasaneContent(app) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
@@ -116,6 +119,31 @@ private fun KasaneContent(app: KasaneApplication) {
     val accentArgb by app.settings.accentColor.collectAsState()
     KasaneTheme(themeMode, accentSource, androidx.compose.ui.graphics.Color(accentArgb)) {
         val playbackState by app.playbackManager.uiState.collectAsState()
+        val remote by app.remote.collectAsState()
+        val remoteTarget by remote?.target?.collectAsState() ?: remember { mutableStateOf(null as String?) }
+        val remoteStates by remote?.manager?.remoteStates?.collectAsState()
+            ?: remember { mutableStateOf(emptyMap<String, cord.kasane.music.connect.Frame.State>()) }
+        val remoteDevices by remote?.manager?.devices?.collectAsState()
+            ?: remember { mutableStateOf(emptyList<cord.kasane.music.connect.ConnectDeviceView>()) }
+        val remotePrompts by remote?.manager?.prompts?.collectAsState()
+            ?: remember { mutableStateOf(emptyList<cord.kasane.music.connect.ConnectPairingPrompt>()) }
+        val remoteFrame = remoteTarget?.let(remoteStates::get)
+        val remoteActive = remote != null && remoteFrame != null
+        val remoteName = remoteTarget?.let { id -> remoteDevices.firstOrNull { it.id == id }?.name }
+        val displayedState = if (remoteActive) remote!!.project(remoteFrame!!) else playbackState
+        var showDevices by remember { mutableStateOf(false) }
+
+        fun routePlayTrack(t: Track) {
+            if (remoteActive && !t.isLocal) remote!!.playTrack(t) else app.playbackManager.playTrack(t)
+        }
+        fun routeAddToQueue(t: Track) {
+            if (remoteActive && !t.isLocal) remote!!.addToQueue(t) else app.playbackManager.addToQueue(t)
+        }
+        fun routePlayList(tracks: List<Track>, shuffle: Boolean) {
+            val target = remoteTarget
+            if (remoteActive && target != null) remote!!.playTracksRemotely(target, tracks, shuffle)
+            else app.playbackManager.playTracks(tracks, shuffle)
+        }
         val scope = rememberCoroutineScope()
         val context = LocalContext.current
         val exportLocalData = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -384,7 +412,7 @@ private fun KasaneContent(app: KasaneApplication) {
         }
 
         val openCatalog: (CatalogItem) -> Unit = { entry ->
-            entry.track()?.let { app.playbackManager.playTrack(it) }
+            entry.track()?.let { routePlayTrack(it) }
                 ?: run { playerSheet.collapse(); detailStack = detailStack + entry }
         }
         CompositionLocalProvider(cord.kasane.music.ui.components.LocalTrackNavigation provides
@@ -480,7 +508,7 @@ private fun KasaneContent(app: KasaneApplication) {
             }
             Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(bottom = if (playbackState.currentTrack != null) 76.dp else 0.dp)) {
                 if (showDownloads) {
-                    DownloadsScreen(app, onBack = { showDownloads = false }, onPlay = { app.playbackManager.playTrack(it) })
+                    DownloadsScreen(app, onBack = { showDownloads = false }, onPlay = { routePlayTrack(it) })
                 } else if (showSettings) {
                     SettingsScreen(
                         app = app, state = accountState,
@@ -500,8 +528,8 @@ private fun KasaneContent(app: KasaneApplication) {
                     screenState.SaveableStateProvider("detail:${detail.kind}:${detail.id}") {
                         CatalogDetailScreen(detail, app.ytProvider.catalog,
                             { detailStack = detailStack.dropLast(1) }, openCatalog,
-                            { tracks, shuffle -> app.playbackManager.playTracks(tracks, shuffle) },
-                            { app.playbackManager.addToQueue(it) }, app.cachedCatalog, catalogScope,
+                            { tracks, shuffle -> routePlayList(tracks, shuffle) },
+                            { routeAddToQueue(it) }, app.cachedCatalog, catalogScope,
                             app.accountRepository.session().takeIf { accountState is AccountState.SignedIn },
                             (accountState as? AccountState.SignedIn)?.identity)
                     }
@@ -514,20 +542,20 @@ private fun KasaneContent(app: KasaneApplication) {
                         onChip = { selectedChip = it?.params },
                         offlineOnly = offlineOnly, currentTrackId = playbackState.currentTrack?.id,
                         actions = HomeActions(
-                            playTrack = { app.playbackManager.playTrack(it) },
-                            playList = { tracks, index -> app.playbackManager.playTracks(tracks.drop(index.coerceAtLeast(0))) },
-                            startRadio = { app.playbackManager.startRadio(it) },
+                            playTrack = { routePlayTrack(it) },
+                            playList = { tracks, index -> routePlayList(tracks.drop(index.coerceAtLeast(0)), false) },
+                            startRadio = { t -> if (remoteActive && !t.isLocal) remote!!.playTrack(t) else app.playbackManager.startRadio(t) },
                             open = openCatalog, openSearch = { selectedTab = 1 }, openSettings = { showSettings = true },
                             openSaved = { showDownloads = true }, refresh = { homeRevision++ },
                             openShelf = { title, id -> openCatalog(CatalogItem(id, cord.kasane.music.model.CatalogKind.PLAYLIST, title)) }))
-                    1 -> if (offlineOnly) OfflineSearchScreen(app.database.trackDao(), playbackState.currentTrack?.id) { app.playbackManager.playTrack(it) }
+                    1 -> if (offlineOnly) OfflineSearchScreen(app.database.trackDao(), playbackState.currentTrack?.id) { routePlayTrack(it) }
                     else CatalogSearchScreen(
                         app.ytProvider.catalog, openCatalog, playbackState.currentTrack?.id, favoriteIds,
                         { track -> scope.launch {
                             app.database.trackDao().insertTrack(track)
                             if (track.id in favoriteIds) app.database.trackDao().removeFavorite(track.id)
                             else app.database.trackDao().addFavorite(FavoriteEntity(track.id))
-                        } }, { app.playbackManager.addToQueue(it) }, { app.playbackManager.playNextInQueue(it) },
+                        } }, { routeAddToQueue(it) }, { t -> if (remoteActive && !t.isLocal) remote!!.playNext(t) else app.playbackManager.playNextInQueue(t) },
                         cachedCatalog = app.cachedCatalog, cacheScope = catalogScope,
                         recentSearches = recentSearches, onCommitSearch = app.searchHistory::add,
                         onRemoveRecent = app.searchHistory::remove, onClearRecent = app.searchHistory::clear)
@@ -545,16 +573,16 @@ private fun KasaneContent(app: KasaneApplication) {
                         favoritesCount = favorites.size,
                         historyCount = history.size,
                         onOpenSettings = { showSettings = true },
-                        onCatalogOpen = { entry -> entry.track()?.let { app.playbackManager.playTrack(it) }
+                        onCatalogOpen = { entry -> entry.track()?.let { routePlayTrack(it) }
                             ?: run { detailStack = detailStack + entry } },
-                        onAddToQueue = { app.playbackManager.addToQueue(it) },
+                        onAddToQueue = { routeAddToQueue(it) },
                         favoritesContent = { FavoritesScreen(
                             favorites = favorites,
                             currentTrackId = playbackState.currentTrack?.id,
                             isPlaying = playbackState.isPlaying,
                             isLoading = playbackState.isLoading,
-                            onTrackClick = { app.playbackManager.playTrack(it) },
-                            onAddToQueue = { app.playbackManager.addToQueue(it) },
+                            onTrackClick = { routePlayTrack(it) },
+                            onAddToQueue = { routeAddToQueue(it) },
                             onRemoveFavorite = { track -> scope.launch { app.database.trackDao().removeFavorite(track.id) } }
                         ) },
                         historyContent = { HistoryScreen(
@@ -563,10 +591,10 @@ private fun KasaneContent(app: KasaneApplication) {
                             isPlaying = playbackState.isPlaying,
                             isLoading = playbackState.isLoading,
                             favoriteIds = favoriteIds,
-                            onHistoryItemClick = { item -> app.playbackManager.playTrack(Track(
+                            onHistoryItemClick = { item -> routePlayTrack(Track(
                                 id = item.trackId, title = item.title, artist = item.artist, album = item.album,
                                 thumbnailUri = item.thumbnailUri)) },
-                            onAddToQueue = { item -> app.playbackManager.addToQueue(Track(
+                            onAddToQueue = { item -> routeAddToQueue(Track(
                                 id = item.trackId, title = item.title, artist = item.artist, album = item.album,
                                 thumbnailUri = item.thumbnailUri)) },
                             onToggleFavorite = { item -> scope.launch {
@@ -582,12 +610,26 @@ private fun KasaneContent(app: KasaneApplication) {
             }
           }
         }
-        val current = playbackState.currentTrack
+        val current = displayedState.currentTrack
         if (current != null) {
             PlayerSheet(
-                state = playbackState, sheet = playerSheet, isFavorite = favoriteIds.contains(current.id),
+                state = displayedState, sheet = playerSheet, isFavorite = favoriteIds.contains(current.id),
                 dockedBottom = with(androidx.compose.ui.platform.LocalDensity.current) { navBarHeightPx.toDp() },
-                actions = PlayerActions(
+                remoteName = remoteName.takeIf { remoteActive },
+                onOpenDevices = remote?.let { { showDevices = true } },
+                actions = if (remoteActive) PlayerActions(
+                    togglePlay = { remote!!.toggle() }, next = { remote!!.next() },
+                    previous = { remote!!.previous() }, seekTo = { remote!!.seekTo(it) },
+                    shuffle = { remote!!.toggleShuffle(displayedState.shuffleEnabled) },
+                    repeat = { remote!!.cycleRepeat(displayedState.repeatMode) },
+                    retry = { }, dismissError = { },
+                    toggleFavorite = { scope.launch {
+                        app.database.trackDao().insertTrack(current)
+                        if (favoriteIds.contains(current.id)) app.database.trackDao().removeFavorite(current.id)
+                        else app.database.trackDao().addFavorite(FavoriteEntity(current.id))
+                    } },
+                    openQueue = { showQueue = true })
+                else PlayerActions(
                     togglePlay = { app.playbackManager.togglePlayPause() }, next = { app.playbackManager.playNext() },
                     previous = { app.playbackManager.playPrevious() }, seekTo = { app.playbackManager.seekTo(it) },
                     shuffle = { app.playbackManager.toggleShuffle() }, repeat = { app.playbackManager.cycleRepeat() },
@@ -599,9 +641,22 @@ private fun KasaneContent(app: KasaneApplication) {
                     } },
                     openQueue = { showQueue = true }))
         }
-        if (showQueue) QueueSheet(playbackState, onPlayIndex = { app.playbackManager.playQueueIndex(it) },
-            onMove = { from, to -> app.playbackManager.moveQueueItem(from, to) },
-            onRemove = { app.playbackManager.removeQueueItem(it) }, onDismiss = { showQueue = false })
+        if (showQueue) QueueSheet(displayedState,
+            onPlayIndex = { if (remoteActive) remote!!.playQueueIndex(it) else app.playbackManager.playQueueIndex(it) },
+            onMove = { from, to -> if (remoteActive) remote!!.moveQueueItem(from, to) else app.playbackManager.moveQueueItem(from, to) },
+            onRemove = { if (remoteActive) remote!!.removeQueueItem(it) else app.playbackManager.removeQueueItem(it) },
+            onDismiss = { showQueue = false })
+        }
+        val devicesRemote = remote
+        if (showDevices && devicesRemote != null) {
+            cord.kasane.music.ui.components.DevicesSheet(devicesRemote,
+                localName = devicesRemote.manager.localDeviceName,
+                onDismiss = { showDevices = false })
+        }
+        remotePrompts.firstOrNull()?.let { prompt ->
+            cord.kasane.music.ui.components.PairingDialog(prompt) { ok ->
+                devicesRemote?.confirm(prompt.promptId, ok)
+            }
         }
         cord.kasane.music.ui.components.PlaylistPickerHost()
     }

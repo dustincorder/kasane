@@ -121,6 +121,8 @@ class ConnectManager(private val config: ConnectConfig) {
     private val dedup = ConcurrentHashMap<String, ArrayDeque<Triple<String, Boolean, FrameError?>>>()
     private val pairFailures = ArrayDeque<Long>()
 
+    val localDeviceName: String get() = identity.deviceName
+
     private val _devices = MutableStateFlow<List<ConnectDeviceView>>(emptyList())
     val devices: StateFlow<List<ConnectDeviceView>> = _devices.asStateFlow()
 
