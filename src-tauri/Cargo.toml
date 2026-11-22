@@ -17,6 +17,7 @@ vibe-core = { path = "../crates/vibe-core" }
 vibe-audio = { path = "../crates/vibe-audio" }
 vibe-providers = { path = "../crates/vibe-providers" }
 vibe-db = { path = "../crates/vibe-db" }
+kasane-connect = { path = "../crates/kasane-connect" }
 tauri = { version = "2.2", features = [] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

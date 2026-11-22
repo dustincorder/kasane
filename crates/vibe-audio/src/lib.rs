@@ -19,6 +19,7 @@ pub struct PlayerManager {
     transition: Mutex<()>,
     provider: Arc<dyn MusicProvider>,
     notice: Mutex<Option<String>>,
+    volume: Mutex<f32>,
 }
 
 impl PlayerManager {
@@ -34,6 +35,7 @@ impl PlayerManager {
             transition: Mutex::new(()),
             provider,
             notice: Mutex::new(None),
+            volume: Mutex::new(1.0),
         }
     }
 
@@ -80,26 +82,7 @@ impl PlayerManager {
                     VibeError::TrackNotFound(format!("Queue index {index} out of bounds"))
                 })?,
         };
-        let stream = match track.provider {
-            ProviderType::YouTubeMusic => self.provider.resolve_stream(&track).await?,
-            ProviderType::LocalLibrary => {
-                let path = track
-                    .uri
-                    .as_ref()
-                    .filter(|p| std::path::Path::new(p).is_absolute())
-                    .ok_or_else(|| VibeError::Playback("The local audio file is missing".into()))?;
-                StreamSource {
-                    url: path.clone(),
-                    mime_type: String::new(),
-                    bitrate_kbps: None,
-                    expires_at: None,
-                    notice: None,
-                }
-            }
-            ProviderType::Mock => {
-                return Err(VibeError::Playback("Demo tracks have no audio".into()))
-            }
-        };
+        let stream = self.resolve(&track).await?;
 
         let mut backend = self.backend.lock().await;
         backend.play_stream(&stream).await?;
@@ -221,7 +204,151 @@ impl PlayerManager {
     }
 
     pub async fn set_volume(&self, volume: f32) -> Result<()> {
-        self.backend.lock().await.set_volume(volume).await
+        self.backend.lock().await.set_volume(volume).await?;
+        *self.volume.lock().await = volume.clamp(0.0, 1.0);
+        Ok(())
+    }
+
+    /// The volume last applied through this manager.
+    pub async fn volume(&self) -> f32 {
+        *self.volume.lock().await
+    }
+
+    pub async fn pause(&self) -> Result<()> {
+        if self.backend.lock().await.get_state().await? == PlaybackState::Playing {
+            self.backend.lock().await.pause().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn play(&self) -> Result<()> {
+        if self.backend.lock().await.get_state().await? == PlaybackState::Paused {
+            self.backend.lock().await.resume().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn remove_at(&self, index: usize) -> Result<()> {
+        let mut q = self.queue.lock().await;
+        if index >= q.items.len() {
+            return Err(VibeError::TrackNotFound(format!(
+                "Queue index {index} out of bounds"
+            )));
+        }
+        q.items.remove(index);
+        q.current_index = match q.current_index {
+            Some(current) if index < current => Some(current - 1),
+            Some(current) if index == current => {
+                if q.items.is_empty() {
+                    None
+                } else {
+                    Some(current.min(q.items.len() - 1))
+                }
+            }
+            other => other,
+        };
+        Ok(())
+    }
+
+    pub async fn move_item(&self, from: usize, to: usize) -> Result<()> {
+        let mut q = self.queue.lock().await;
+        if from >= q.items.len() || to >= q.items.len() {
+            return Err(VibeError::TrackNotFound(
+                "Queue move out of bounds".into(),
+            ));
+        }
+        let item = q.items.remove(from);
+        q.items.insert(to, item);
+        q.current_index = q.current_index.map(|current| {
+            if current == from {
+                to
+            } else {
+                let mut c = current;
+                if from < c {
+                    c -= 1;
+                }
+                if to <= c {
+                    c += 1;
+                }
+                c
+            }
+        });
+        Ok(())
+    }
+
+    pub async fn set_repeat(&self, mode: RepeatMode) {
+        self.queue.lock().await.repeat_mode = mode;
+    }
+
+    /// Queue a track right after the current one without changing playback.
+    pub async fn insert_next(&self, track: Track) {
+        let mut q = self.queue.lock().await;
+        let at = q.current_index.map_or(q.items.len(), |i| (i + 1).min(q.items.len()));
+        q.items.insert(at, track);
+    }
+
+    /// Handoff target: resolve and start `queue[index]` at `position_secs`,
+    /// then replace the whole queue. The previous queue is only replaced once
+    /// the new item is actually playing.
+    pub async fn handoff_queue(
+        &self,
+        tracks: Vec<Track>,
+        index: usize,
+        position_secs: f64,
+        playing: bool,
+        shuffle: bool,
+        repeat_mode: RepeatMode,
+    ) -> Result<Track> {
+        let _transition = self.transition.lock().await;
+        let mut track = tracks
+            .get(index)
+            .cloned()
+            .ok_or_else(|| VibeError::TrackNotFound("Handoff index out of bounds".into()))?;
+        let stream = self.resolve(&track).await?;
+        let mut backend = self.backend.lock().await;
+        backend.play_stream(&stream).await?;
+        *self.notice.lock().await = stream.notice.clone();
+        if track.provider == ProviderType::LocalLibrary {
+            if let Ok(progress) = backend.get_progress().await {
+                track.duration_secs = progress.duration_secs.round() as u64;
+            }
+        }
+        if position_secs > 0.0 {
+            backend.seek(position_secs).await?;
+        }
+        if !playing {
+            backend.pause().await?;
+        }
+        drop(backend);
+        let mut q = self.queue.lock().await;
+        let mut items = tracks;
+        items[index] = track.clone();
+        q.items = items;
+        q.current_index = Some(index);
+        q.shuffle = shuffle;
+        q.repeat_mode = repeat_mode;
+        Ok(track)
+    }
+
+    async fn resolve(&self, track: &Track) -> Result<StreamSource> {
+        match track.provider {
+            ProviderType::YouTubeMusic => self.provider.resolve_stream(track).await,
+            ProviderType::LocalLibrary => {
+                let path = track
+                    .uri
+                    .as_ref()
+                    .filter(|p| std::path::Path::new(p).is_absolute())
+                    .ok_or_else(|| VibeError::Playback("The local audio file is missing".into()))?;
+                Ok(StreamSource {
+                    url: path.clone(),
+                    mime_type: String::new(),
+                    bitrate_kbps: None,
+                    expires_at: None,
+                    notice: None,
+                })
+            }
+            ProviderType::Mock => Err(VibeError::Playback("Demo tracks have no audio".into())),
+        }
     }
 }
 

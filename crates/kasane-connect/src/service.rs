@@ -60,7 +60,7 @@ impl From<rustls::Error> for ConnError {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DeviceView {
     pub id: Option<String>,
     pub name: String,
@@ -73,7 +73,7 @@ pub struct DeviceView {
     pub last_error: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PairingPrompt {
     pub prompt_id: String,
     /// true = a remote device asked to pair with us.
@@ -267,6 +267,11 @@ impl ConnectService {
 
     pub fn port(&self) -> u16 {
         self.inner.port
+    }
+
+    /// Lowercase hex SHA-256 fingerprint of our leaf certificate.
+    pub fn fingerprint(&self) -> String {
+        hex::encode(self.inner.identity.fingerprint())
     }
 
     pub fn local_device(&self) -> DeviceInfo {

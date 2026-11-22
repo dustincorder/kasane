@@ -8,12 +8,14 @@ use vibe_core::traits::MusicProvider;
 use vibe_db::Database;
 use vibe_providers::{WebPlaybackVerifier, YouTubeMusicProvider};
 
+mod connect;
 mod verifier;
 
 pub struct AppState {
     pub player: Arc<PlayerManager>,
     pub db: Arc<Database>,
     pub yt_provider: Arc<YouTubeMusicProvider>,
+    pub connect: kasane_connect::ConnectService,
 }
 
 mod commands {
@@ -231,10 +233,54 @@ pub fn run() {
                 Box::new(DesktopAudioBackend::new()?),
                 yt_provider.clone(),
             ));
+            let connect = {
+                let adapter = Arc::new(connect::DesktopPlayerAdapter::new(
+                    player.clone(),
+                    db.clone(),
+                ));
+                let data_dir = app
+                    .path()
+                    .app_data_dir()
+                    .map(|dir| dir.join("connect"))
+                    .unwrap_or_else(|_| std::env::temp_dir().join("kasane-connect"));
+                let host = std::env::var("HOSTNAME")
+                    .ok()
+                    .filter(|name| !name.is_empty())
+                    .or_else(|| {
+                        std::fs::read_to_string("/etc/hostname")
+                            .ok()
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty())
+                    })
+                    .unwrap_or_else(|| "Kasane PC".into());
+                match tauri::async_runtime::block_on(kasane_connect::ConnectService::start(
+                    &data_dir,
+                    &host,
+                    "linux",
+                    env!("CARGO_PKG_VERSION"),
+                    adapter.clone(),
+                    true,
+                )) {
+                    Ok(service) => service,
+                    Err(error) => {
+                        eprintln!("Kasane Connect could not start: {error}. Remote control is disabled for this session.");
+                        tauri::async_runtime::block_on(kasane_connect::ConnectService::start(
+                            &data_dir,
+                            &host,
+                            "linux",
+                            env!("CARGO_PKG_VERSION"),
+                            adapter,
+                            false,
+                        ))?
+                    }
+                }
+            };
+            connect::spawn_update_forwarder(app.handle().clone(), connect.clone());
             app.manage(AppState {
                 player,
                 db,
                 yt_provider,
+                connect,
             });
             Ok(())
         })
@@ -262,7 +308,17 @@ pub fn run() {
             commands::get_favorites,
             commands::toggle_favorite,
             commands::get_history,
-            verifier::verifier_reply
+            verifier::verifier_reply,
+            connect::commands::connect_local,
+            connect::commands::connect_devices,
+            connect::commands::connect_prompts,
+            connect::commands::connect_pair,
+            connect::commands::connect_confirm,
+            connect::commands::connect_command,
+            connect::commands::connect_handoff,
+            connect::commands::connect_remote_state,
+            connect::commands::connect_pull,
+            connect::commands::connect_unpair
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
