@@ -198,6 +198,8 @@ fun CatalogSearchScreen(catalog: OnlineCatalog, onOpen: (CatalogItem) -> Unit,
     }
 }
 
+internal fun Track.withCover(cover: String?): Track = if (thumbnailUri.isNullOrBlank() && !cover.isNullOrBlank()) copy(thumbnailUri = cover) else this
+
 @Composable
 private fun SearchHint(title: String, body: String) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -283,15 +285,25 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
     loadingMore: Boolean, onBack: () -> Unit, onRetry: () -> Unit, onOpen: (CatalogItem) -> Unit,
     onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
     onLoadMore: () -> Unit) {
+    // Album rows carry no artwork of their own, so they show (and queue with) the album cover instead of a placeholder note.
+    val albumCover = if (item.kind == CatalogKind.ALBUM) page?.artwork ?: item.artwork else null
+    val shownTracks = remember(page, albumCover) { page?.tracks.orEmpty().map { it.withCover(albumCover) } }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Back is also the system gesture (either edge), so the top button is a convenience, not the only way out.
+        val listState = rememberLazyListState()
+        // The header collapses into the app bar: once the hero has scrolled away its title takes the bar's place.
+        val heroGone by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
+        // Large playlists continue loading as the end approaches, so they are never silently cut short.
+        val nearEnd by remember { derivedStateOf { val info = listState.layoutInfo; info.totalItemsCount > 0 && (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 4 } }
+        LaunchedEffect(nearEnd, page?.continuation, loadingMore, loading) { if (nearEnd && page?.continuation != null && !loadingMore && !loading && error == null) onLoadMore() }
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            Text(item.kind.label.removeSuffix("s"), style = MaterialTheme.typography.titleMedium)
+            Text(if (heroGone) (page?.title?.ifBlank { item.title } ?: item.title) else item.kind.label.removeSuffix("s"),
+                style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        LazyColumn(state = rememberLazyListState(), modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
+        LazyColumn(state = listState, modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
             item(key = "hero") {
-                val tracks = page?.tracks.orEmpty()
+                val tracks = shownTracks
                 val title = page?.title?.ifBlank { item.title } ?: item.title
                 val subtitle = page?.subtitle?.ifBlank { item.subtitle } ?: item.subtitle
                 val offline = cord.kasane.music.ui.components.LocalOfflineActions.current
@@ -362,8 +374,8 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                     if (shelf.title.isNotBlank()) item { Text(shelf.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(20.dp)) }
                     // A playlist may legitimately contain the same video twice, so the position is part of the key.
                     itemsIndexed(shelf.items, key = { position, it -> "$index:$position:${it.kind}:${it.id}" }) { _, entry ->
-                        val track = entry.track() ?: return@itemsIndexed
-                        TrackRow(track, onClick = { onPlay(page.tracks.dropWhile { it.id != track.id }, false) },
+                        val track = entry.track()?.withCover(albumCover) ?: return@itemsIndexed
+                        TrackRow(track, onClick = { onPlay(shownTracks.dropWhile { it.id != track.id }, false) },
                             onAddToQueue = { onQueue(track) })
                     }
                 } else item { CatalogShelfRow(shelf, onOpen) }
