@@ -48,6 +48,7 @@ fun TrackRow(
     modifier: Modifier = Modifier,
     useCloudFavorite: Boolean = true,
     showLike: Boolean = true,
+    showMenuButton: Boolean = true,
     extraMenu: List<MenuEntry> = emptyList(),
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
@@ -91,7 +92,7 @@ fun TrackRow(
         if (showLike && (onToggleFavorite != null || LocalCloudLikes.current != null)) {
             TrackLikeButton(track, isFavorite, onToggleFavorite ?: {}, useCloud = useCloudFavorite)
         }
-        Box {
+        if (showMenuButton) Box {
             // A 20dp glyph inside the standard 48dp touch target: compact to look at, comfortable to hit.
             IconButton(onClick = { menuExpanded = true }) {
                 Icon(Icons.Default.MoreVert, "More options for ${track.title}", tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))

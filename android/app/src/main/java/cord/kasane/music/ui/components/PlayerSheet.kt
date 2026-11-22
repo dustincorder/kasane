@@ -260,7 +260,6 @@ private fun FullContent(
             IconButton(onClick = onCollapse, modifier = Modifier.align(Alignment.CenterStart)) { Icon(Icons.Default.KeyboardArrowDown, "Minimize player") }
             Text("Now playing", Modifier.align(Alignment.Center), style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
             Row(Modifier.align(Alignment.CenterEnd)) {
-                IconButton(onClick = actions.openQueue) { Icon(Icons.AutoMirrored.Outlined.QueueMusic, "Open queue") }
                 Box {
                     IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "More options") }
                     TrackContextMenu(track, menuOpen, { menuOpen = false }, onPlay = { if (!state.isPlaying) actions.togglePlay() },
@@ -334,7 +333,8 @@ private fun FullContent(
             }
         }
         Spacer(Modifier.height(gap / 2))
-        TextButton(onClick = actions.openQueue, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+        // Queue access sits at the bottom and spans the width, so either thumb reaches it without stretching to the top.
+        FilledTonalButton(onClick = actions.openQueue, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = MaterialTheme.shapes.medium) {
             Icon(Icons.AutoMirrored.Filled.QueueMusic, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
             Text(if (state.queue.size > 1) "Up next · ${state.queue.size} tracks" else "Up next")
         }
@@ -353,7 +353,9 @@ fun PlayerSheetCollapsedPreview() {
     }
 }
 
-@Preview(showBackground = true, widthDp = 412, heightDp = 892)
+@Preview(name = "360", showBackground = true, widthDp = 360, heightDp = 780)
+@Preview(name = "412", showBackground = true, widthDp = 412, heightDp = 892)
+@Preview(name = "700", showBackground = true, widthDp = 700, heightDp = 900)
 @Composable
 fun PlayerSheetExpandedPreview() {
     KasaneTheme(dynamicColor = false) {

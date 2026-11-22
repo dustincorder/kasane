@@ -278,40 +278,73 @@ fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () ->
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean, error: String?,
     loadingMore: Boolean, onBack: () -> Unit, onRetry: () -> Unit, onOpen: (CatalogItem) -> Unit,
     onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
     onLoadMore: () -> Unit) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // Back is also the system gesture (either edge), so the top button is a convenience, not the only way out.
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             Text(item.kind.label.removeSuffix("s"), style = MaterialTheme.typography.titleMedium)
         }
         LazyColumn(state = rememberLazyListState(), modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
-            item {
-                Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TrackArtwork(page?.artwork ?: item.artwork, Modifier.widthIn(max = 220.dp).fillMaxWidth().aspectRatio(1f),
-                        shape = MaterialTheme.shapes.medium)
-                    Text(page?.title?.ifBlank { item.title } ?: item.title, style = MaterialTheme.typography.headlineSmall)
-                    Text(page?.subtitle?.ifBlank { item.subtitle } ?: item.subtitle, style = MaterialTheme.typography.bodyMedium)
-                    if (!page?.description.isNullOrBlank()) Text(page!!.description, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                    val tracks = page?.tracks.orEmpty()
-                    if (tracks.isNotEmpty()) {
-                        val duration = tracks.sumOf { it.durationSeconds }
-                        Text("${tracks.size} loaded tracks" + if (duration > 0) " · ${formatDuration(duration)}" else "", style = MaterialTheme.typography.labelMedium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Button(onClick = { onPlay(tracks, false) }, shape = MaterialTheme.shapes.small) {
-                                Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text("Play")
-                            }
-                            FilledTonalButton(onClick = { onPlay(tracks, true) }, shape = MaterialTheme.shapes.small) {
-                                Icon(Icons.Default.Shuffle, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text("Shuffle")
-                            }
-                            IconButton(onClick = { tracks.forEach(onQueue) }) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "Add loaded tracks to queue") }
-                            val offline = cord.kasane.music.ui.components.LocalOfflineActions.current
-                            if (offline != null) FilledTonalIconButton(onClick = { offline.save(tracks) }) {
-                                Icon(Icons.Default.Download, "Save loaded tracks offline")
-                            }
+            item(key = "hero") {
+                val tracks = page?.tracks.orEmpty()
+                val title = page?.title?.ifBlank { item.title } ?: item.title
+                val subtitle = page?.subtitle?.ifBlank { item.subtitle } ?: item.subtitle
+                val offline = cord.kasane.music.ui.components.LocalOfflineActions.current
+                var more by remember { mutableStateOf(false) }
+                val artwork: @Composable (Modifier) -> Unit = { m ->
+                    TrackArtwork(page?.artwork ?: item.artwork, m.aspectRatio(1f), minPixels = 800,
+                        shape = if (item.kind == CatalogKind.ARTIST) androidx.compose.foundation.shape.CircleShape else MaterialTheme.shapes.medium)
+                }
+                val info: @Composable (Boolean) -> Unit = { start ->
+                    val align = if (start) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center
+                    Column(horizontalAlignment = if (start) Alignment.Start else Alignment.CenterHorizontally) {
+                        Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = align, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodyMediumMuted, textAlign = align, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (tracks.isNotEmpty()) {
+                            val duration = tracks.sumOf { it.durationSeconds }
+                            Text(plural(tracks.size, "track") + if (duration > 0) " · ${formatDuration(duration)}" else "", style = MaterialTheme.typography.labelMediumMuted, textAlign = align)
                         }
+                    }
+                }
+                // Playback controls span the full width: equally reachable by either thumb, and the primary action is the widest.
+                val actions: @Composable () -> Unit = {
+                    if (tracks.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = { onPlay(tracks, false) }, modifier = Modifier.weight(1.15f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.medium, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                            Icon(Icons.Default.PlayArrow, null, Modifier.size(22.dp)); Spacer(Modifier.width(8.dp)); Text("Play", style = MaterialTheme.typography.labelLarge)
+                        }
+                        FilledTonalButton(onClick = { onPlay(tracks, true) }, modifier = Modifier.weight(1f).heightIn(min = 52.dp), shape = MaterialTheme.shapes.medium, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                            Icon(Icons.Default.Shuffle, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text("Shuffle", style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
+                        }
+                        FilledTonalIconButton(onClick = { more = true }, modifier = Modifier.size(52.dp), shape = MaterialTheme.shapes.medium) {
+                            Icon(Icons.Default.MoreVert, "More actions for this ${item.kind.label.removeSuffix("s").lowercase()}")
+                        }
+                    }
+                }
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val widthDp = maxWidth
+                    if (widthDp >= 600.dp) Row(Modifier.padding(horizontal = 24.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                        artwork(Modifier.width(240.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) { info(true); Box(Modifier.widthIn(max = 480.dp)) { actions() } }
+                    } else Column(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        artwork(Modifier.fillMaxWidth(if (widthDp < 380.dp) 0.62f else 0.68f).widthIn(max = 300.dp))
+                        info(false)
+                        actions()
+                        if (!page?.description.isNullOrBlank()) Text(page!!.description, style = MaterialTheme.typography.bodySmallMuted, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                if (more) ModalBottomSheet(onDismissRequest = { more = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                    Column(Modifier.navigationBarsPadding().padding(bottom = 8.dp)) {
+                        ListItem(headlineContent = { Text("Add to queue") }, leadingContent = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                            modifier = Modifier.heightIn(min = 56.dp).clickable { more = false; tracks.forEach(onQueue) })
+                        if (offline != null) ListItem(headlineContent = { Text("Save loaded tracks offline") }, leadingContent = { Icon(Icons.Default.Download, null) },
+                            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                            modifier = Modifier.heightIn(min = 56.dp).clickable { more = false; offline.save(tracks) })
                     }
                 }
             }
@@ -342,13 +375,15 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
     }
 }
 
-@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Preview(name = "Artist 360", showBackground = true, widthDp = 360, heightDp = 780)
+@Preview(name = "Artist 412", showBackground = true, widthDp = 412, heightDp = 892)
+@Preview(name = "Artist 700", showBackground = true, widthDp = 700, heightDp = 900)
 @Composable
 fun CatalogDetailPreview() {
     KasaneTheme(dynamicColor = false) {
-        val item = CatalogItem("preview-album", CatalogKind.ALBUM, "Evening sessions", "Kasane Preview")
-        val page = CatalogPage(item.title, item.subtitle, null, listOf(CatalogShelf("Tracks", listOf(
-            CatalogItem("preview-track", CatalogKind.SONG, "A very long song title across the evening", "Preview artist", durationSeconds = 180.0)))))
+        val item = CatalogItem("UCpreview", CatalogKind.ARTIST, "KIRA", "Artist")
+        val page = CatalogPage(item.title, "1.2M subscribers", null, listOf(CatalogShelf("Songs", (1..4).map {
+            CatalogItem("song$it", CatalogKind.SONG, "Popular song number $it", "KIRA", durationSeconds = 180.0 + it) })))
         Surface(color = MaterialTheme.colorScheme.background) { CatalogDetailContent(item, page, false, null, false, {}, {}, {}, { _, _ -> }, {}, {}) }
     }
 }

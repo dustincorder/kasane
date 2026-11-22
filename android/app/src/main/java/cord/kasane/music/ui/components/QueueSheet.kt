@@ -81,7 +81,7 @@ fun QueueContent(state: PlaybackUiState, onPlayIndex: (Int) -> Unit, onMove: (In
             item(key = "h-now") { SectionLabel("Now playing") }
             item(key = "current") {
                 val current = state.queue.getOrNull(sections.currentIndex)
-                if (current != null) TrackRow(current, isPlaying = state.isPlaying, isLoading = state.isLoading, onClick = { onPlayIndex(sections.currentIndex) },
+                if (current != null) TrackRow(current, isPlaying = state.isPlaying, isLoading = state.isLoading, onClick = { onPlayIndex(sections.currentIndex) }, showLike = false, showMenuButton = false,
                     modifier = Modifier.background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)))
             }
             item(key = "h-up") { SectionLabel(if (upNext.isEmpty()) "Up next · nothing yet" else "Up next") }
@@ -101,11 +101,11 @@ fun QueueContent(state: PlaybackUiState, onPlayIndex: (Int) -> Unit, onMove: (In
                             Text("Remove", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onErrorContainer)
                         }
                     }) {
-                        TrackRow(track, onClick = { onPlayIndex(queueIndex) }, extraMenu = moveEntries,
+                        TrackRow(track, onClick = { onPlayIndex(queueIndex) }, extraMenu = moveEntries, showLike = false, showMenuButton = false,
                             modifier = Modifier.background(if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface),
                             trailing = if (reorderable) ({
                                 Icon(Icons.Default.DragHandle, "Reorder ${track.title}", tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(40.dp).padding(8.dp).draggableHandle(
+                                    modifier = Modifier.size(48.dp).padding(12.dp).draggableHandle(
                                         onDragStarted = { dragStartIndex = queueIndex; haptics.performHapticFeedback(HapticFeedbackType.LongPress) },
                                         onDragStopped = {
                                             val start = dragStartIndex; dragStartIndex = null
@@ -125,7 +125,7 @@ fun QueueContent(state: PlaybackUiState, onPlayIndex: (Int) -> Unit, onMove: (In
                     }
                 }
                 if (showPlayed) itemsIndexed(sections.played, key = { _, i -> key("p:", i) }) { _, queueIndex ->
-                    TrackRow(state.queue[queueIndex], onClick = { onPlayIndex(queueIndex) },
+                    TrackRow(state.queue[queueIndex], onClick = { onPlayIndex(queueIndex) }, showLike = false,
                         extraMenu = listOf(MenuEntry("Remove from queue") { onRemove(queueIndex) }))
                 }
             }
@@ -138,7 +138,9 @@ private fun SectionLabel(text: String) {
     Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
 }
 
-@Preview(showBackground = true, widthDp = 390, heightDp = 760)
+@Preview(name = "360", showBackground = true, widthDp = 360, heightDp = 780)
+@Preview(name = "412", showBackground = true, widthDp = 412, heightDp = 892)
+@Preview(name = "700", showBackground = true, widthDp = 700, heightDp = 900)
 @Composable
 fun QueuePreview() {
     KasaneTheme(dynamicColor = false) {
