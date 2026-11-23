@@ -276,6 +276,12 @@ class ConnectLoopbackTest {
             val deviceId = client.devices.value.first { it.connection == "paired" }.id!!
             client.sendCommand(deviceId, "pause")
             awaitTrue { adapter.executed.contains("pause") }
+            // The controller must keep receiving state after its initial frame.
+            awaitTrue { client.remoteStates.value[deviceId]?.playback == "paused" }
+            client.sendCommand(deviceId, "play")
+            awaitTrue { client.remoteStates.value[deviceId]?.playback == "playing" }
+            // Incremental frames omit an unchanged queue; the controller keeps the last one.
+            assertEquals(listOf("t1", "t2"), client.remoteStates.value[deviceId]?.queue?.map { it.id })
         } finally {
             client.stop()
         }

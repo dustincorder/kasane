@@ -841,9 +841,20 @@ async fn client_dispatch(inner: Arc<Inner>, conn: Arc<ClientHandle>, mut rx: mps
                         let _ = tx.send((ok, error));
                     }
                 }
-                Frame::State(state) => {
+                Frame::State(mut state) => {
                     let last = conn.last_rev.swap(state.rev, Ordering::SeqCst);
                     if state.rev > last {
+                        // The queue is only sent when it changed (protocol §State): keep the
+                        // last one, and ask for a full frame when the revision moved on.
+                        if state.queue.is_none() {
+                            let previous = conn.state_tx.borrow().as_ref()
+                                .filter(|p| p.queue_rev == state.queue_rev)
+                                .and_then(|p| p.queue.clone());
+                            state.queue = previous;
+                            if state.queue.is_none() {
+                                let _ = conn.send(&Frame::Sync);
+                            }
+                        }
                         let _ = conn.state_tx.send_replace(Some(*state));
                     }
                 }

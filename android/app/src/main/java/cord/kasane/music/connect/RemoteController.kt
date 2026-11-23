@@ -229,14 +229,14 @@ class RemoteController(
 
     fun moveQueueItem(from: Int, to: Int) {
         val rev = _target.value?.let { remoteFrame(it)?.queueRev } ?: 0
-        send("moveQueueItem", buildJsonObject {
+        send("moveQueue", buildJsonObject {
             put("from", from); put("to", to); put("queueRev", rev)
         })
     }
 
     fun removeQueueItem(index: Int) {
         val rev = _target.value?.let { remoteFrame(it)?.queueRev } ?: 0
-        send("removeQueueItem", buildJsonObject {
+        send("removeQueueIndex", buildJsonObject {
             put("index", index); put("queueRev", rev)
         })
     }

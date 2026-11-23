@@ -119,6 +119,8 @@ class ConnectManager(private val config: ConnectConfig) {
 
     private val entries = LinkedHashMap<String, DeviceEntry>()
     private val sessions = ConcurrentHashMap<String, Session>()
+    /** Sessions other devices opened to us; subscribed ones receive our state updates. */
+    private val inbound: MutableSet<Session> = ConcurrentHashMap.newKeySet()
     private val wanted = mutableSetOf<String>()
     private val dedup = ConcurrentHashMap<String, ArrayDeque<Triple<String, Boolean, FrameError?>>>()
     private val pairFailures = ArrayDeque<Long>()
@@ -206,6 +208,8 @@ class ConnectManager(private val config: ConnectConfig) {
         runCatching { serverSocket?.close() }
         sessions.values.forEach { it.link.close() }
         sessions.clear()
+        inbound.forEach { it.link.close() }
+        inbound.clear()
     }
 
     // ---- inbound sessions -------------------------------------------------
@@ -242,6 +246,7 @@ class ConnectManager(private val config: ConnectConfig) {
             onError = { logWarn("inbound session error", it) },
         )
         session = Session(link, clientMode = false, socket)
+        inbound.add(session)
         try {
             socket.startHandshake()
         } catch (e: Exception) {
@@ -274,6 +279,7 @@ class ConnectManager(private val config: ConnectConfig) {
     }
 
     private fun onSessionClosed(session: Session) {
+        inbound.remove(session)
         if (!session.closed) {
             session.closed = true
             session.dead.complete(Unit)
@@ -343,9 +349,14 @@ class ConnectManager(private val config: ConnectConfig) {
                 if (!session.clientMode) return
                 if (frame.rev <= session.lastRev) return
                 session.lastRev = frame.rev
-                session.remoteState.value = frame
+                // The queue is only sent when it changed (protocol §State); keep the last one.
+                val previous = session.remoteState.value
+                val merged = if (frame.queue == null && previous?.queue != null && previous.queueRev == frame.queueRev)
+                    frame.copy(queue = previous.queue) else frame
+                if (merged.queue == null) session.link.send(Frame.Sync)
+                session.remoteState.value = merged
                 session.peer?.let { peer ->
-                    _remoteStates.value = _remoteStates.value + (peer.id to frame)
+                    _remoteStates.value = _remoteStates.value + (peer.id to merged)
                 }
             }
             is Frame.Command -> {
@@ -609,8 +620,8 @@ class ConnectManager(private val config: ConnectConfig) {
             queueRevCounter++
         }
         revCounter++
-        sessions.values.forEach { session ->
-            if (session.authed && session.subscribed) pushState(session, forceQueue = false)
+        inbound.forEach { session ->
+            if (session.authed && session.subscribed && !session.closed) pushState(session, forceQueue = false)
         }
     }
 
