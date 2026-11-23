@@ -33,6 +33,8 @@ pub enum ConnError {
     Unauthorized,
     Unpaired,
     NotFound(String),
+    /// The peer trusts us but we no longer trust it (we forgot it).
+    StaleTrust(String),
 }
 
 impl std::fmt::Display for ConnError {
@@ -41,6 +43,10 @@ impl std::fmt::Display for ConnError {
             ConnError::Io(e) => write!(f, "{e}"),
             ConnError::Tls(e) => write!(f, "TLS failed: {e}"),
             ConnError::Protocol(e) => write!(f, "{e}"),
+            ConnError::StaleTrust(name) => write!(
+                f,
+                "{name} still trusts this device from an earlier pairing. Remove this device on {name} and pair again."
+            ),
             ConnError::Unauthorized => write!(f, "peer rejected the command"),
             ConnError::Unpaired => write!(f, "device is not paired"),
             ConnError::NotFound(t) => write!(f, "no address known for {t}"),
@@ -617,7 +623,22 @@ impl ConnectService {
         Ok(())
     }
 
+    /// Dial a peer. When the peer still trusts us from a pairing we have since
+    /// forgotten, ask it to forget us too and dial again, so the user gets a
+    /// normal pairing (with a code on both screens) instead of a dead end.
     async fn dial(&self, addr: &str, want_id: Option<&str>) -> Result<Arc<ClientHandle>, ConnError> {
+        match self.dial_once(addr, want_id, true).await {
+            Err(ConnError::StaleTrust(_)) => self.dial_once(addr, want_id, false).await,
+            other => other,
+        }
+    }
+
+    async fn dial_once(
+        &self,
+        addr: &str,
+        want_id: Option<&str>,
+        reset_stale: bool,
+    ) -> Result<Arc<ClientHandle>, ConnError> {
         let addr = normalize_addr(addr);
         let tcp = TcpStream::connect(&addr).await?;
         let host = addr.split(':').next().unwrap_or("localhost");
@@ -653,10 +674,13 @@ impl ConnectService {
             .get(&peer_hello.id)
             .is_some_and(|t| t.fingerprint == hex::encode(peer_fp));
         if authed && !pinned {
-            let name = &peer_hello.name;
-            return Err(ConnError::Protocol(format!(
-                "{name} trusts this device, but this device has no matching record of it. Remove this device on {name} and pair again."
-            )));
+            if reset_stale {
+                // The peer authenticated our certificate, so this request can
+                // only come from us; it only makes the peer forget us.
+                let _ = link.send(Frame::Unpair);
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+            return Err(ConnError::StaleTrust(peer_hello.name.clone()));
         }
         let (ready_tx, _) = watch::channel(Some(authed));
         let (pair_tx, _) = tokio::sync::broadcast::channel::<Frame>(64);
