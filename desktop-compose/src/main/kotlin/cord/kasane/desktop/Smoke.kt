@@ -47,7 +47,7 @@ fun runPlay(args: List<String>): Int = DesktopApp(audioOutput = "null", root = k
         repeat(seconds / 5) {
             delay(5_000)
             val s = app.player.state.value
-            println("t=${(it + 1) * 5}s ${s.current?.title} idx=${s.index} pos=${"%.1f".format(s.positionSec)} playing=${s.isPlaying} err=${s.error}")
+            println("t=${(it + 1) * 5}s ${s.current?.title} idx=${s.index} pos=${"%.1f".format(s.positionSec)} playing=${s.isPlaying} source=${app.player.lastSource} err=${s.error} note=${app.player.lastSourceNote}")
         }
     }
     0

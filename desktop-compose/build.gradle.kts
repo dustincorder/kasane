@@ -9,6 +9,9 @@ plugins {
 
 kotlin { jvmToolchain(17) }
 
+// The same verification bundle Android ships (built by `npm run build:verifier` at the repo root).
+sourceSets.main { resources.srcDir(rootProject.file("../verifier/dist")) }
+
 dependencies {
     implementation(project(":shared"))
     implementation(project(":ui"))
@@ -19,6 +22,8 @@ dependencies {
     implementation("org.json:json:20240303")
     implementation("com.materialkolor:material-kolor:2.1.1")
     implementation("org.jmdns:jmdns:3.5.9")
+    // System WebKitGTK for playback verification, called directly (no bundled browser).
+    implementation("net.java.dev.jna:jna:5.14.0")
     testImplementation(kotlin("test"))
 }
 

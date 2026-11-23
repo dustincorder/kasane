@@ -5,6 +5,7 @@ import cord.kasane.desktop.ui.runUi
 import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
+    if (args.firstOrNull() == "--verifier") exitProcess(cord.kasane.desktop.verify.runVerifierHelper())
     if (args.firstOrNull() == "--connect-smoke") exitProcess(runConnectSmoke())
     if (args.firstOrNull() == "--render") exitProcess(runRender(java.io.File(args.getOrElse(1) { "/tmp/kasane-render" }), args.getOrNull(2)?.toDoubleOrNull() ?: 1.0))
     if (args.firstOrNull() == "--live") exitProcess(runLive(args.drop(1)))

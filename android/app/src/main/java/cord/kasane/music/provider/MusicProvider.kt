@@ -41,7 +41,7 @@ class YouTubeMusicProvider(
             accountSession()?.let { account -> catalog.request("player", JSONObject().put("videoId", videoId), account,
                 clientVersion = "1.20260707.12.00") }
         },
-        verified = verifiedResolver?.let { resolver -> resolver::resolve })
+        verified = verifiedResolver?.let { VerifiedAdapter(it)::resolve })
     val playerResolver = GuestPlayerResolver(client, diagnostic = playerDiagnostic)
 
     override suspend fun resolveStreamUrl(trackId: String): String? = playerResolver.resolve(trackId).url
@@ -66,4 +66,15 @@ internal fun signedInHeaders(account: cord.kasane.music.auth.AccountSession): Ma
         account.visitorData?.let { put("X-Goog-Visitor-Id", it) }
         account.channelId?.let { put("X-Goog-PageId", it) }
     }
+}
+
+/** The shared verified resolver's result as Android's stream type. */
+internal fun cord.kasane.music.provider.verification.VerifiedResult.toPlaybackStream(): PlaybackStream = when (this) {
+    is cord.kasane.music.provider.verification.VerifiedResult.Verified -> ProgressiveStream(audio, clientProfile)
+    is cord.kasane.music.provider.verification.VerifiedResult.Unavailable -> UnavailableStream(reason, code)
+}
+
+/** Android's PlaybackStream view of the shared verified resolver. */
+internal class VerifiedAdapter(private val resolver: cord.kasane.music.provider.verification.VerifiedPlayerResolver) {
+    suspend fun resolve(videoId: String): PlaybackStream = resolver.resolve(videoId).toPlaybackStream()
 }

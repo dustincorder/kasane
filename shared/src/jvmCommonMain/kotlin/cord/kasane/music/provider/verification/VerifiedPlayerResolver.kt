@@ -1,9 +1,6 @@
 package cord.kasane.music.provider.verification
 
-import cord.kasane.music.provider.PlaybackStream
-import cord.kasane.music.provider.ProgressiveStream
 import cord.kasane.music.provider.ResolvedAudioStream
-import cord.kasane.music.provider.UnavailableStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -23,6 +20,14 @@ interface VerificationRuntime {
 
     /** User-Agent of the engine that answers the BotGuard challenge; sent with its Create/GenerateIT requests. */
     val userAgent: String
+}
+
+/** Outcome of a verified resolve; platforms map it onto their own stream types. */
+sealed interface VerifiedResult {
+    class Verified(val audio: ResolvedAudioStream, val clientProfile: String) : VerifiedResult {
+        override fun toString() = "Verified(client=$clientProfile, url=[redacted])"
+    }
+    class Unavailable(val reason: String, val code: String) : VerifiedResult
 }
 
 class VerificationException(message: String) : java.io.IOException("YouTube playback verification failed: $message")
@@ -48,7 +53,7 @@ class VerifiedPlayerResolver(
     private var signatureTimestamp = 0L
     private var playerLoadedAt = 0L
 
-    suspend fun resolve(videoId: String): PlaybackStream = withContext(Dispatchers.IO) {
+    suspend fun resolve(videoId: String): VerifiedResult = withContext(Dispatchers.IO) {
         try {
             lock.withLock {
                 try {
@@ -64,15 +69,15 @@ class VerifiedPlayerResolver(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: UnplayableException) {
-            UnavailableStream(e.message.orEmpty(), e.status)
+            VerifiedResult.Unavailable(e.message.orEmpty(), e.status)
         } catch (e: java.io.IOException) {
-            UnavailableStream(e.message ?: "YouTube playback verification failed.", "VERIFICATION_FAILED")
+            VerifiedResult.Unavailable(e.message ?: "YouTube playback verification failed.", "VERIFICATION_FAILED")
         } catch (e: org.json.JSONException) {
-            UnavailableStream("YouTube playback verification failed: invalid response", "VERIFICATION_FAILED")
+            VerifiedResult.Unavailable("YouTube playback verification failed: invalid response", "VERIFICATION_FAILED")
         }
     }
 
-    private suspend fun resolveLocked(videoId: String, account: Map<String, String>?): PlaybackStream {
+    private suspend fun resolveLocked(videoId: String, account: Map<String, String>?): VerifiedResult {
         if (!protocolChecked) {
             if ((runtime.call("protocol", JSONArray()) as? Number)?.toInt() != PROTOCOL) throw VerificationException("verification runtime version mismatch")
             protocolChecked = true
@@ -96,7 +101,7 @@ class VerifiedPlayerResolver(
             ?: throw VerificationException("BotGuard returned no proof")
         val url = applyVerification(format, prepared, token)
         val expires = url.queryParameter("expire")?.toLongOrNull()?.times(1000) ?: (now() + 5 * 60 * 60 * 1000)
-        return ProgressiveStream(ResolvedAudioStream(url.toString(), AUDIO_ITAG, format.mimeType, expires, format.contentLength), PROFILE)
+        return VerifiedResult.Verified(ResolvedAudioStream(url.toString(), AUDIO_ITAG, format.mimeType, expires, format.contentLength), PROFILE)
     }
 
     private suspend fun ensurePlayer(): Long {
@@ -158,7 +163,7 @@ class VerifiedPlayerResolver(
 
     class UnplayableException(val status: String, reason: String) : Exception("Unplayable ($status): $reason")
 
-    internal class AudioFormat(val url: okhttp3.HttpUrl, val signature: String?, val signatureParam: String, val mimeType: String, val contentLength: Long)
+    class AudioFormat(val url: okhttp3.HttpUrl, val signature: String?, val signatureParam: String, val mimeType: String, val contentLength: Long)
 
     companion object {
         const val PROFILE = "WEB_REMIX_VERIFIED"
@@ -171,15 +176,15 @@ class VerifiedPlayerResolver(
         private const val INTEGRITY_MARGIN_MS = 10L * 60 * 1000
         private const val MAX_PLAYER_JS_BYTES = 8L * 1024 * 1024
 
-        internal fun playerId(iframeApi: String): String? {
+        fun playerId(iframeApi: String): String? {
             val match = Regex("""player\\?/([0-9a-fA-F]{8})\\?/""").find(iframeApi) ?: return null
             return match.groupValues[1]
         }
 
-        internal fun signatureTimestamp(source: String): Long? =
+        fun signatureTimestamp(source: String): Long? =
             Regex("""signatureTimestamp["']?\s*[:=]\s*(\d+)""").find(source)?.groupValues?.get(1)?.toLongOrNull()
 
-        internal fun selectAudioFormat(root: JSONObject, videoId: String): AudioFormat {
+        fun selectAudioFormat(root: JSONObject, videoId: String): AudioFormat {
             val returned = root.optJSONObject("videoDetails")?.optString("videoId").orEmpty()
             if (returned.isNotEmpty() && returned != videoId) throw VerificationException("player returned a different video")
             val status = root.optJSONObject("playabilityStatus")?.optString("status").orEmpty()

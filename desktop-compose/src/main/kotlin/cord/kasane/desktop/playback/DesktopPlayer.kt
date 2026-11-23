@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.IOException
+import cord.kasane.music.provider.verification.VerifiedResult
 import java.util.UUID
 
 enum class RepeatMode { OFF, ALL, ONE }
@@ -49,6 +50,7 @@ class DesktopPlayer(
     private val resolver: GuestPlayerResolver,
     private val proxy: StreamProxy,
     private val hls: cord.kasane.music.provider.IosHlsResolver,
+    private val verifiedResolver: cord.kasane.music.provider.verification.VerifiedPlayerResolver? = null,
     private val catalog: SharedOnlineCatalog,
     private val library: LocalLibrary,
 ) {
@@ -63,6 +65,12 @@ class DesktopPlayer(
     private var loadJob: Job? = null
     private var unshuffled: List<Track>? = null
     private var refreshedFor: String? = null
+    /** Which path served the current track (verified, ios-hls, guest); for diagnostics. */
+    @Volatile var lastSource: String = ""
+        private set
+    /** Why the verified path was skipped for the current track, if it was (no URLs or credentials in it). */
+    @Volatile var lastSourceNote: String = ""
+        private set
 
     init {
         scope.launch {
@@ -147,12 +155,27 @@ class DesktopPlayer(
         _state.update { it.copy(isLoading = true, error = null, positionSec = startSec, durationSec = track.durationSeconds) }
         loadJob = scope.launch {
             try {
-                // iOS HLS gives full-length audio when YouTube offers it; otherwise the guest direct stream,
-                // which YouTube may cut after its first part (detected in onEnded, never skipped silently).
+                // 1. Verified WEB_REMIX (BotGuard in system WebKitGTK, the same verifier as Android): full length.
+                // 2. iOS HLS when YouTube offers it. 3. Guest direct stream, which YouTube may cut after its
+                // first part (detected in onEnded, never skipped silently).
+                val verified = verifiedResolver?.let { v -> runCatching { v.resolve(track.id) }
+                    .onFailure { lastSourceNote = "verification error: ${it.message}" }.getOrNull() }
+                if (verified is VerifiedResult.Unavailable) lastSourceNote = "verification unavailable: ${verified.code} ${verified.reason}"
+                if (_state.value.current?.id != track.id) return@launch
+                if (verified is VerifiedResult.Verified) {
+                    lastSource = "verified"
+                    engine.load(proxy.register(track.id, verified.audio) {
+                        (verifiedResolver?.resolve(track.id) as? VerifiedResult.Verified)?.audio ?: throw IOException("verification expired")
+                    }, null, startSec, play)
+                    library.recordPlayed(track)
+                    maybeExtendRadio()
+                    return@launch
+                }
                 val manifest = runCatching { hls.resolve(track.id) }.getOrNull()
                 if (_state.value.current?.id != track.id) return@launch
-                if (manifest != null) engine.load(manifest.url, manifest.userAgent, startSec, play)
+                if (manifest != null) { lastSource = "ios-hls"; engine.load(manifest.url, manifest.userAgent, startSec, play) }
                 else {
+                    lastSource = "guest"
                     val stream = resolver.resolve(track.id, forceRefresh = forceRefresh)
                     if (_state.value.current?.id != track.id) return@launch
                     engine.load(proxy.register(track.id, stream), null, startSec, play)

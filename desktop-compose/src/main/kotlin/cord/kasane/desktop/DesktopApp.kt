@@ -40,7 +40,10 @@ class DesktopApp(
         ProcessBuilder("mpv", "--version").start().inputStream.bufferedReader().readLine()?.split(' ')?.getOrNull(1)
     }.getOrNull() ?: "unknown version"
     val proxy = StreamProxy(http, resolver)
-    val player = DesktopPlayer(scope, engine, resolver, proxy, cord.kasane.music.provider.IosHlsResolver(http), catalog, library)
+    /** System WebKitGTK in a helper process, started on the first verified track and stopped when idle. */
+    val verifier = cord.kasane.desktop.verify.VerifierProcess(scope)
+    val player = DesktopPlayer(scope, engine, resolver, proxy, cord.kasane.music.provider.IosHlsResolver(http),
+        cord.kasane.music.provider.verification.VerifiedPlayerResolver(http, verifier), catalog, library)
     /** Same Connect core as Android; null when it could not start (reported in Settings). */
     val connect: cord.kasane.desktop.connect.DesktopConnect?
     val connectError: String?
@@ -59,6 +62,7 @@ class DesktopApp(
 
     override fun close() {
         connect?.stop()
+        verifier.close()
         engine.close()
         proxy.close()
         scope.cancel()

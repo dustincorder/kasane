@@ -27,7 +27,8 @@ import kotlin.concurrent.thread
  * this process.
  */
 class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPlayerResolver) : AutoCloseable {
-    private class Entry(val videoId: String, @Volatile var stream: ResolvedAudioStream, @Volatile var total: Long)
+    private class Entry(val videoId: String, @Volatile var stream: ResolvedAudioStream, @Volatile var total: Long,
+        val refresh: (suspend () -> ResolvedAudioStream)?)
 
     private val server = ServerSocket(0, 16, InetAddress.getLoopbackAddress())
     private val entries = ConcurrentHashMap<String, Entry>()
@@ -47,10 +48,10 @@ class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPla
     }
 
     /** Register [stream] and return the loopback URL mpv should open. */
-    fun register(videoId: String, stream: ResolvedAudioStream): String {
+    fun register(videoId: String, stream: ResolvedAudioStream, refresh: (suspend () -> ResolvedAudioStream)? = null): String {
         val token = ByteArray(16).also(random::nextBytes).joinToString("") { "%02x".format(it) }
         if (entries.size > 8) entries.keys.take(entries.size - 8).forEach(entries::remove)
-        entries[token] = Entry(videoId, stream, stream.contentLength)
+        entries[token] = Entry(videoId, stream, stream.contentLength, refresh)
         return "http://127.0.0.1:${server.localPort}/a/$token"
     }
 
@@ -101,7 +102,7 @@ class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPla
             http.newCall(request).execute().use { response ->
                 if (response.code == 403 || response.code == 410) {
                     try { budget.beforeRefresh() } catch (e: IOException) { throw CdnRefusedException() }
-                    entry.stream = runBlocking { resolver.resolve(entry.videoId, forceRefresh = true, requiredItag = entry.stream.itag) }
+                    entry.stream = runBlocking { entry.refresh?.invoke() ?: resolver.resolve(entry.videoId, forceRefresh = true, requiredItag = entry.stream.itag) }
                     return@use
                 }
                 log("chunk $position+$length -> ${response.code} len=${response.header("Content-Length")}")

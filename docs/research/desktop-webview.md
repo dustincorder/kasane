@@ -72,3 +72,18 @@ authorization-code flow with PKCE and a loopback redirect (`http://127.0.0.1:<po
 Secret Service (Linux) / Credential Manager (Windows). Open question, not tested here: which InnerTube clients
 accept OAuth bearer tokens for the YouTube Music account library; Android's session is cookie-based and cannot
 be obtained from an external browser. This needs its own experiment before it replaces Guest on desktop.
+
+## Implemented (follow-up)
+
+- `VerifiedPlayerResolver` moved to `shared/jvmCommonMain` and returns `VerifiedResult`; Android maps it to its
+  `PlaybackStream` in `MusicProvider` (behaviour unchanged, `VerifiedPlayerResolverTest` passes).
+- Desktop: `verify/WebKitGtkRuntime` (from the PoC) runs in the `--verifier` helper process
+  (`verify/VerifierHelper`), driven by `verify/VerifierProcess`: started on the first verified track, stopped
+  after 3 idle minutes and on exit; crashes are replaced on the next call. The packaged launcher needs its
+  jpackage marker variables removed from the child environment, or it acts as a plain `java` launcher.
+- `DesktopPlayer` order: verified (system WebKitGTK) → iOS HLS → guest (with cut-off detection). Expired
+  verified URLs are re-verified by `StreamProxy`, not replaced with guest URLs.
+- Checked headless with the packaged app (`--play`): Teardrop and Around the World play past the 30 s guest
+  cut-off from `source=verified`; no WebKit or helper process remains after exit. Not yet checked: idle
+  shutdown timing, a session longer than the signed URL's lifetime, Windows (no WebView2 runtime yet; the
+  desktop falls back to iOS HLS/guest there).

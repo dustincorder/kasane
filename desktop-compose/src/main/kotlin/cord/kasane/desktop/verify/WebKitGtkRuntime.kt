@@ -1,4 +1,4 @@
-package cord.kasane.poc
+package cord.kasane.desktop.verify
 
 import com.sun.jna.Callback
 import com.sun.jna.Function

@@ -1,10 +1,10 @@
 package cord.kasane.poc
 
 import cord.kasane.music.playback.AudioRange
-import cord.kasane.music.provider.ProgressiveStream
-import cord.kasane.music.provider.UnavailableStream
+import cord.kasane.music.provider.verification.VerifiedResult
 import cord.kasane.music.provider.verification.VerificationRuntime
 import cord.kasane.music.provider.verification.VerifiedPlayerResolver
+import cord.kasane.desktop.verify.WebKitGtkRuntime
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -42,7 +42,7 @@ fun main(args: Array<String>) {
             val stream = resolver.resolve(id)
             val ms = (System.nanoTime() - start) / 1_000_000
             when (stream) {
-                is ProgressiveStream -> {
+                is VerifiedResult.Verified -> {
                     val a = stream.audio
                     // Guest URLs now answer only the first range; a verified URL must serve the rest of the file.
                     val probes = listOf(0L, 1L shl 20, a.contentLength / 2, a.contentLength - 300_000).filter { it in 0 until a.contentLength }
@@ -53,14 +53,14 @@ fun main(args: Array<String>) {
                     println("[$n] $id verified in ${ms}ms itag=${a.itag} size=${a.contentLength / 1024}KiB ranges=${codes}")
                     if (n == 0) println("     startup incl. engine launch: ${(System.nanoTime() - t0) / 1_000_000}ms; ${memory()}")
                 }
-                is UnavailableStream -> println("[$n] $id FAILED in ${ms}ms: ${stream.code} ${stream.reason}")
+                is VerifiedResult.Unavailable -> println("[$n] $id FAILED in ${ms}ms: ${stream.code} ${stream.reason}")
             }
         }
     }
     println("after resolves: ${memory()}")
     if (System.getProperty("kasane.play") != null) runBlocking {
         // Real playback of a verified stream through the desktop's own engine (mpv, no sound), past the guest cut-off.
-        val stream = resolver.resolve(ids[0]) as ProgressiveStream
+        val stream = resolver.resolve(ids[0]) as VerifiedResult.Verified
         val proxy = cord.kasane.desktop.audio.StreamProxy(http, cord.kasane.music.provider.GuestPlayerResolver(http))
         java.io.File("/tmp/kasane-poc-url").writeText(proxy.register(ids[0], stream.audio))
         println("serving verified stream on loopback for 120 s")

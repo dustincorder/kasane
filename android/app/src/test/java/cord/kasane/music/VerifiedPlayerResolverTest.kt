@@ -57,8 +57,8 @@ class VerifiedPlayerResolverTest {
         val runtime = FakeRuntime()
         val base = server.url("").toString().trimEnd('/')
         val stream = VerifiedPlayerResolver(OkHttpClient(), runtime, base, base).resolve("JALbemLw3G4")
-        assertTrue(stream is ProgressiveStream)
-        val audio = (stream as ProgressiveStream).audio
+        assertTrue(stream is cord.kasane.music.provider.verification.VerifiedResult.Verified)
+        val audio = (stream as cord.kasane.music.provider.verification.VerifiedResult.Verified).audio
         val url = audio.url.toHttpUrl()
         assertEquals("SIGNED", url.queryParameter("sig"))
         assertEquals("fast", url.queryParameter("n"))
@@ -83,13 +83,13 @@ class VerifiedPlayerResolverTest {
         val server = server()
         val base = server.url("").toString().trimEnd('/')
         val noSig = VerifiedPlayerResolver(OkHttpClient(), FakeRuntime(JSONObject.NULL), base, base).resolve("JALbemLw3G4")
-        assertEquals("VERIFICATION_FAILED", (noSig as UnavailableStream).code)
+        assertEquals("VERIFICATION_FAILED", (noSig as cord.kasane.music.provider.verification.VerifiedResult.Unavailable).code)
         assertTrue(noSig.reason.contains("did not produce a signature"))
         server.shutdown()
         val login = server("""{"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Sign in"}}""")
         val loginBase = login.url("").toString().trimEnd('/')
         val unplayable = VerifiedPlayerResolver(OkHttpClient(), FakeRuntime(), loginBase, loginBase).resolve("JALbemLw3G4")
-        assertEquals("LOGIN_REQUIRED", (unplayable as UnavailableStream).code)
+        assertEquals("LOGIN_REQUIRED", (unplayable as cord.kasane.music.provider.verification.VerifiedResult.Unavailable).code)
         login.shutdown()
     }
 
