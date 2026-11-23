@@ -2,9 +2,9 @@
 Type=Application
 Name=Kasane
 Comment=YouTube Music and local audio player
-Exec=vibeplayer %U
+Exec=kasane %U
 Icon=cord.kasane.desktop
 Categories=AudioVideo;Audio;Player;
 Terminal=false
-StartupWMClass=vibeplayer
+StartupWMClass=kasane
 StartupNotify=true

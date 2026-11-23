@@ -1,4 +1,4 @@
-# VibePlayer Code Quality & Style Guidelines
+# Kasane Code Quality & Style Guidelines
 
 ## Rust
 - Zero warnings under `cargo clippy --workspace -- -D warnings`.

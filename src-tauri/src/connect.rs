@@ -6,9 +6,9 @@ use kasane_connect::adapter::{CmdError, PlayerAdapter, PlayerSnapshot};
 use kasane_connect::protocol::{AlbumMeta, ArtistMeta, HandoffRequest, TrackMeta};
 use serde_json::{Map, Value};
 use tokio::sync::watch;
-use vibe_audio::PlayerManager;
-use vibe_core::model::{Album, Artist, PlaybackState, ProviderType, RepeatMode, Track};
-use vibe_db::Database;
+use kasane_audio::PlayerManager;
+use kasane_core::model::{Album, Artist, PlaybackState, ProviderType, RepeatMode, Track};
+use kasane_db::Database;
 
 /// Bridges the Connect protocol session to the desktop PlayerManager.
 pub struct DesktopPlayerAdapter {

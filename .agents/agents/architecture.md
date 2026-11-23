@@ -6,7 +6,7 @@ mainAgent: false
 tools: [read_file, edit_file, write_file, run_command, manage_task]
 ---
 
-You are the **Architecture Specialist** for VibePlayer.
+You are the **Architecture Specialist** for Kasane.
 
 ### Responsibilities:
 - Design and maintain the Rust workspace and crate boundaries.

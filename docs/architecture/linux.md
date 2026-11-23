@@ -9,8 +9,8 @@
 - **Фреймворк**: Tauri v2
 - **UI Frontend**: Svelte 5 (Runes), TypeScript, Tailwind CSS, Vite
 - **Backend / Core**: Rust 2021 (Workspace crates)
-- **База данных**: SQLite через `sqlx` (`vibe-db`)
-- **Аудиодвижок**: `rodio` / `cpal` (`vibe-audio`) с поддержкой DSP анализа
+- **База данных**: SQLite через `sqlx` (`kasane-db`)
+- **Аудиодвижок**: `rodio` / `cpal` (`kasane-audio`) с поддержкой DSP анализа
 
 ---
 
@@ -20,16 +20,16 @@
 
 ```text
 crates/
-├── vibe-core/         # Доменные структуры (Track, Artist, Album, Playlist, SearchResult)
-├── vibe-audio/        # Движок воспроизведения, буферизация, DSP анализ
-├── vibe-db/           # SQLite хранилище избранного, плейлистов и истории
-└── vibe-providers/    # Модули интеграции с провайдерами музыки (YouTube Music / InnerTube)
+├── kasane-core/         # Доменные структуры (Track, Artist, Album, Playlist, SearchResult)
+├── kasane-audio/        # Движок воспроизведения, буферизация, DSP анализ
+├── kasane-db/           # SQLite хранилище избранного, плейлистов и истории
+└── kasane-providers/    # Модули интеграции с провайдерами музыки (YouTube Music / InnerTube)
 src-tauri/             # Оболочка Tauri 2, IPC команды и привязка оконного интерфейса
 ```
 
 ### Принципы архитектуры Rust
 1. **Zero `unwrap()` на путях рантайма**: Все ошибки обрабатываются через `Result` и явные типы ошибок (`thiserror`).
-2. **Изоляция провайдеров**: Логика парсинга внешних API изолирована в `vibe-providers`.
+2. **Изоляция провайдеров**: Логика парсинга внешних API изолирована в `kasane-providers`.
 3. **Локальность данных**: База данных SQLite обеспечивает мгновенную загрузку истории и кэша без зависимости от сети.
 
 ---

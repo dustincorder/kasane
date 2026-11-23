@@ -13,8 +13,8 @@ use serde_json::{json, Value};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use vibe_core::error::{Result, VibeError};
-use vibe_core::model::StreamSource;
+use kasane_core::error::{Result, KasaneError};
+use kasane_core::model::StreamSource;
 
 use crate::account::{auth_headers, read_session, AccountSession, SessionStore};
 
@@ -34,8 +34,8 @@ const PLAYER_REFRESH: Duration = Duration::from_secs(6 * 60 * 60);
 const INTEGRITY_MARGIN: Duration = Duration::from_secs(10 * 60);
 const MAX_PLAYER_JS_BYTES: usize = 8 * 1024 * 1024;
 
-fn verification_error(message: impl Into<String>) -> VibeError {
-    VibeError::Provider {
+fn verification_error(message: impl Into<String>) -> KasaneError {
+    KasaneError::Provider {
         provider: "YouTubeMusic".into(),
         message: format!("YouTube playback verification failed: {}", message.into()),
     }
@@ -376,7 +376,7 @@ fn select_audio_format(root: &Value, video_id: &str) -> Result<AudioFormat> {
             .pointer("/playabilityStatus/reason")
             .and_then(Value::as_str)
             .unwrap_or("no reason given");
-        return Err(VibeError::Provider {
+        return Err(KasaneError::Provider {
             provider: "YouTubeMusic".into(),
             message: format!("Unplayable ({}): {reason}", status.unwrap_or("UNKNOWN")),
         });

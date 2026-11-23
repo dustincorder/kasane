@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum VibeError {
+pub enum KasaneError {
     #[error("Audio engine error: {0}")]
     Audio(String),
 
@@ -33,4 +33,4 @@ pub enum VibeError {
     Io(#[from] std::io::Error),
 }
 
-pub type Result<T> = std::result::Result<T, VibeError>;
+pub type Result<T> = std::result::Result<T, KasaneError>;

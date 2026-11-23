@@ -15,7 +15,7 @@ and the AAC itag 140 progressive stream. YouTube requires two things for that UR
 | | Browser engine | Host code |
 |---|---|---|
 | Android | Offscreen System WebView, `https://appassets.androidplatform.net/` origin, network loads blocked | `provider/verification/` |
-| Linux | Hidden Tauri WebKitGTK window on the app's own `verifier.html`; replies accepted only from that window | `src-tauri/src/verifier.rs`, `crates/vibe-providers/src/verification.rs` |
+| Linux | Hidden Tauri WebKitGTK window on the app's own `verifier.html`; replies accepted only from that window | `src-tauri/src/verifier.rs`, `crates/kasane-providers/src/verification.rs` |
 
 Both load `verifier/dist/kasane-verifier.js`, built from `verifier/entry.js` with
 `npm run build:verifier` (also run by `npm run dev`/`npm run build`; Android's

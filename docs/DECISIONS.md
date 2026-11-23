@@ -1,13 +1,13 @@
-# VibePlayer Architecture Decisions (ADR)
+# Kasane Architecture Decisions (ADR)
 
 ## ADR-001: Modular Rust Workspace Structure
 - **Date**: 2026-11-10
 - **Context**: Need a maintainable codebase separating domain entities, audio output, providers, and database storage without circular dependencies.
 - **Decision**: Split the project into distinct crates:
-  - `vibe-core`: Pure models (`Track`, `Album`, `Artist`, `QueueState`), errors (`VibeError`), and public traits (`MusicProvider`, `PlaybackBackend`, `AudioAnalyzer`, `AIProvider`).
-  - `vibe-audio`: Dedicated audio execution thread, `rodio` / `symphonia` desktop audio backend, volume control, timeline scrubber, and DSP analyzer.
-  - `vibe-providers`: InnerTube HTTP client (`YouTubeMusicProvider`) and test suite mock catalog (`MockProvider`).
-  - `vibe-db`: Local SQLite database for favorites, play count, and listening history.
+  - `kasane-core`: Pure models (`Track`, `Album`, `Artist`, `QueueState`), errors (`KasaneError`), and public traits (`MusicProvider`, `PlaybackBackend`, `AudioAnalyzer`, `AIProvider`).
+  - `kasane-audio`: Dedicated audio execution thread, `rodio` / `symphonia` desktop audio backend, volume control, timeline scrubber, and DSP analyzer.
+  - `kasane-providers`: InnerTube HTTP client (`YouTubeMusicProvider`) and test suite mock catalog (`MockProvider`).
+  - `kasane-db`: Local SQLite database for favorites, play count, and listening history.
   - `src-tauri`: Tauri 2 application shell handling IPC commands and window lifecycle.
 - **Consequences**: Easy unit testing of each module independently; eliminates heavy C dependencies from the core.
 

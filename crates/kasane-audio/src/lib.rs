@@ -7,11 +7,11 @@ pub use dsp::NativeDspAnalyzer;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use vibe_core::error::{Result, VibeError};
-use vibe_core::model::{
+use kasane_core::error::{Result, KasaneError};
+use kasane_core::model::{
     PlaybackProgress, PlaybackState, ProviderType, QueueState, RepeatMode, StreamSource, Track,
 };
-use vibe_core::traits::{MusicProvider, PlaybackBackend};
+use kasane_core::traits::{MusicProvider, PlaybackBackend};
 
 pub struct PlayerManager {
     backend: Mutex<Box<dyn PlaybackBackend>>,
@@ -79,7 +79,7 @@ impl PlayerManager {
                 .get(index)
                 .cloned()
                 .ok_or_else(|| {
-                    VibeError::TrackNotFound(format!("Queue index {index} out of bounds"))
+                    KasaneError::TrackNotFound(format!("Queue index {index} out of bounds"))
                 })?,
         };
         let stream = self.resolve(&track).await?;
@@ -231,7 +231,7 @@ impl PlayerManager {
     pub async fn remove_at(&self, index: usize) -> Result<()> {
         let mut q = self.queue.lock().await;
         if index >= q.items.len() {
-            return Err(VibeError::TrackNotFound(format!(
+            return Err(KasaneError::TrackNotFound(format!(
                 "Queue index {index} out of bounds"
             )));
         }
@@ -253,7 +253,7 @@ impl PlayerManager {
     pub async fn move_item(&self, from: usize, to: usize) -> Result<()> {
         let mut q = self.queue.lock().await;
         if from >= q.items.len() || to >= q.items.len() {
-            return Err(VibeError::TrackNotFound(
+            return Err(KasaneError::TrackNotFound(
                 "Queue move out of bounds".into(),
             ));
         }
@@ -303,7 +303,7 @@ impl PlayerManager {
         let mut track = tracks
             .get(index)
             .cloned()
-            .ok_or_else(|| VibeError::TrackNotFound("Handoff index out of bounds".into()))?;
+            .ok_or_else(|| KasaneError::TrackNotFound("Handoff index out of bounds".into()))?;
         let stream = self.resolve(&track).await?;
         let mut backend = self.backend.lock().await;
         backend.play_stream(&stream).await?;
@@ -338,7 +338,7 @@ impl PlayerManager {
                     .uri
                     .as_ref()
                     .filter(|p| std::path::Path::new(p).is_absolute())
-                    .ok_or_else(|| VibeError::Playback("The local audio file is missing".into()))?;
+                    .ok_or_else(|| KasaneError::Playback("The local audio file is missing".into()))?;
                 Ok(StreamSource {
                     url: path.clone(),
                     mime_type: String::new(),
@@ -347,7 +347,7 @@ impl PlayerManager {
                     notice: None,
                 })
             }
-            ProviderType::Mock => Err(VibeError::Playback("Demo tracks have no audio".into())),
+            ProviderType::Mock => Err(KasaneError::Playback("Demo tracks have no audio".into())),
         }
     }
 }
@@ -391,7 +391,7 @@ mod tests {
     impl PlaybackBackend for TestBackend {
         async fn play_stream(&mut self, source: &StreamSource) -> Result<()> {
             if source.url == "broken" {
-                return Err(VibeError::Playback("Cannot decode".into()));
+                return Err(KasaneError::Playback("Cannot decode".into()));
             }
             self.ended.store(false, Ordering::Relaxed);
             self.state = PlaybackState::Playing;

@@ -1,11 +1,11 @@
 [package]
-name = "vibe-audio"
+name = "kasane-audio"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-vibe-core = { path = "../vibe-core" }
+kasane-core = { path = "../kasane-core" }
 rodio.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
@@ -16,4 +16,4 @@ symphonia = { version = "0.5", features = ["all"] }
 m3u8-rs = "6"
 
 [dev-dependencies]
-vibe-providers = { path = "../vibe-providers" }
+kasane-providers = { path = "../kasane-providers" }

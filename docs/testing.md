@@ -24,7 +24,7 @@ cd android
 
 ## 2. Тестирование Rust Workspace (Backend & Engine)
 
-Тесты Rust распределены по crates: `vibe-core`, `vibe-audio`, `vibe-db`, `vibe-providers`.
+Тесты Rust распределены по crates: `kasane-core`, `kasane-audio`, `kasane-db`, `kasane-providers`.
 
 ### Запуск тестов:
 ```bash
@@ -32,10 +32,10 @@ cargo test
 ```
 
 ### Сценарии:
-- `vibe-audio`: Проверка DSP анализа аудиосигнала (`test_dsp_analysis`).
-- `vibe-core`: Проверка сериализации/десериализации моделей треков.
-- `vibe-db`: CRUD операции с базой SQLite (избранное, история воспроизведения).
-- `vibe-providers`: Мок-резолвинг треков и парсинг InnerTube ответов.
+- `kasane-audio`: Проверка DSP анализа аудиосигнала (`test_dsp_analysis`).
+- `kasane-core`: Проверка сериализации/десериализации моделей треков.
+- `kasane-db`: CRUD операции с базой SQLite (избранное, история воспроизведения).
+- `kasane-providers`: Мок-резолвинг треков и парсинг InnerTube ответов.
 
 ---
 

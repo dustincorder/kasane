@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "crates/vibe-core",
-    "crates/vibe-audio",
-    "crates/vibe-providers",
-    "crates/vibe-db",
+    "crates/kasane-core",
+    "crates/kasane-audio",
+    "crates/kasane-providers",
+    "crates/kasane-db",
     "crates/kasane-connect",
     "src-tauri",
 ]
@@ -12,7 +12,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.1-alpha"
 edition = "2021"
-authors = ["VibePlayer Contributors"]
+authors = ["Kasane contributors"]
 
 [workspace.dependencies]
 tokio = { version = "1.40", features = ["full"] }

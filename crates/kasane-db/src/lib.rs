@@ -1,8 +1,8 @@
 use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use vibe_core::error::{Result, VibeError};
-use vibe_core::model::Track;
+use kasane_core::error::{Result, KasaneError};
+use kasane_core::model::Track;
 
 #[derive(Clone)]
 pub struct Database {
@@ -11,7 +11,7 @@ pub struct Database {
 
 impl Database {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let conn = Connection::open(path).map_err(|e| VibeError::Database(e.to_string()))?;
+        let conn = Connection::open(path).map_err(|e| KasaneError::Database(e.to_string()))?;
         let db = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -20,7 +20,7 @@ impl Database {
     }
 
     pub fn in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory().map_err(|e| VibeError::Database(e.to_string()))?;
+        let conn = Connection::open_in_memory().map_err(|e| KasaneError::Database(e.to_string()))?;
         let db = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -29,7 +29,7 @@ impl Database {
     }
 
     fn init_schema(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| VibeError::Database("Lock poisoned".into()))?;
+        let conn = self.conn.lock().map_err(|_| KasaneError::Database("Lock poisoned".into()))?;
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS favorites (
@@ -56,13 +56,13 @@ impl Database {
             );
             "#,
         )
-        .map_err(|e| VibeError::Database(e.to_string()))?;
+        .map_err(|e| KasaneError::Database(e.to_string()))?;
         Ok(())
     }
 
     pub fn save_favorite(&self, track: &Track) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| VibeError::Database("Lock poisoned".into()))?;
-        let json = serde_json::to_string(track).map_err(|e| VibeError::Database(e.to_string()))?;
+        let conn = self.conn.lock().map_err(|_| KasaneError::Database("Lock poisoned".into()))?;
+        let json = serde_json::to_string(track).map_err(|e| KasaneError::Database(e.to_string()))?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -72,55 +72,55 @@ impl Database {
             "INSERT OR REPLACE INTO favorites (id, track_json, added_at) VALUES (?1, ?2, ?3)",
             params![track.id, json, now],
         )
-        .map_err(|e| VibeError::Database(e.to_string()))?;
+        .map_err(|e| KasaneError::Database(e.to_string()))?;
         Ok(())
     }
 
     pub fn remove_favorite(&self, track_id: &str) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| VibeError::Database("Lock poisoned".into()))?;
+        let conn = self.conn.lock().map_err(|_| KasaneError::Database("Lock poisoned".into()))?;
         conn.execute("DELETE FROM favorites WHERE id = ?1", params![track_id])
-            .map_err(|e| VibeError::Database(e.to_string()))?;
+            .map_err(|e| KasaneError::Database(e.to_string()))?;
         Ok(())
     }
 
     pub fn is_favorite(&self, track_id: &str) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|_| VibeError::Database("Lock poisoned".into()))?;
+        let conn = self.conn.lock().map_err(|_| KasaneError::Database("Lock poisoned".into()))?;
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM favorites WHERE id = ?1",
                 params![track_id],
                 |row| row.get(0),
             )
-            .map_err(|e| VibeError::Database(e.to_string()))?;
+            .map_err(|e| KasaneError::Database(e.to_string()))?;
         Ok(count > 0)
     }
 
     pub fn get_favorites(&self) -> Result<Vec<Track>> {
-        let conn = self.conn.lock().map_err(|_| VibeError::Database("Lock poisoned".into()))?;
+        let conn = self.conn.lock().map_err(|_| KasaneError::Database("Lock poisoned".into()))?;
         let mut stmt = conn
             .prepare("SELECT track_json FROM favorites ORDER BY added_at DESC")
-            .map_err(|e| VibeError::Database(e.to_string()))?;
+            .map_err(|e| KasaneError::Database(e.to_string()))?;
 
         let rows = stmt
             .query_map([], |row| {
                 let json: String = row.get(0)?;
                 Ok(json)
             })
-            .map_err(|e| VibeError::Database(e.to_string()))?;
+            .map_err(|e| KasaneError::Database(e.to_string()))?;
 
         let mut tracks = Vec::new();
         for row in rows {
-            let json = row.map_err(|e| VibeError::Database(e.to_string()))?;
+            let json = row.map_err(|e| KasaneError::Database(e.to_string()))?;
             let track: Track =
-                serde_json::from_str(&json).map_err(|e| VibeError::Database(e.to_string()))?;
+                serde_json::from_str(&json).map_err(|e| KasaneError::Database(e.to_string()))?;
             tracks.push(track);
         }
         Ok(tracks)
     }
 
     pub fn log_history(&self, track: &Track, duration_listened_secs: f64) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| VibeError::Database("Lock poisoned".into()))?;
-        let json = serde_json::to_string(track).map_err(|e| VibeError::Database(e.to_string()))?;
+        let conn = self.conn.lock().map_err(|_| KasaneError::Database("Lock poisoned".into()))?;
+        let json = serde_json::to_string(track).map_err(|e| KasaneError::Database(e.to_string()))?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -130,28 +130,28 @@ impl Database {
             "INSERT INTO history (track_id, track_json, played_at, duration_listened_secs) VALUES (?1, ?2, ?3, ?4)",
             params![track.id, json, now, duration_listened_secs],
         )
-        .map_err(|e| VibeError::Database(e.to_string()))?;
+        .map_err(|e| KasaneError::Database(e.to_string()))?;
         Ok(())
     }
 
     pub fn get_recent_history(&self, limit: usize) -> Result<Vec<Track>> {
-        let conn = self.conn.lock().map_err(|_| VibeError::Database("Lock poisoned".into()))?;
+        let conn = self.conn.lock().map_err(|_| KasaneError::Database("Lock poisoned".into()))?;
         let mut stmt = conn
             .prepare("SELECT track_json FROM history ORDER BY played_at DESC LIMIT ?1")
-            .map_err(|e| VibeError::Database(e.to_string()))?;
+            .map_err(|e| KasaneError::Database(e.to_string()))?;
 
         let rows = stmt
             .query_map(params![limit as i64], |row| {
                 let json: String = row.get(0)?;
                 Ok(json)
             })
-            .map_err(|e| VibeError::Database(e.to_string()))?;
+            .map_err(|e| KasaneError::Database(e.to_string()))?;
 
         let mut tracks = Vec::new();
         for row in rows {
-            let json = row.map_err(|e| VibeError::Database(e.to_string()))?;
+            let json = row.map_err(|e| KasaneError::Database(e.to_string()))?;
             let track: Track =
-                serde_json::from_str(&json).map_err(|e| VibeError::Database(e.to_string()))?;
+                serde_json::from_str(&json).map_err(|e| KasaneError::Database(e.to_string()))?;
             tracks.push(track);
         }
         Ok(tracks)
@@ -161,7 +161,7 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibe_core::model::{Artist, ProviderType};
+    use kasane_core::model::{Artist, ProviderType};
 
     #[test]
     fn test_favorites_crud() {

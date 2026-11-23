@@ -16,8 +16,8 @@ description: Систематический протокол диагности�
 2. **Локализуй связанный код**:
    - Используй `docs/agent-map.md`, чтобы найти ответственный компонент:
      - Очередь и воспроизведение Android: `PlaybackManager.kt`, `PlaybackService.kt`.
-     - InnerTube API / парсинг стримов: `MusicProvider.kt` (Android) или `crates/vibe-providers` (Linux).
-     - База данных / недавние треки: `KasaneDatabase.kt` / `TrackDao` (Android) или `crates/vibe-db` (Linux).
+     - InnerTube API / парсинг стримов: `MusicProvider.kt` (Android) или `crates/kasane-providers` (Linux).
+     - База данных / недавние треки: `KasaneDatabase.kt` / `TrackDao` (Android) или `crates/kasane-db` (Linux).
      - Реактивное состояние UI: `KasaneApp.kt`, `MiniPlayer.kt`, `NowPlayingSheet.kt`.
 
 3. **Собери логи и проанализируй тесты**:

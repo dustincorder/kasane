@@ -2,7 +2,7 @@
 
 ## Context
 - Android: Kotlin/Compose. Playback lives in `PlaybackService` (Media3 ExoPlayer + MediaSession). The UI talks to it only through `PlaybackManager`, a `MediaController` projection, and Media3 owns the queue.
-- Linux: Tauri 2 + Rust. `vibe_audio::PlayerManager` owns the queue and the rodio backend. Svelte polls it through Tauri commands, and YouTube streams are resolved by `vibe_providers::YouTubeMusicProvider` with the WebView verifier.
+- Linux: Tauri 2 + Rust. `kasane_audio::PlayerManager` owns the queue and the rodio backend. Svelte polls it through Tauri commands, and YouTube streams are resolved by `kasane_providers::YouTubeMusicProvider` with the WebView verifier.
 - `shared/` (KMP) has no live JVM desktop consumer any more. The Kotlin/Compose desktop that the old Connect targeted (`backup/pre-devin-integration`, `536c833`, `6e6ec6d`, `b79f526`) was replaced by Tauri.
 
 ## Old implementation

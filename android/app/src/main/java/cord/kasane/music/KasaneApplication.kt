@@ -56,10 +56,11 @@ class KasaneApplication : Application() {
         settings = cord.kasane.music.settings.AppSettings(this)
         searchHistory = cord.kasane.music.settings.SearchHistory(this)
 
+        renameLegacyDatabase()
         database = Room.databaseBuilder(
             applicationContext,
             KasaneDatabase::class.java,
-            "kanade.db"
+            DATABASE_NAME
         ).addMigrations(KasaneDatabase.MIGRATION_1_2, KasaneDatabase.MIGRATION_2_3, KasaneDatabase.MIGRATION_3_4, KasaneDatabase.MIGRATION_4_5, KasaneDatabase.MIGRATION_5_6, KasaneDatabase.MIGRATION_6_7).build()
 
         val httpClient = okhttp3.OkHttpClient.Builder()
@@ -117,5 +118,20 @@ class KasaneApplication : Application() {
                 }
             }
         }
+    }
+
+    /** Earlier builds named the database after the old project name; keep the user's data. */
+    private fun renameLegacyDatabase() {
+        val legacy = getDatabasePath(LEGACY_DATABASE_NAME)
+        if (!legacy.exists() || getDatabasePath(DATABASE_NAME).exists()) return
+        for (suffix in listOf("", "-wal", "-shm", "-journal")) {
+            val from = getDatabasePath(LEGACY_DATABASE_NAME + suffix)
+            if (from.exists()) from.renameTo(getDatabasePath(DATABASE_NAME + suffix))
+        }
+    }
+
+    private companion object {
+        const val DATABASE_NAME = "kasane.db"
+        const val LEGACY_DATABASE_NAME = "kanade.db"
     }
 }

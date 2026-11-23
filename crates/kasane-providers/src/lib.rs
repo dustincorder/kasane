@@ -14,7 +14,7 @@ pub use ytmusic::YouTubeMusicProvider;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibe_core::traits::MusicProvider;
+    use kasane_core::traits::MusicProvider;
 
     #[tokio::test]
     async fn test_mock_provider_search() {

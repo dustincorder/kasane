@@ -11,8 +11,8 @@ use std::time::Duration;
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, State, Webview, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tokio::sync::{oneshot, OnceCell};
-use vibe_core::error::{Result, VibeError};
-use vibe_providers::VerificationRuntime;
+use kasane_core::error::{Result, KasaneError};
+use kasane_providers::VerificationRuntime;
 
 pub const LABEL: &str = "kasane-verifier";
 const BUNDLE: &str = include_str!("../../verifier/dist/kasane-verifier.js");
@@ -21,8 +21,8 @@ const BRIDGE: &str = "globalThis.__kasaneReply = (id, payload) => \
 const LOAD_TIMEOUT: Duration = Duration::from_secs(20);
 const CALL_TIMEOUT: Duration = Duration::from_secs(45);
 
-fn runtime_error(message: &str) -> VibeError {
-    VibeError::Provider {
+fn runtime_error(message: &str) -> KasaneError {
+    KasaneError::Provider {
         provider: "YouTubeMusic".into(),
         message: format!("YouTube playback verification failed: {message}"),
     }

@@ -3,9 +3,9 @@ use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use vibe_core::error::{Result, VibeError};
-use vibe_core::model::{Album, Artist, ProviderType, StreamSource, Track};
-use vibe_core::traits::MusicProvider;
+use kasane_core::error::{Result, KasaneError};
+use kasane_core::model::{Album, Artist, ProviderType, StreamSource, Track};
+use kasane_core::traits::MusicProvider;
 
 use crate::account::{
     auth_headers, read_session, write_session, AccountClient, AccountIdentity, AccountSession,
@@ -24,12 +24,12 @@ const IOS_VERSION: &str = "21.26.4";
 const IOS_USER_AGENT: &str =
     "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_5 like Mac OS X;)";
 
-fn fallback_notice(error: &VibeError) -> String {
+fn fallback_notice(error: &KasaneError) -> String {
     format!("Verified playback unavailable ({error}). Playing the iOS HLS stream instead.")
 }
 
-fn provider_error(message: impl Into<String>) -> VibeError {
-    VibeError::Provider {
+fn provider_error(message: impl Into<String>) -> KasaneError {
+    KasaneError::Provider {
         provider: "YouTubeMusic".into(),
         message: message.into(),
     }
@@ -196,19 +196,19 @@ impl MusicProvider for YouTubeMusicProvider {
         let resp = request
             .send()
             .await
-            .map_err(|e| VibeError::Provider {
+            .map_err(|e| KasaneError::Provider {
                 provider: "YouTubeMusic".into(),
                 message: format!("Search request failed: {e}"),
             })?;
 
         if !resp.status().is_success() {
-            return Err(VibeError::Provider {
+            return Err(KasaneError::Provider {
                 provider: "YouTubeMusic".into(),
                 message: format!("HTTP error: {}", resp.status()),
             });
         }
 
-        let json: Value = resp.json().await.map_err(|e| VibeError::Provider {
+        let json: Value = resp.json().await.map_err(|e| KasaneError::Provider {
             provider: "YouTubeMusic".into(),
             message: format!("Invalid JSON response: {e}"),
         })?;

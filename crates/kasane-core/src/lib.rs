@@ -2,7 +2,7 @@ pub mod error;
 pub mod model;
 pub mod traits;
 
-pub use error::{VibeError, Result};
+pub use error::{KasaneError, Result};
 pub use model::*;
 pub use traits::*;
 

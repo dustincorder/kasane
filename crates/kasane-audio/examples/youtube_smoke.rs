@@ -1,10 +1,10 @@
-//! Run explicitly with `cargo run -p vibe-audio --example youtube_smoke`.
+//! Run explicitly with `cargo run -p kasane-audio --example youtube_smoke`.
 //! Uses anonymous live YouTube requests and the same backend as the desktop app.
 use std::time::{Duration, Instant};
-use vibe_audio::DesktopAudioBackend;
-use vibe_core::model::PlaybackState;
-use vibe_core::traits::{MusicProvider, PlaybackBackend};
-use vibe_providers::YouTubeMusicProvider;
+use kasane_audio::DesktopAudioBackend;
+use kasane_core::model::PlaybackState;
+use kasane_core::traits::{MusicProvider, PlaybackBackend};
+use kasane_providers::YouTubeMusicProvider;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

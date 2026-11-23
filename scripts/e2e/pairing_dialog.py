@@ -25,7 +25,7 @@ import urllib.error
 import http.client as http_client
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-BINARY = os.environ.get("KC_BINARY", os.path.join(ROOT, "target/release/vibeplayer"))
+BINARY = os.environ.get("KC_BINARY", os.path.join(ROOT, "target/release/kasane"))
 DRIVER_PORT = 4781
 BASE = f"http://127.0.0.1:{DRIVER_PORT}"
 SHOTS_DIR = os.environ.get("SHOTS_DIR", "/tmp")

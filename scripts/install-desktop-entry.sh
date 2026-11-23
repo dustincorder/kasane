@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Install the Kasane .desktop entry and hicolor icons for a given binary path.
-# Usage: scripts/install-desktop-entry.sh [path-to-vibeplayer-binary]
+# Usage: scripts/install-desktop-entry.sh [path-to-kasane-binary]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BINARY="${1:-$REPO_ROOT/target/release/vibeplayer}"
+BINARY="${1:-$REPO_ROOT/target/release/kasane}"
 BINARY="$(readlink -f "$BINARY")"
 
 APPS_DIR="$HOME/.local/share/applications"

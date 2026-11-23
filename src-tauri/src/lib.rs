@@ -1,12 +1,12 @@
 use std::{path::PathBuf, sync::Arc};
 use tauri::{Manager, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
-use vibe_audio::{DesktopAudioBackend, PlayerManager};
-use vibe_core::error::VibeError;
-use vibe_core::model::{PlaybackProgress, ProviderType, QueueState, Track};
-use vibe_core::traits::MusicProvider;
-use vibe_db::Database;
-use vibe_providers::{WebPlaybackVerifier, YouTubeMusicProvider};
+use kasane_audio::{DesktopAudioBackend, PlayerManager};
+use kasane_core::error::KasaneError;
+use kasane_core::model::{PlaybackProgress, ProviderType, QueueState, Track};
+use kasane_core::traits::MusicProvider;
+use kasane_db::Database;
+use kasane_providers::{WebPlaybackVerifier, YouTubeMusicProvider};
 
 mod account;
 mod connect;
@@ -217,12 +217,12 @@ mod commands {
     }
 }
 
-fn open_library_database(app_dir: tauri::Result<PathBuf>) -> vibe_core::error::Result<Database> {
+fn open_library_database(app_dir: tauri::Result<PathBuf>) -> kasane_core::error::Result<Database> {
     let persistent = app_dir
-        .map_err(|error| VibeError::Database(error.to_string()))
+        .map_err(|error| KasaneError::Database(error.to_string()))
         .and_then(|dir| {
             std::fs::create_dir_all(&dir)?;
-            Database::open(dir.join("vibeplayer.db"))
+            Database::open(dir.join("kasane.db"))
         });
     persistent.or_else(|error| {
         eprintln!("Kasane could not open the library database: {error}. Favorites and listening history will not be saved for this session.");
@@ -386,7 +386,7 @@ mod tests {
             .as_nanos();
         let dir =
             std::env::temp_dir().join(format!("kasane-db-{}-{timestamp}", std::process::id()));
-        let path = dir.join("vibeplayer.db");
+        let path = dir.join("kasane.db");
         drop(open_library_database(Ok(dir.clone())).unwrap());
         assert!(path.is_file());
 

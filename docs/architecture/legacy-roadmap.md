@@ -2,16 +2,16 @@
 
 These old completion claims have not been revalidated. Current work is tracked in ../ROADMAP.md.
 
-# VibePlayer Implementation Roadmap
+# Kasane Implementation Roadmap
 
 ## Phase 1: Foundation & Vertical Slice (Completed)
 - [x] Workspace bootstrap (Rust 1.99 + Node 26 + Tauri 2 + Svelte 5).
 - [x] Definition of 6 Antigravity subagents in `.agents/agents/` and `AGENTS.md`.
 - [x] Reference research on LiMusic & BitChord (`docs/architecture/RESEARCH.md`).
-- [x] Unified domain models and traits (`vibe-core`).
-- [x] Audio backend (`vibe-audio`) with dedicated audio thread and DSP analyzer.
-- [x] Providers (`vibe-providers`) with YouTube Music InnerTube and Mock implementations.
-- [x] Local SQLite persistence (`vibe-db`) for favorites and listening history.
+- [x] Unified domain models and traits (`kasane-core`).
+- [x] Audio backend (`kasane-audio`) with dedicated audio thread and DSP analyzer.
+- [x] Providers (`kasane-providers`) with YouTube Music InnerTube and Mock implementations.
+- [x] Local SQLite persistence (`kasane-db`) for favorites and listening history.
 - [x] Svelte 5 frontend with runes (`$state`, `$derived`) and original dark design system.
 - [x] Views: Search, Library (Favorites & History), Queue, PlayerBar, NowPlaying Modal.
 - [x] CI pipeline (`.github/workflows/ci.yml`) and passing tests/clippy.
@@ -20,7 +20,7 @@ These old completion claims have not been revalidated. Current work is tracked i
 - [ ] Implement signature deciphering for restricted YouTube audio streams.
 - [ ] Local file scanner (ID3 / Vorbis metadata extraction).
 - [ ] Linux desktop MPRIS D-Bus media controls integration (`zbus`).
-- [ ] Gapless playback buffer preload in `vibe-audio`.
+- [ ] Gapless playback buffer preload in `kasane-audio`.
 
 ## Phase 3: DSP Analysis & Automix Framework
 - [ ] Native audio decoding pipeline for live tempo / beat grid tracking.

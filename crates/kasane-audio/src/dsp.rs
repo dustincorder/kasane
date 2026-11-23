@@ -1,6 +1,6 @@
-use vibe_core::error::Result;
-use vibe_core::model::{AudioFeatures, StreamSource, Track};
-use vibe_core::traits::AudioAnalyzer;
+use kasane_core::error::Result;
+use kasane_core::model::{AudioFeatures, StreamSource, Track};
+use kasane_core::traits::AudioAnalyzer;
 use async_trait::async_trait;
 
 pub struct NativeDspAnalyzer;
@@ -43,7 +43,7 @@ impl AudioAnalyzer for NativeDspAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vibe_core::model::ProviderType;
+    use kasane_core::model::ProviderType;
 
     #[tokio::test]
     async fn test_dsp_analysis() {

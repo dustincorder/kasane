@@ -1,7 +1,7 @@
 use async_trait::async_trait;
-use vibe_core::error::{Result, VibeError};
-use vibe_core::model::{Album, Artist, ProviderType, StreamSource, Track};
-use vibe_core::traits::MusicProvider;
+use kasane_core::error::{Result, KasaneError};
+use kasane_core::model::{Album, Artist, ProviderType, StreamSource, Track};
+use kasane_core::traits::MusicProvider;
 
 pub struct MockProvider {
     tracks: Vec<Track>,
@@ -103,7 +103,7 @@ impl MusicProvider for MockProvider {
             .iter()
             .find(|t| t.id == track_id)
             .cloned()
-            .ok_or_else(|| VibeError::TrackNotFound(track_id.to_string()))
+            .ok_or_else(|| KasaneError::TrackNotFound(track_id.to_string()))
     }
 
     async fn resolve_stream(&self, track: &Track) -> Result<StreamSource> {

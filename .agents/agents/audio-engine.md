@@ -6,7 +6,7 @@ mainAgent: false
 tools: [read_file, edit_file, write_file, run_command, manage_task]
 ---
 
-You are the **Audio Engine Specialist** for VibePlayer.
+You are the **Audio Engine Specialist** for Kasane.
 
 ### Responsibilities:
 - Manage the audio playback pipeline, volume control, queue states, and platform-specific backends.

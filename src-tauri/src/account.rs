@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
-use vibe_providers::{AccountIdentity, AccountSession, YouTubeMusicProvider};
+use kasane_providers::{AccountIdentity, AccountSession, YouTubeMusicProvider};
 
 use crate::AppState;
 
@@ -312,7 +312,7 @@ pub mod commands {
     }
 
     #[tauri::command]
-    pub async fn account_liked_music(state: State<'_, AppState>) -> Result<Vec<vibe_core::model::Track>, String> {
+    pub async fn account_liked_music(state: State<'_, AppState>) -> Result<Vec<kasane_core::model::Track>, String> {
         state
             .yt_provider
             .account_liked_music()
@@ -323,7 +323,7 @@ pub mod commands {
     #[tauri::command]
     pub async fn account_playlists(
         state: State<'_, AppState>,
-    ) -> Result<Vec<vibe_providers::LibraryPlaylist>, String> {
+    ) -> Result<Vec<kasane_providers::LibraryPlaylist>, String> {
         state
             .yt_provider
             .account_playlists()
@@ -335,7 +335,7 @@ pub mod commands {
     pub async fn account_playlist_tracks(
         state: State<'_, AppState>,
         playlist_id: String,
-    ) -> Result<Vec<vibe_core::model::Track>, String> {
+    ) -> Result<Vec<kasane_core::model::Track>, String> {
         state
             .yt_provider
             .account_playlist_tracks(&playlist_id)
@@ -374,7 +374,7 @@ pub mod commands {
     pub async fn storage_info(app: AppHandle) -> Result<StorageInfo, String> {
         tauri::async_runtime::spawn_blocking(move || {
             let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-            let db_path = dir.join("vibeplayer.db");
+            let db_path = dir.join("kasane.db");
             let database_bytes = std::fs::metadata(&db_path)
                 .map(|m| m.len())
                 .unwrap_or(0);

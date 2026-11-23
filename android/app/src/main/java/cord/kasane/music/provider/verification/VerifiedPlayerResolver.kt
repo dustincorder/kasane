@@ -30,7 +30,7 @@ class VerificationException(message: String) : java.io.IOException("YouTube play
 /**
  * Anonymous WEB_REMIX playback with a legitimate, video-bound BotGuard proof and
  * the official player-script URL transform. Mirrors
- * `crates/vibe-providers/src/verification.rs` on Linux.
+ * `crates/kasane-providers/src/verification.rs` on Linux.
  */
 class VerifiedPlayerResolver(
     private val client: OkHttpClient,

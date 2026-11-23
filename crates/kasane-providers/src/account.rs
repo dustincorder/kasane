@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 
-use vibe_core::error::{Result, VibeError};
-use vibe_core::model::{Album, Artist, ProviderType, Track};
+use kasane_core::error::{Result, KasaneError};
+use kasane_core::model::{Album, Artist, ProviderType, Track};
 
 pub const YOUTUBE_ORIGIN: &str = "https://music.youtube.com";
 pub const LIKED_MUSIC_BROWSE_ID: &str = "FEmusic_liked_videos";
@@ -20,8 +20,8 @@ pub const PLAYLISTS_BROWSE_ID: &str = "FEmusic_liked_playlists";
 /// InnerTube browse ids are prefixed with VL to read a playlist's contents.
 const PLAYLIST_PREFIX: &str = "VL";
 
-fn provider_error(message: impl Into<String>) -> VibeError {
-    VibeError::Provider {
+fn provider_error(message: impl Into<String>) -> KasaneError {
+    KasaneError::Provider {
         provider: "YouTubeMusic".into(),
         message: message.into(),
     }

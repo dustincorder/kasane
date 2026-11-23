@@ -12,10 +12,10 @@
 | **Shared KMP Domain** | `shared/` | Kotlin Multiplatform, commonMain + JVM target | Shared Track/catalog models and queue policy; Android consumes this module. |
 | **Android Client** | `android/` | Kotlin 2.0.21, Jetpack Compose, Media3 1.5.1, Room 2.6.1 | Нативное Android-приложение (`cord.kasane.music`). |
 | **Desktop Client** | `src/`, `src-tauri/` | Svelte 5, Tailwind CSS, Tauri 2, Rust | Десктоп-клиент для Linux (`cord.kasane.desktop`). |
-| **Audio Engine** | `crates/vibe-audio/` | Rust, rodio / cpal | Воспроизведение, очередь, буферизация. |
-| **Core Domain** | `crates/vibe-core/` | Rust | Модели данных (`Track`, `Playlist`, `Artist`), общие структуры. |
-| **Database** | `crates/vibe-db/` | Rust, SQLite / sqlx | Локальная БД истории, кэша и метаданных десктопа. |
-| **Providers** | `crates/vibe-providers/`| Rust, reqwest, serde | Скрейпинг YouTube Music (InnerTube), резолв аудиопотоков. |
+| **Audio Engine** | `crates/kasane-audio/` | Rust, rodio / cpal | Воспроизведение, очередь, буферизация. |
+| **Core Domain** | `crates/kasane-core/` | Rust | Модели данных (`Track`, `Playlist`, `Artist`), общие структуры. |
+| **Database** | `crates/kasane-db/` | Rust, SQLite / sqlx | Локальная БД истории, кэша и метаданных десктопа. |
+| **Providers** | `crates/kasane-providers/`| Rust, reqwest, serde | Скрейпинг YouTube Music (InnerTube), резолв аудиопотоков. |
 
 ---
 
@@ -34,7 +34,7 @@ Application ID: `cord.kasane.music`
 - `provider/sabr/SabrWire.kt`, `SabrSession.kt`: ограниченный SABR/UMP AAC/fMP4 транспорт, ephemeral context, server protection handling.
 - `playback/SabrDataSource.kt`: внутренний on-demand HLS/fMP4 bridge для существующего Media3, без файлов/HTTP proxy.
 - Статус и ограничения: `docs/sabr-playback.md` (полное YouTube-воспроизведение ещё не подтверждено).
-- `provider/verification/`: верифицированный WEB_REMIX (BotGuard в System WebView + официальный player JS), см. `docs/playback-verification.md`. Linux-аналог: `crates/vibe-providers/src/verification.rs`, `src-tauri/src/verifier.rs`, общий JS — `verifier/entry.js`.
+- `provider/verification/`: верифицированный WEB_REMIX (BotGuard в System WebView + официальный player JS), см. `docs/playback-verification.md`. Linux-аналог: `crates/kasane-providers/src/verification.rs`, `src-tauri/src/verifier.rs`, общий JS — `verifier/entry.js`.
 - `GuestPlayerResolver.kt`:
   - Класс: `GuestPlayerResolver(client: OkHttpClient)`
   - Резолв гостевых потоков через клиент `ANDROID_VR` (`1.65.10`) с автоматическим `visitorData` handshake.
@@ -96,7 +96,7 @@ Application ID: `cord.kasane.music`
 - Application ID: `cord.kasane.desktop`
 - `src/`: Svelte 5 + Tailwind CSS UI.
 - `src-tauri/`: Tauri 2 backend на Rust.
-- `crates/`: `vibe-audio`, `vibe-core`, `vibe-db`, `vibe-providers`.
+- `crates/`: `kasane-audio`, `kasane-core`, `kasane-db`, `kasane-providers`.
 
 - Playlist destination parsing and confirmed account mutation: `android/app/src/main/java/cord/kasane/music/provider/PlaylistActions.kt`.
 - Account-scoped picker state and lost-acknowledgement recovery: `android/app/src/main/java/cord/kasane/music/provider/PlaylistPicker.kt`.

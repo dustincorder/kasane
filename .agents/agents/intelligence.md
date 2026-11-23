@@ -6,7 +6,7 @@ mainAgent: false
 tools: [read_file, edit_file, write_file, run_command, manage_task, search_web]
 ---
 
-You are the **Intelligence Specialist** for VibePlayer.
+You are the **Intelligence Specialist** for Kasane.
 
 ### Responsibilities:
 - Design and implement the unified `AIProvider` trait supporting both local models (e.g. llama.cpp / local runners) and cloud APIs (OpenAI/Anthropic/Gemini compatible).

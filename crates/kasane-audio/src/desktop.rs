@@ -4,9 +4,9 @@ use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 use std::io::Cursor;
 use std::{fs::File, thread, time::Duration};
 use tokio::sync::{mpsc, oneshot};
-use vibe_core::error::{Result, VibeError};
-use vibe_core::model::{PlaybackProgress, PlaybackState, StreamSource};
-use vibe_core::traits::PlaybackBackend;
+use kasane_core::error::{Result, KasaneError};
+use kasane_core::model::{PlaybackProgress, PlaybackState, StreamSource};
+use kasane_core::traits::PlaybackBackend;
 
 const MAX_DOWNLOAD_BYTES: usize = 64 * 1024 * 1024;
 const DOWNLOAD_CHUNK_BYTES: usize = 1024 * 1024;
@@ -41,12 +41,12 @@ impl AudioWorker {
         source: std::result::Result<impl Source + Send + 'static, rodio::decoder::DecoderError>,
     ) -> Result<()> {
         let source = source.map_err(|error| {
-            VibeError::Playback(format!("Unsupported or invalid audio file: {error}"))
+            KasaneError::Playback(format!("Unsupported or invalid audio file: {error}"))
         })?;
         let duration = source.total_duration().unwrap_or_default();
         if self.output.is_none() {
             let output = OutputStreamBuilder::open_default_stream()
-                .map_err(|_| VibeError::Audio("No working audio output is available".into()))?;
+                .map_err(|_| KasaneError::Audio("No working audio output is available".into()))?;
             self.output = Some(output);
         }
         let output = self.output.as_ref().ok_or_else(worker_closed)?;
@@ -89,7 +89,7 @@ impl AudioWorker {
         match command {
             Command::Play(Media::File(path)) => {
                 if !std::fs::metadata(&path)?.is_file() {
-                    return Err(VibeError::Playback("Choose a regular audio file".into()));
+                    return Err(KasaneError::Playback("Choose a regular audio file".into()));
                 }
                 self.play(Decoder::try_from(File::open(path)?))?;
                 self.stream_error = None;
@@ -133,7 +133,7 @@ impl AudioWorker {
                         position.min(self.duration.saturating_sub(Duration::from_millis(1)))
                     };
                     sink.try_seek(position).map_err(|_| {
-                        VibeError::Playback("Could not seek in this audio file".into())
+                        KasaneError::Playback("Could not seek in this audio file".into())
                     })?;
                 }
             }
@@ -150,15 +150,15 @@ impl AudioWorker {
                 if let Some(sink) = &self.sink {
                     sink.pause();
                 }
-                return Err(VibeError::Network(message.clone()));
+                return Err(KasaneError::Network(message.clone()));
             }
         }
         Ok(self.progress())
     }
 }
 
-fn worker_closed() -> VibeError {
-    VibeError::Audio("Audio worker stopped".into())
+fn worker_closed() -> KasaneError {
+    KasaneError::Audio("Audio worker stopped".into())
 }
 
 pub struct DesktopAudioBackend {
@@ -171,7 +171,7 @@ impl DesktopAudioBackend {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
             .build()
-            .map_err(|_| VibeError::Audio("Could not initialize audio HTTP client".into()))?;
+            .map_err(|_| KasaneError::Audio("Could not initialize audio HTTP client".into()))?;
         let (commands, mut receiver) = mpsc::channel::<(Command, oneshot::Sender<_>)>(8);
         // Keep rodio's non-Send output stream on its own thread.
         thread::Builder::new()
@@ -215,16 +215,16 @@ impl DesktopAudioBackend {
                 )
                 .send()
                 .await
-                .map_err(|_| VibeError::Network("Could not reach the audio server".into()))?;
+                .map_err(|_| KasaneError::Network("Could not reach the audio server".into()))?;
             let status = response.status();
             if !status.is_success() {
-                return Err(VibeError::Playback(format!(
+                return Err(KasaneError::Playback(format!(
                     "Audio server returned HTTP {status}"
                 )));
             }
             let partial = status == reqwest::StatusCode::PARTIAL_CONTENT;
             if !partial && start > 0 {
-                return Err(VibeError::Playback(
+                return Err(KasaneError::Playback(
                     "Audio server stopped honoring byte ranges".into(),
                 ));
             }
@@ -239,15 +239,15 @@ impl DesktopAudioBackend {
                 response.content_length()
             };
             if total.is_some_and(|size| size > MAX_DOWNLOAD_BYTES as u64) {
-                return Err(VibeError::Playback("Audio stream is too large".into()));
+                return Err(KasaneError::Playback("Audio stream is too large".into()));
             }
             while let Some(chunk) = response
                 .chunk()
                 .await
-                .map_err(|_| VibeError::Network("Could not download audio".into()))?
+                .map_err(|_| KasaneError::Network("Could not download audio".into()))?
             {
                 if chunk.len() > MAX_DOWNLOAD_BYTES - bytes.len() {
-                    return Err(VibeError::Playback("Audio stream is too large".into()));
+                    return Err(KasaneError::Playback("Audio stream is too large".into()));
                 }
                 bytes.extend_from_slice(&chunk);
             }
@@ -298,14 +298,14 @@ impl PlaybackBackend for DesktopAudioBackend {
 
     async fn seek(&mut self, position_secs: f64) -> Result<()> {
         let position = Duration::try_from_secs_f64(position_secs)
-            .map_err(|_| VibeError::Playback("Invalid seek position".into()))?;
+            .map_err(|_| KasaneError::Playback("Invalid seek position".into()))?;
         self.send(Command::Seek(position)).await?;
         Ok(())
     }
 
     async fn set_volume(&mut self, volume: f32) -> Result<()> {
         if !volume.is_finite() {
-            return Err(VibeError::Playback("Invalid volume".into()));
+            return Err(KasaneError::Playback("Invalid volume".into()));
         }
         self.send(Command::Volume(volume.clamp(0.0, 1.0))).await?;
         Ok(())
@@ -395,7 +395,7 @@ mod tests {
         let result = backend
             .send(Command::Play(Media::Download(b"not audio".to_vec())))
             .await;
-        assert!(matches!(result, Err(VibeError::Playback(_))));
+        assert!(matches!(result, Err(KasaneError::Playback(_))));
         assert_eq!(backend.get_state().await.unwrap(), PlaybackState::Stopped);
     }
 }

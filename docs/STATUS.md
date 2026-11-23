@@ -1,4 +1,4 @@
-# VibePlayer Project Status
+# Kasane Project Status
 
 - **Status**: First Working Vertical Slice Complete
 - **Date**: 2026-11-10
@@ -7,12 +7,12 @@
 ## What Works Right Now
 
 1. **Rust Workspace & Crates**:
-   - `vibe-core`: Shared models (`Track`, `Album`, `Artist`, `QueueState`, `AudioFeatures`, `StreamSource`), custom typed `VibeError`, traits for `MusicProvider`, `PlaybackBackend`, `AudioAnalyzer`, and `AIProvider`.
-   - `vibe-audio`: Dedicated audio execution thread, `rodio` / `symphonia` sink, playback progress polling, seek, volume control, and native DSP heuristic feature extractor.
-   - `vibe-providers`:
+   - `kasane-core`: Shared models (`Track`, `Album`, `Artist`, `QueueState`, `AudioFeatures`, `StreamSource`), custom typed `KasaneError`, traits for `MusicProvider`, `PlaybackBackend`, `AudioAnalyzer`, and `AIProvider`.
+   - `kasane-audio`: Dedicated audio execution thread, `rodio` / `symphonia` sink, playback progress polling, seek, volume control, and native DSP heuristic feature extractor.
+   - `kasane-providers`:
      - Real YouTube Music InnerTube search & stream resolution client (`WEB_REMIX` + `ANDROID_MUSIC` endpoints).
      - Offline mock catalog provider for zero-network testing and fallback.
-   - `vibe-db`: Embedded SQLite database (`vibeplayer.db`) with migrations for favorites, history, and audio features.
+   - `kasane-db`: Embedded SQLite database (`kasane.db`) with migrations for favorites, history, and audio features.
    - `src-tauri`: 13 IPC commands wiring the audio engine, queue manager, search, and database to the frontend.
 
 2. **Frontend UI (Svelte 5 + TypeScript + Tailwind CSS)**:

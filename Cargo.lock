@@ -2381,6 +2381,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "kasane"
+version = "0.1.1-alpha"
+dependencies = [
+ "async-trait",
+ "kasane-audio",
+ "kasane-connect",
+ "kasane-core",
+ "kasane-db",
+ "kasane-providers",
+ "keyring",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "kasane-audio"
+version = "0.1.1-alpha"
+dependencies = [
+ "async-trait",
+ "kasane-core",
+ "kasane-providers",
+ "m3u8-rs",
+ "reqwest 0.12.28",
+ "rodio",
+ "symphonia",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "kasane-connect"
 version = "0.1.0"
 dependencies = [
@@ -2401,6 +2438,45 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "kasane-core"
+version = "0.1.1-alpha"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "kasane-db"
+version = "0.1.1-alpha"
+dependencies = [
+ "kasane-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "kasane-providers"
+version = "0.1.1-alpha"
+dependencies = [
+ "async-trait",
+ "kasane-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha1",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -5625,82 +5701,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vibe-audio"
-version = "0.1.1-alpha"
-dependencies = [
- "async-trait",
- "m3u8-rs",
- "reqwest 0.12.28",
- "rodio",
- "symphonia",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "vibe-core",
- "vibe-providers",
-]
-
-[[package]]
-name = "vibe-core"
-version = "0.1.1-alpha"
-dependencies = [
- "async-trait",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
-name = "vibe-db"
-version = "0.1.1-alpha"
-dependencies = [
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "vibe-core",
-]
-
-[[package]]
-name = "vibe-providers"
-version = "0.1.1-alpha"
-dependencies = [
- "async-trait",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha1",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "vibe-core",
-]
-
-[[package]]
-name = "vibeplayer"
-version = "0.1.1-alpha"
-dependencies = [
- "async-trait",
- "kasane-connect",
- "keyring",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "vibe-audio",
- "vibe-core",
- "vibe-db",
- "vibe-providers",
-]
 
 [[package]]
 name = "vswhom"
