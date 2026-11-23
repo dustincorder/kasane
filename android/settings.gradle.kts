@@ -32,3 +32,7 @@ project(":desktop").projectDir = file("../desktop-compose")
 // Shared Compose Multiplatform UI (theme, components, screens) used by Android and desktop.
 include(":ui")
 project(":ui").projectDir = file("../shared-ui")
+
+// Isolated experiment: system-WebView playback verification for the desktop (not part of any app).
+include(":poc-webview")
+project(":poc-webview").projectDir = file("../poc/webview-verify")
