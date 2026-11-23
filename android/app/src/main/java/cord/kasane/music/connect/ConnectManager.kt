@@ -64,6 +64,8 @@ data class ConnectConfig(
     val appVersion: String,
     val platform: String = "android",
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    /** Preferred listening port; an ephemeral port is used when it is taken. */
+    val listenPort: Int = DEFAULT_PORT,
 )
 
 /** Callback for discovered services; ConnectManager owns what happens next. */
@@ -169,7 +171,7 @@ class ConnectManager(private val config: ConnectConfig) {
         if (running) return
         running = true
         val listener = try {
-            tls.serverSocket(DEFAULT_PORT)
+            tls.serverSocket(config.listenPort)
         } catch (e: Exception) {
             try { tls.serverSocket(0) } catch (e2: Exception) { return }
         }

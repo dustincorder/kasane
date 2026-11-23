@@ -87,7 +87,7 @@ class ConnectInteropTest {
     private fun manager(adapter: ConnectPlayerAdapter) = ConnectManager(ConnectConfig(
         identity = fixture("test-identity.p12"), adapter = adapter,
         trustFile = File(work, "kotlin-trusted.json"), appVersion = "interop",
-        platform = "android", scope = scope))
+        platform = "android", scope = scope, listenPort = 0))
 
     private fun rust(vararg args: String, stdin: String? = null): Process {
         val pb = ProcessBuilder(listOf(cli!!, "--data-dir", File(work, "rust").path) + args)

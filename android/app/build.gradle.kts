@@ -42,6 +42,9 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true
+        // Robolectric installs Conscrypt process-wide; on JDK 17+ its TLS server
+        // handshake reflects into java.net, which the Connect socket tests use.
+        unitTests.all { it.jvmArgs("--add-opens=java.base/java.net=ALL-UNNAMED") }
         managedDevices {
             devices {
                 create<com.android.build.api.dsl.ManagedVirtualDevice>("kasaneApi35") {

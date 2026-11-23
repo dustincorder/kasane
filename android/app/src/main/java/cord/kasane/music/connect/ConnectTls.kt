@@ -69,7 +69,11 @@ class ConnectTls(private val identity: ConnectIdentity) {
     }
 
     fun serverSocket(port: Int): SSLServerSocket {
-        val socket = context.serverSocketFactory.createServerSocket(port) as SSLServerSocket
+        // Bind IPv4 explicitly like the Rust peer: a dual-stack "::" socket can share
+        // the port with another process's 0.0.0.0 listener, and IPv4 clients then
+        // reach that process instead of us.
+        val socket = context.serverSocketFactory.createServerSocket(
+            port, 50, java.net.InetAddress.getByName("0.0.0.0")) as SSLServerSocket
         socket.enabledProtocols = arrayOf("TLSv1.3")
         socket.needClientAuth = true
         return socket

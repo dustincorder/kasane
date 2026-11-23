@@ -130,6 +130,7 @@ class ConnectLoopbackTest {
                 appVersion = "test",
                 platform = "android",
                 scope = scope,
+                listenPort = 0,
             )
         )
 
