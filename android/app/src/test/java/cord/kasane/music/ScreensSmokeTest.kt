@@ -15,7 +15,7 @@ import cord.kasane.music.settings.AccentSource
 import cord.kasane.music.settings.ThemeMode
 import cord.kasane.music.ui.*
 import cord.kasane.music.ui.components.QueueContent
-import cord.kasane.music.ui.theme.FallbackSeed
+import cord.kasane.ui.theme.FallbackSeed
 import cord.kasane.music.ui.theme.KasaneTheme
 import org.junit.Rule
 import org.junit.Test

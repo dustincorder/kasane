@@ -59,6 +59,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import cord.kasane.desktop.playback.PlayerState
 import cord.kasane.desktop.playback.RepeatMode
+import cord.kasane.ui.screens.QueueContent
+import cord.kasane.ui.screens.QueueUiState
 
 /** Everything the player surfaces need; routes to local playback or, later, a Connect target. */
 interface PlayerControls {
@@ -153,46 +155,22 @@ fun PlayerBar(
     }
 }
 
-/** Up next and history; click plays, the arrows reorder, × removes. */
+/** The shared queue screen, fed from the desktop player state (the desktop queue is already in play order). */
 @Composable
 fun QueueList(state: PlayerState, controls: PlayerControls, modifier: Modifier = Modifier) {
-    val listState = rememberLazyListState()
-    LaunchedEffect(state.index) { if (state.index >= 0) listState.animateScrollToItem((state.index - 1).coerceAtLeast(0)) }
-    if (state.queue.isEmpty()) { Message("The queue is empty.", modifier); return }
-    LazyColumn(modifier, state = listState, contentPadding = PaddingValues(8.dp)) {
-        itemsIndexed(state.queue, key = { i, t -> "$i:${t.id}" }) { i, t ->
-            val current = i == state.index
-            Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
-                .background(if (current) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow)
-                .clickable { controls.playIndex(i) }.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Artwork(t.thumbnailUri, 40.dp, MaterialTheme.shapes.extraSmall)
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(t.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        color = if (i < state.index) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
-                    Text(t.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (!current) {
-                    IconButton(onClick = { controls.move(i, i - 1) }, enabled = i > 0, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.KeyboardArrowUp, "Move up", Modifier.size(18.dp)) }
-                    IconButton(onClick = { controls.move(i, i + 1) }, enabled = i < state.queue.lastIndex, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.KeyboardArrowDown, "Move down", Modifier.size(18.dp)) }
-                    IconButton(onClick = { controls.remove(i) }, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.Close, "Remove", Modifier.size(16.dp)) }
-                }
-            }
-            Spacer(Modifier.height(2.dp))
-        }
-    }
+    QueueContent(
+        QueueUiState(state.queue, state.index, if (state.index >= 0) (state.index + 1 until state.queue.size).toList() else emptyList(),
+            state.isPlaying, state.isLoading, shuffle = false),
+        onPlayIndex = controls::playIndex, onMove = controls::move, onRemove = controls::remove, modifier = modifier)
 }
 
 @Composable
 fun QueuePanel(state: PlayerState, controls: PlayerControls, onClose: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.width(360.dp).fillMaxHeight()) {
         Column {
-            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Up next", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                Text("${state.queue.size} tracks", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth().padding(end = 4.dp), horizontalArrangement = Arrangement.End) {
                 IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close queue") }
             }
-            HorizontalDivider()
             QueueList(state, controls, Modifier.fillMaxSize())
         }
     }
@@ -238,10 +216,7 @@ fun NowPlaying(state: PlayerState, controls: PlayerControls, actions: Actions, o
                 if (wide) {
                     Spacer(Modifier.width(24.dp))
                     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large, modifier = Modifier.width(400.dp).fillMaxHeight()) {
-                        Column {
-                            Text("Up next", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
-                            QueueList(state, controls, Modifier.fillMaxSize())
-                        }
+                        QueueList(state, controls, Modifier.fillMaxSize().padding(top = 8.dp))
                     }
                 }
             }

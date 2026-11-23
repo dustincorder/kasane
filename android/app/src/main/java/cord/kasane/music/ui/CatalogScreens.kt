@@ -35,6 +35,7 @@ import cord.kasane.music.data.CachedCatalogRepository
 import cord.kasane.music.data.CatalogCache
 import cord.kasane.music.ui.components.*
 import cord.kasane.music.ui.theme.*
+import cord.kasane.ui.theme.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.security.MessageDigest

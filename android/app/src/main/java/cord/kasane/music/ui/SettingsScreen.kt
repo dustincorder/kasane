@@ -21,6 +21,7 @@ import cord.kasane.music.settings.AccentSource
 import cord.kasane.music.settings.ThemeMode
 import androidx.compose.ui.graphics.toArgb
 import cord.kasane.music.ui.theme.*
+import cord.kasane.ui.theme.*
 
 @Composable
 fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
@@ -176,7 +177,7 @@ fun SettingsContent(
 fun SettingsGuestPreview() {
     KasaneTheme(dynamicColor = false) {
         Surface(color = MaterialTheme.colorScheme.background) {
-            SettingsContent(AccountState.Guest, {}, {}, {}, {}, {}, {}, ThemeMode.DARK, AccentSource.AUTO, cord.kasane.music.ui.theme.FallbackSeed, {}, {}, {})
+            SettingsContent(AccountState.Guest, {}, {}, {}, {}, {}, {}, ThemeMode.DARK, AccentSource.AUTO, cord.kasane.ui.theme.FallbackSeed, {}, {}, {})
         }
     }
 }
@@ -186,7 +187,7 @@ fun SettingsGuestPreview() {
 fun SettingsSignedInPreview() {
     KasaneTheme(dynamicColor = false) {
         Surface(color = MaterialTheme.colorScheme.background) {
-            SettingsContent(AccountState.SignedIn(AccountIdentity("Kasane Listener", null, "UCpreview")), {}, {}, {}, {}, {}, {}, ThemeMode.LIGHT, AccentSource.MANUAL, cord.kasane.music.ui.theme.FallbackSeed, {}, {}, {})
+            SettingsContent(AccountState.SignedIn(AccountIdentity("Kasane Listener", null, "UCpreview")), {}, {}, {}, {}, {}, {}, ThemeMode.LIGHT, AccentSource.MANUAL, cord.kasane.ui.theme.FallbackSeed, {}, {}, {})
         }
     }
 }

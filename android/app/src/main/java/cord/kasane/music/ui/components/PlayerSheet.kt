@@ -53,6 +53,7 @@ import androidx.compose.ui.util.lerp
 import cord.kasane.music.model.Track
 import cord.kasane.music.playback.PlaybackUiState
 import cord.kasane.music.ui.theme.*
+import cord.kasane.ui.theme.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.abs

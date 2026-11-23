@@ -28,3 +28,7 @@ project(":shared").projectDir = file("../shared")
 // Experimental Compose Multiplatform desktop client (Linux JVM); the Tauri client is unaffected.
 include(":desktop")
 project(":desktop").projectDir = file("../desktop-compose")
+
+// Shared Compose Multiplatform UI (theme, components, screens) used by Android and desktop.
+include(":ui")
+project(":ui").projectDir = file("../shared-ui")

@@ -6,7 +6,7 @@ import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "--connect-smoke") exitProcess(runConnectSmoke())
-    if (args.firstOrNull() == "--render") exitProcess(runRender(java.io.File(args.getOrElse(1) { "/tmp/kasane-render" })))
+    if (args.firstOrNull() == "--render") exitProcess(runRender(java.io.File(args.getOrElse(1) { "/tmp/kasane-render" }), args.getOrNull(2)?.toDoubleOrNull() ?: 1.0))
     if (args.firstOrNull() == "--smoke") exitProcess(runSmoke(args.drop(1).joinToString(" ").ifBlank { "Daft Punk Around the World" }))
     runUi()
 }

@@ -1,6 +1,7 @@
 package cord.kasane.desktop
 
-import cord.kasane.desktop.ui.ThemeMode
+import cord.kasane.ui.settings.AccentSource
+import cord.kasane.ui.settings.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -11,7 +12,10 @@ import java.io.File
 @Serializable
 data class Preferences(
     val theme: ThemeMode = ThemeMode.SYSTEM,
+    val accentSource: AccentSource = AccentSource.AUTO,
     val accent: Long = 0xFF4F8BE8,
+    /** Multiplier on top of the detected system scale; 1.0 = follow the system. */
+    val uiScale: Float = 1f,
     val connectEnabled: Boolean = true,
     val volume: Float = 1f,
 )

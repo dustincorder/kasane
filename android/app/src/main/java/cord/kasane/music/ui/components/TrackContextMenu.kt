@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cord.kasane.music.ui.theme.*
+import cord.kasane.ui.theme.*
 import androidx.compose.runtime.*
 import cord.kasane.music.model.Track
 import cord.kasane.music.provider.CloudLikeState

@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import cord.kasane.music.model.Track
 import cord.kasane.music.ui.theme.*
+import cord.kasane.ui.theme.*
 
 /**
  * Grid item: the whole card is the target. Tap plays or opens, long-press opens the menu, and there is no

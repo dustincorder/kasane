@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import cord.kasane.music.ui.theme.*
+import cord.kasane.ui.theme.*
 
 /** Selected = tonal primary container; unselected = outlined. Uses the active color scheme (incl. Material You). */
 @Composable

@@ -38,6 +38,7 @@ import cord.kasane.music.model.CatalogChip
 import cord.kasane.music.model.Track
 import cord.kasane.music.ui.components.*
 import cord.kasane.music.ui.theme.*
+import cord.kasane.ui.theme.*
 
 class HomeActions(
     val playTrack: (Track) -> Unit,

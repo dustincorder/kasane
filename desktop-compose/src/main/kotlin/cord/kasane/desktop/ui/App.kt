@@ -41,6 +41,10 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.platform.LocalDensity
+import cord.kasane.desktop.SystemScale
+import cord.kasane.ui.settings.AccentSource
+import cord.kasane.ui.theme.FallbackSeed
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -78,7 +82,9 @@ class Nav {
 fun runUi() = application {
     val app = remember { DesktopApp() }
     val nav = remember { Nav() }
-    val window = rememberWindowState(size = DpSize(1320.dp, 860.dp))
+    val systemScale = remember { SystemScale.detect() }
+    val initial = remember { initialWindowSize(systemScale * app.settings.prefs.value.uiScale) }
+    val window = rememberWindowState(size = initial)
     Window(onCloseRequest = { app.close(); exitApplication() }, state = window, title = "Kasane",
         icon = painterResource("kasane.png"), onKeyEvent = { e ->
             if (e.type != KeyEventType.KeyDown) return@Window false
@@ -90,16 +96,43 @@ fun runUi() = application {
                     nav.nowPlaying = false; nav.stack = emptyList(); nav.tab = Tab.SEARCH
                     runCatching { nav.searchFocus.requestFocus() }; true
                 }
+                e.isCtrlPressed && (e.key == Key.Equals || e.key == Key.Plus) -> { app.settings.update { it.copy(uiScale = stepScale(it.uiScale, +1)) }; true }
+                e.isCtrlPressed && e.key == Key.Minus -> { app.settings.update { it.copy(uiScale = stepScale(it.uiScale, -1)) }; true }
+                e.isCtrlPressed && e.key == Key.Zero -> { app.settings.update { it.copy(uiScale = 1f) }; true }
                 e.key == Key.Escape || (e.isAltPressed && e.key == Key.DirectionLeft) -> nav.back()
                 else -> false
             }
         }) {
-        this.window.minimumSize = java.awt.Dimension(900, 600)
         val prefs by app.settings.prefs.collectAsState()
-        KasaneTheme(prefs.theme, Color(prefs.accent)) {
-            CompositionLocalProvider(LocalArtwork provides remember { ArtworkLoader(app.http) }) { KasaneWindow(app, nav) }
+        val artwork = remember { DesktopArtworkLoader(app.http) }
+        val seed = if (prefs.accentSource == AccentSource.MANUAL) Color(prefs.accent) else FallbackSeed
+        KasaneTheme(prefs.theme, seed, artwork) {
+            ScaledDensity(systemScale, prefs.uiScale) {
+                val density = LocalDensity.current
+                androidx.compose.runtime.LaunchedEffect(density.density) {
+                    this@Window.window.minimumSize = java.awt.Dimension((MIN_WIDTH_DP * density.density).toInt(), (MIN_HEIGHT_DP * density.density).toInt())
+                }
+                KasaneWindow(app, nav)
+            }
         }
     }
+}
+
+const val MIN_WIDTH_DP = 720
+const val MIN_HEIGHT_DP = 520
+
+/** 10 % steps between 75 % and 250 %, for Ctrl +/-. */
+fun stepScale(current: Float, direction: Int): Float = ((current * 100).toInt() / 5 * 5 + direction * 10).coerceIn(75, 250) / 100f
+
+/** About 1320x860 dp, never more than 90 % of the screen, so a scaled UI still opens fully on screen. */
+private fun initialWindowSize(effective: Double): DpSize {
+    val screen = java.awt.Toolkit.getDefaultToolkit().screenSize
+    val awt = runCatching { java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration.defaultTransform.scaleX }.getOrDefault(1.0)
+    // Window sizes are in AWT units; the UI draws at awt * effective-if-not-already-applied.
+    val density = if (awt > 1.01) awt else effective
+    val w = minOf(1320.0 * density, screen.width * 0.9) / awt
+    val h = minOf(860.0 * density, screen.height * 0.9) / awt
+    return DpSize(w.dp, h.dp)
 }
 
 @Composable

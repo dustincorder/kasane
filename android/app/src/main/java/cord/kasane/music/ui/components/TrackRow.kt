@@ -25,6 +25,7 @@ import coil.compose.AsyncImage
 import androidx.compose.ui.tooling.preview.Preview
 import cord.kasane.music.model.Track
 import cord.kasane.music.ui.theme.*
+import cord.kasane.ui.theme.*
 
 fun formatDuration(seconds: Double): String {
     val totalSecs = seconds.toInt()

@@ -124,6 +124,7 @@ gradle.taskGraph.whenReady {
 
 dependencies {
     implementation(project(":shared"))
+    implementation(project(":ui"))
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
 

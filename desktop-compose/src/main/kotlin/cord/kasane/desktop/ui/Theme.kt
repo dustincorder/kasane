@@ -1,64 +1,18 @@
 package cord.kasane.desktop.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Shapes
-import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.materialkolor.PaletteStyle
-import com.materialkolor.dynamicColorScheme
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import cord.kasane.ui.components.ArtworkLoader
+import cord.kasane.ui.components.LocalArtworkLoader
+import cord.kasane.ui.settings.ThemeMode
+import cord.kasane.ui.theme.KasaneMaterialTheme
+import cord.kasane.ui.theme.seedColorScheme
 import java.io.File
-
-// Same tokens as android/.../ui/theme/Theme.kt. They are duplicated for this
-// prototype only; a shared Compose UI module would own them (see docs).
-
-val FallbackSeed = Color(0xFF4F8BE8)
-
-val AccentPresets: List<Pair<String, Color>> = listOf(
-    "Blue" to Color(0xFF4F8BE8), "Teal" to Color(0xFF1FA6A0), "Green" to Color(0xFF4CAF6A), "Amber" to Color(0xFFE0A030),
-    "Coral" to Color(0xFFE5685A), "Rose" to Color(0xFFD9548A), "Indigo" to Color(0xFF6577E0), "Slate" to Color(0xFF7A8A99),
-)
-
-val KasaneShapes = Shapes(
-    extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(28.dp),
-)
-
-private fun style(size: Int, line: Int, weight: FontWeight, spacing: Double) = TextStyle(
-    fontFamily = FontFamily.SansSerif, fontWeight = weight, fontSize = size.sp, lineHeight = line.sp, letterSpacing = spacing.sp,
-)
-
-val KasaneTypography = Typography(
-    headlineLarge = style(32, 40, FontWeight.Bold, -0.5),
-    headlineMedium = style(26, 32, FontWeight.Bold, -0.4),
-    headlineSmall = style(22, 28, FontWeight.Bold, -0.3),
-    titleLarge = style(20, 26, FontWeight.SemiBold, -0.2),
-    titleMedium = style(15, 20, FontWeight.SemiBold, 0.0),
-    titleSmall = style(14, 19, FontWeight.Medium, 0.0),
-    bodyLarge = style(15, 21, FontWeight.Normal, 0.0),
-    bodyMedium = style(13, 18, FontWeight.Normal, 0.1),
-    bodySmall = style(12, 16, FontWeight.Normal, 0.1),
-    labelLarge = style(13, 18, FontWeight.SemiBold, 0.1),
-    labelMedium = style(12, 16, FontWeight.Medium, 0.2),
-    labelSmall = style(11, 15, FontWeight.Normal, 0.2),
-)
-
-enum class ThemeMode { SYSTEM, LIGHT, DARK }
-
-fun seedColorScheme(seed: Color, dark: Boolean): ColorScheme =
-    dynamicColorScheme(seedColor = seed, isDark = dark, isAmoled = false, style = PaletteStyle.TonalSpot)
 
 /** KDE and GNOME expose dark mode differently from what the JVM can see. */
 private fun desktopPrefersDark(): Boolean? {
@@ -73,11 +27,27 @@ private fun desktopPrefersDark(): Boolean? {
     }.getOrNull()
 }
 
+/** The shared Kasane theme with the desktop's colour source (the user's accent; the built-in seed for Automatic). */
 @Composable
-fun KasaneTheme(mode: ThemeMode, seed: Color, content: @Composable () -> Unit) {
+fun KasaneTheme(mode: ThemeMode, seed: Color, artwork: ArtworkLoader, content: @Composable () -> Unit) {
     val systemDark = isSystemInDarkTheme()
     val desktopDark = remember { desktopPrefersDark() }
     val dark = when (mode) { ThemeMode.SYSTEM -> desktopDark ?: systemDark; ThemeMode.LIGHT -> false; ThemeMode.DARK -> true }
     val scheme = remember(dark, seed) { seedColorScheme(seed, dark) }
-    MaterialTheme(colorScheme = scheme, typography = KasaneTypography, shapes = KasaneShapes, content = content)
+    CompositionLocalProvider(LocalArtworkLoader provides artwork) { KasaneMaterialTheme(scheme, content) }
 }
+
+/**
+ * Interface scale. The window density already includes the display scale when the JVM applied it (then
+ * [detected] is ignored, so the scale is never doubled); otherwise [detected] supplies it. [user] is the
+ * preference on top. Every dp and sp in shared and desktop code scales together: layout, type and hit targets.
+ */
+@Composable
+fun ScaledDensity(detected: Double, user: Float, content: @Composable () -> Unit) {
+    val base = LocalDensity.current
+    val density = remember(base, detected, user) { Density(base.density * effectiveMultiplier(base.density, detected, user), base.fontScale) }
+    CompositionLocalProvider(LocalDensity provides density, content = content)
+}
+
+fun effectiveMultiplier(baseDensity: Float, detected: Double, user: Float): Float =
+    (if (baseDensity > 1.01f) 1.0 else detected).toFloat() * user

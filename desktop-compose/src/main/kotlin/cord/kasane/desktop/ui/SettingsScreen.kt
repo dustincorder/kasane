@@ -18,6 +18,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import cord.kasane.ui.screens.AppearanceSection
+import cord.kasane.ui.settings.AccentSource
+import cord.kasane.ui.theme.bodySmallMuted
+import kotlin.math.roundToInt
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -46,25 +57,13 @@ fun SettingsScreen(app: DesktopApp, connectSection: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         SectionTitle("Settings")
         Column(Modifier.padding(horizontal = 24.dp).widthIn(max = 720.dp)) {
-            SettingsSection("Appearance") {
-                SingleChoiceSegmentedButtonRow {
-                    ThemeMode.entries.forEachIndexed { i, mode ->
-                        SegmentedButton(selected = prefs.theme == mode, onClick = { app.settings.update { it.copy(theme = mode) } },
-                            shape = SegmentedButtonDefaults.itemShape(i, ThemeMode.entries.size)) {
-                            Text(mode.name.lowercase().replaceFirstChar(Char::uppercase))
-                        }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                Text("Accent", style = MaterialTheme.typography.titleSmall)
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    AccentPresets.forEach { (_, color) ->
-                        val selected = prefs.accent == (color.toArgb().toLong() and 0xFFFFFFFFL)
-                        Box(Modifier.size(32.dp).clip(CircleShape).background(color)
-                            .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
-                            .clickable { app.settings.update { it.copy(accent = (color.toArgb().toLong() and 0xFFFFFFFFL)) } })
-                    }
-                }
+            Column(Modifier.padding(horizontal = 0.dp)) {
+                AppearanceSection(prefs.theme, prefs.accentSource, Color(prefs.accent),
+                    automaticHint = "Automatic uses Kasane's built-in palette on desktop. Pick an accent to override it.",
+                    onMode = { m -> app.settings.update { it.copy(theme = m) } },
+                    onAuto = { app.settings.update { it.copy(accentSource = AccentSource.AUTO) } },
+                    onAccent = { c -> app.settings.update { it.copy(accentSource = AccentSource.MANUAL, accent = c.toArgb().toLong() and 0xFFFFFFFFL) } },
+                    extra = { ScaleControl(app, prefs.uiScale) })
             }
             SettingsSection("Account") {
                 Text("Guest", style = MaterialTheme.typography.titleSmall)
@@ -86,3 +85,21 @@ fun SettingsScreen(app: DesktopApp, connectSection: @Composable () -> Unit) {
     }
 }
 
+
+/** Interface scale: a multiplier over the detected display scale, applied to the whole window through the density. */
+@Composable
+private fun ScaleControl(app: DesktopApp, scale: Float) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var value by remember(scale) { mutableStateOf(scale) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Interface scale", style = MaterialTheme.typography.titleSmall)
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Slider(value, { value = ((it * 20).roundToInt() / 20f) }, valueRange = 0.75f..2.5f,
+                onValueChangeFinished = { app.settings.update { it.copy(uiScale = value) } }, modifier = Modifier.weight(1f))
+            Text("${(value * 100).roundToInt()} %", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 12.dp))
+            TextButton(onClick = { app.settings.update { it.copy(uiScale = 1f) } }, enabled = scale != 1f) { Text("Reset") }
+        }
+        Text("Total scale in effect: ${(density.density * 100).roundToInt()} %. Ctrl + / Ctrl - / Ctrl 0 also change it.",
+            style = MaterialTheme.typography.bodySmallMuted)
+    }
+}

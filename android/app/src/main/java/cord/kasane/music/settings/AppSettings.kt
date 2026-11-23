@@ -10,16 +10,8 @@ enum class StorageLocation(val key: String) {
     companion object { fun fromKey(key: String?) = entries.firstOrNull { it.key == key } ?: INTERNAL }
 }
 
-enum class ThemeMode(val key: String) {
-    SYSTEM("system"), LIGHT("light"), DARK("dark");
-    companion object { fun fromKey(key: String?) = entries.firstOrNull { it.key == key } ?: SYSTEM }
-}
-
-/** Where the colour scheme comes from. AUTO = wallpaper colours (Android 12+) or the built-in palette. */
-enum class AccentSource(val key: String) {
-    AUTO("auto"), MANUAL("manual");
-    companion object { fun fromKey(key: String?) = entries.firstOrNull { it.key == key } ?: AUTO }
-}
+typealias ThemeMode = cord.kasane.ui.settings.ThemeMode
+typealias AccentSource = cord.kasane.ui.settings.AccentSource
 
 /** Device-local preferences. Nothing here is synced or exported with account data. */
 class AppSettings(context: Context) {

@@ -24,6 +24,7 @@ import cord.kasane.music.provider.*
 import cord.kasane.music.ui.components.TrackArtwork
 import cord.kasane.music.ui.components.*
 import cord.kasane.music.ui.theme.*
+import cord.kasane.ui.theme.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
