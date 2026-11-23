@@ -15,7 +15,14 @@ kotlin {
             api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
         }
         commonTest.dependencies { implementation(kotlin("test")) }
-        jvmMain.dependencies { api("com.squareup.okhttp3:okhttp:4.12.0") }
-        jvmTest.dependencies { implementation("com.squareup.okhttp3:mockwebserver:4.12.0") }
+        jvmMain.dependencies {
+            api("com.squareup.okhttp3:okhttp:4.12.0")
+            // Android provides org.json in the platform; desktop consumers add the artifact themselves.
+            compileOnly("org.json:json:20240303")
+        }
+        jvmTest.dependencies {
+            implementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+            implementation("org.json:json:20240303")
+        }
     }
 }

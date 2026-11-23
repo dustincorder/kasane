@@ -24,3 +24,7 @@ include(":app")
 
 include(":shared")
 project(":shared").projectDir = file("../shared")
+
+// Experimental Compose Multiplatform desktop client (Linux JVM); the Tauri client is unaffected.
+include(":desktop")
+project(":desktop").projectDir = file("../desktop-compose")

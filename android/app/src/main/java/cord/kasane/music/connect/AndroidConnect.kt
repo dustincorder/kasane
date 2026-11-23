@@ -78,6 +78,7 @@ object AndroidConnect {
             platform = "android",
             scope = scope,
         )
+        ConnectLog.warn = { tag, t -> android.util.Log.w("KasaneConnect", tag, t) }
         val manager = ConnectManager(config)
         return ConnectService(context, manager, identity)
     }

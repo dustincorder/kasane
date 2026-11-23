@@ -1000,7 +1000,9 @@ class ConnectManager(private val config: ConnectConfig) {
 
 class ConnectException(message: String) : Exception(message)
 
-private fun logWarn(tag: String, t: Throwable) {
-    runCatching { android.util.Log.w("KasaneConnect", tag, t) }
-        .onFailure { println("KasaneConnect $tag: $t") }
+/** Platform log sink; Android routes it to logcat, the desktop to stderr. */
+object ConnectLog {
+    @Volatile var warn: (String, Throwable) -> Unit = { tag, t -> System.err.println("KasaneConnect $tag: $t") }
 }
+
+private fun logWarn(tag: String, t: Throwable) = ConnectLog.warn(tag, t)
