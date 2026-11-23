@@ -91,22 +91,35 @@ export function trackToMeta(track: Track): TrackMeta {
   };
 }
 
+const LOCAL = '';
+
 class ConnectStore {
   local = $state<LocalDevice | null>(null);
   devices = $state<ConnectDevice[]>([]);
   prompts = $state<PairingPrompt[]>([]);
-  /** null = this PC plays locally; otherwise the controlled device id. */
+  /**
+   * The active playback device, Spotify Connect style: null = this PC.
+   * It follows whichever device is playing; a paused remote stays active.
+   */
   target = $state<string | null>(null);
-  remote = $state<RemoteState | null>(null);
-  private remoteAt = 0;
+  /** Latest state of every paired, connected device. */
+  remotes = $state<Record<string, { frame: RemoteState; at: number }>>({});
   error = $state<string | null>(null);
   showDevices = $state(false);
+  /** A transfer is in flight; the picker shows progress and ignores taps. */
+  transferring = $state<string | null>(null);
+
+  remote = $derived<RemoteState | null>(this.target ? this.remotes[this.target]?.frame ?? null : null);
+  private remoteAt = $derived(this.target ? this.remotes[this.target]?.at ?? 0 : 0);
 
   targetName = $derived(
     this.target === null
       ? null
       : this.devices.find((d) => d.id === this.target)?.name ?? 'device',
   );
+
+  /** Paired devices, connected or not, for the Connect picker. */
+  paired = $derived(this.devices.filter((d) => d.trusted && d.id));
 
   remoteQueue = $derived<Track[]>((this.remote?.queue ?? []).map(metaToTrack));
 
@@ -116,8 +129,9 @@ class ConnectStore {
     if (!frame) return 0;
     const base = (frame.positionMs ?? 0) / 1000;
     if (frame.playback !== 'playing') return base;
-    return base + (Date.now() - this.remoteAt) / 1000;
+    return base + (this.now - this.remoteAt) / 1000;
   });
+  private now = $state(Date.now());
 
   remoteDurationSecs = $derived((this.remote?.durationMs ?? 0) / 1000);
   remotePlaying = $derived(this.remote?.playback === 'playing');
@@ -146,36 +160,136 @@ class ConnectStore {
     await listen<ConnectUpdate>('connect://update', (event) => {
       this.devices = event.payload.devices;
       this.prompts = event.payload.prompts;
-      if (this.target && !this.devices.some((d) => d.id === this.target)) {
-        this.stopControlling();
+      if (this.target && !this.paired.some((d) => d.id === this.target)) {
+        this.target = null;
       }
     });
-    setInterval(() => void this.pollRemote(), 500);
+    setInterval(() => void this.pollRemotes(), 500);
   }
 
-  private async pollRemote() {
-    if (!this.target) return;
+  /** Remote position extrapolated to this instant (for transfers). */
+  private positionOf(id: string): number {
+    const entry = this.remotes[id];
+    if (!entry) return 0;
+    const base = entry.frame.positionMs ?? 0;
+    return entry.frame.playback === 'playing' ? base + (Date.now() - entry.at) : base;
+  }
+
+  /** Local-clock time each device (LOCAL = this PC) was seen starting to play. */
+  private startedAt: Record<string, number> = {};
+  private wasPlaying: Record<string, boolean> = {};
+
+  private async pollRemotes() {
+    this.now = Date.now();
+    let states: Record<string, RemoteState> = {};
     try {
-      const frame = await invoke<RemoteState | null>('connect_remote_state', {
-        deviceId: this.target,
-      });
-      if (frame) {
-        this.remote = frame;
-        this.remoteAt = Date.now();
-      }
+      states = await invoke<Record<string, RemoteState>>('connect_remote_states');
     } catch {
-      // Transient; the next poll retries.
+      return; // Transient; the next poll retries.
     }
+    const next: Record<string, { frame: RemoteState; at: number }> = {};
+    for (const [id, frame] of Object.entries(states)) {
+      const prev = this.remotes[id];
+      // Keep the receive time of an unchanged frame so extrapolation is right.
+      next[id] = prev && prev.frame.rev === frame.rev ? prev : { frame, at: Date.now() };
+      const playing = frame.playback === 'playing';
+      if (playing && !this.wasPlaying[id]) this.startedAt[id] = Date.now();
+      this.wasPlaying[id] = playing;
+    }
+    for (const id of Object.keys(this.startedAt)) {
+      if (id !== LOCAL && !(id in next)) {
+        delete this.startedAt[id];
+        delete this.wasPlaying[id];
+      }
+    }
+    this.remotes = next;
+    // This PC started playing: it becomes current and other devices stop, so
+    // only one device plays at a time.
+    if (player.isPlaying && !this.wasPlaying[LOCAL]) {
+      this.startedAt[LOCAL] = Date.now();
+      if (!this.transferring) {
+        for (const [id, r] of Object.entries(next)) {
+          if (r.frame.playback === 'playing') {
+            void invoke('connect_command', { deviceId: id, action: 'pause', args: {} }).catch(() => {});
+          }
+        }
+      }
+    }
+    this.wasPlaying[LOCAL] = player.isPlaying;
+    if (this.transferring) return;
+    // Current = the device that most recently started playing.
+    let best: string | null = null;
+    let bestAt = -1;
+    for (const [id, at] of Object.entries(this.startedAt)) {
+      if (at > bestAt && (id === LOCAL || id in next)) {
+        best = id;
+        bestAt = at;
+      }
+    }
+    this.target = best === null || best === LOCAL ? null : best;
   }
 
-  control(deviceId: string | null) {
-    this.target = deviceId;
-    this.remote = null;
-    if (deviceId) void this.pollRemote();
-  }
-
-  stopControlling() {
-    this.control(null);
+  /**
+   * Make `deviceId` (null = this PC) the active device. Whatever is playing
+   * moves there and continues from the same position; the old device stops
+   * only after the new one confirmed.
+   */
+  async select(deviceId: string | null) {
+    const from = this.target;
+    if (deviceId === from || this.transferring) return;
+    this.error = null;
+    this.transferring = deviceId ?? 'local';
+    try {
+      if (from === null) {
+        if (player.currentTrack && deviceId) {
+          await invoke('connect_handoff', {
+            deviceId,
+            request: {
+              transferId: '',
+              queue: player.queue.map(trackToMeta),
+              index: player.currentIndex ?? 0,
+              positionMs: Math.round(player.positionSecs * 1000),
+              playing: player.isPlaying,
+              shuffle: false,
+              repeat: 'off',
+            },
+          });
+          if (player.isPlaying) await player.togglePlay();
+        }
+      } else {
+        const frame = this.remotes[from]?.frame;
+        const playing = frame?.playback === 'playing';
+        if (frame?.track) {
+          const positionMs = Math.round(this.positionOf(from));
+          if (deviceId === null) {
+            await invoke('connect_pull', { deviceId: from, positionMs });
+            await player.refreshQueue();
+          } else {
+            await invoke('connect_handoff', {
+              deviceId,
+              request: {
+                transferId: '',
+                queue: frame.queue ?? [frame.track],
+                index: Math.max(0, frame.queueIndex),
+                positionMs,
+                playing,
+                shuffle: frame.shuffle,
+                repeat: frame.repeat,
+              },
+            });
+          }
+          if (playing) {
+            await invoke('connect_command', { deviceId: from, action: 'pause', args: {} });
+          }
+        }
+      }
+      this.startedAt[deviceId ?? LOCAL] = Date.now();
+      this.target = deviceId;
+    } catch (e) {
+      this.error = String(e);
+    } finally {
+      this.transferring = null;
+    }
   }
 
   async pair(target: string): Promise<string | null> {
@@ -205,49 +319,19 @@ class ConnectStore {
         action,
         args,
       });
-      await this.pollRemote();
+      await this.pollRemotes();
     } catch (e) {
       this.error = String(e);
     }
   }
 
-  /** Push the local queue + position to a paired device. */
-  async transferTo(deviceId: string) {
-    const index = player.currentIndex ?? 0;
-    try {
-      this.error = null;
-      await invoke('connect_handoff', {
-        deviceId,
-        request: {
-          transferId: '',
-          queue: player.queue.map(trackToMeta),
-          index,
-          positionMs: Math.round(player.positionSecs * 1000),
-          playing: player.isPlaying,
-          shuffle: false,
-          repeat: 'off',
-        },
-      });
-      // Per spec: only pause locally after the target acknowledged.
-      if (player.isPlaying) await player.togglePlay();
-    } catch (e) {
-      this.error = String(e);
-    }
-  }
-
-  /** Pull the remote device's queue into local playback. */
-  async playHere(deviceId: string) {
-    try {
-      this.error = null;
-      await invoke('connect_pull', { deviceId });
-      await player.refreshQueue();
-    } catch (e) {
-      this.error = String(e);
-    }
+  async disconnect(deviceId: string) {
+    if (this.target === deviceId) this.target = null;
+    await invoke('connect_disconnect', { deviceId }).catch((e) => (this.error = String(e)));
   }
 
   async remove(deviceId: string) {
-    if (this.target === deviceId) this.stopControlling();
+    if (this.target === deviceId) this.target = null;
     await invoke('connect_unpair', { deviceId });
   }
 

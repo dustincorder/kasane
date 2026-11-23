@@ -348,6 +348,8 @@ pub fn run() {
             connect::commands::connect_command,
             connect::commands::connect_handoff,
             connect::commands::connect_remote_state,
+            connect::commands::connect_remote_states,
+            connect::commands::connect_disconnect,
             connect::commands::connect_pull,
             connect::commands::connect_unpair,
             connect::commands::connect_status,

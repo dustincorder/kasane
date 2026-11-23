@@ -452,11 +452,25 @@ pub mod commands {
             .and_then(|rx| rx.borrow().clone()))
     }
 
+    #[tauri::command]
+    pub async fn connect_remote_states(
+        state: State<'_, AppState>,
+    ) -> Result<std::collections::HashMap<String, StateFrame>, String> {
+        Ok(state.connect.read().await.remote_states())
+    }
+
+    #[tauri::command]
+    pub async fn connect_disconnect(state: State<'_, AppState>, device_id: String) -> Result<(), String> {
+        state.connect.read().await.disconnect(&device_id);
+        Ok(())
+    }
+
     /// Pull the remote device's current queue into the local player.
     #[tauri::command]
     pub async fn connect_pull(
         state: State<'_, AppState>,
         device_id: String,
+        position_ms: Option<u64>,
     ) -> Result<(), String> {
         let frame = state
             .connect.read().await
@@ -480,7 +494,8 @@ pub mod commands {
             .handoff_queue(
                 tracks,
                 index,
-                frame.position_ms as f64 / 1000.0,
+                // The caller extrapolates the remote position to "now".
+                position_ms.unwrap_or(frame.position_ms) as f64 / 1000.0,
                 frame.playback == "playing",
                 frame.shuffle,
                 repeat,

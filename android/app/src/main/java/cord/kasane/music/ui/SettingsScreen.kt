@@ -1,5 +1,6 @@
 package cord.kasane.music.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -52,6 +53,7 @@ fun SettingsScreen(
     onCancel: () -> Unit,
     onExportLocalData: () -> Unit,
     onManageSaved: () -> Unit,
+    onOpenConnect: () -> Unit = {},
 ) {
     val mode by app.settings.themeMode.collectAsState()
     val source by app.settings.accentSource.collectAsState()
@@ -64,9 +66,14 @@ fun SettingsScreen(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SettingsSection("Devices") {
                 val connectOn by app.settings.connectEnabled.collectAsState()
-                SettingsSwitchRow("Kasane Connect",
-                    "Control playback between this phone and your PC on the same network.",
-                    connectOn, onChange = app.settings::setConnectEnabled)
+                ListItem(
+                    headlineContent = { Text("Kasane Connect", style = MaterialTheme.typography.titleSmall) },
+                    supportingContent = { Text(if (connectOn) "On · pair and manage your devices" else "Off",
+                        style = MaterialTheme.typography.bodySmall) },
+                    trailingContent = { Switch(checked = connectOn, onCheckedChange = app.settings::setConnectEnabled) },
+                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    modifier = Modifier.clickable(onClick = onOpenConnect),
+                )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             StorageSection(app, onManageSaved)

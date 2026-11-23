@@ -190,6 +190,7 @@ private fun KasaneContent(app: KasaneApplication) {
         var homeShelves by remember { mutableStateOf<List<CatalogShelf>>(emptyList()) }
         var showSettings by remember { mutableStateOf(false) }
         var showDownloads by remember { mutableStateOf(false) }
+        var showConnectSettings by remember { mutableStateOf(false) }
         var pendingSave by remember { mutableStateOf<List<Track>?>(null) }
         val offlineOnly by app.settings.offlineOnly.collectAsState()
         val recentSearches by app.searchHistory.recent.collectAsState()
@@ -507,7 +508,12 @@ private fun KasaneContent(app: KasaneApplication) {
                 }
             }
             Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(bottom = if (playbackState.currentTrack != null) 76.dp else 0.dp)) {
-                if (showDownloads) {
+                if (showConnectSettings) {
+                    val connectOn by app.settings.connectEnabled.collectAsState()
+                    cord.kasane.music.ui.components.ConnectDevicesScreen(remote, connectOn, app.settings::setConnectEnabled,
+                        localName = remote?.manager?.localDeviceName ?: cord.kasane.music.connect.AndroidConnect.deviceName(app),
+                        onBack = { showConnectSettings = false })
+                } else if (showDownloads) {
                     DownloadsScreen(app, onBack = { showDownloads = false }, onPlay = { routePlayTrack(it) })
                 } else if (showSettings) {
                     SettingsScreen(
@@ -522,7 +528,8 @@ private fun KasaneContent(app: KasaneApplication) {
                             clearYtMusicWebSession()
                         },
                         onExportLocalData = { exportLocalData.launch("kasane-local-data.json") },
-                        onManageSaved = { showDownloads = true })
+                        onManageSaved = { showDownloads = true },
+                        onOpenConnect = { showConnectSettings = true })
                 } else if (detailStack.isNotEmpty()) {
                     val detail = detailStack.last()
                     screenState.SaveableStateProvider("detail:${detail.kind}:${detail.id}") {
@@ -649,8 +656,10 @@ private fun KasaneContent(app: KasaneApplication) {
         }
         val devicesRemote = remote
         if (showDevices && devicesRemote != null) {
-            cord.kasane.music.ui.components.DevicesSheet(devicesRemote,
+            cord.kasane.music.ui.components.ConnectSheet(devicesRemote,
                 localName = devicesRemote.manager.localDeviceName,
+                localTrack = playbackState.currentTrack?.let { t -> listOf(t.title, t.artist).filter(String::isNotBlank).joinToString(" — ") },
+                onAddDevice = { showSettings = true; showConnectSettings = true },
                 onDismiss = { showDevices = false })
         }
         remotePrompts.firstOrNull()?.let { prompt ->

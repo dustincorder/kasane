@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DevicesView from '$lib/components/DevicesView.svelte';
   import { account } from '$lib/stores/account.svelte';
   import { Settings, User, MonitorSmartphone, HardDrive, LogOut } from 'lucide-svelte';
 
@@ -98,6 +99,9 @@
         </button>
       </div>
     </div>
+    {#if account.connectEnabled}
+      <DevicesView />
+    {/if}
   </section>
 
   <!-- Storage -->

@@ -8,6 +8,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -15,22 +17,147 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * UI-side remote control: which device (if any) the player surface renders
- * and routes actions to. Local playback stays authoritative when target==null.
+ * Spotify-Connect-style playback routing. Exactly one device is "current": the
+ * one that most recently started playing (this device or a paired peer). The
+ * player UI renders and controls the current device; when this device starts
+ * playing, peers that are playing are paused so only one device plays.
  */
 class RemoteController(
     val manager: ConnectManager,
     private val playback: PlaybackManager,
     private val scope: CoroutineScope,
 ) {
+    /** Current device id, or null when this device is current. */
     private val _target = MutableStateFlow<String?>(null)
     val target: StateFlow<String?> = _target.asStateFlow()
 
-    fun control(deviceId: String?) {
-        _target.value = deviceId
-        if (deviceId != null) {
-            scope.launch { runCatching { manager.connect(deviceId) } }
+    /** Local-clock time at which each device was seen starting to play. */
+    private val startedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val wasPlaying = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    private val receivedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    init {
+        scope.launch {
+            playback.uiState.map { it.isPlaying }.distinctUntilChanged().collect { playing ->
+                if (playing) {
+                    startedAt[LOCAL] = System.currentTimeMillis()
+                    pausePlayingPeers()
+                }
+                recompute()
+            }
         }
+        scope.launch {
+            manager.remoteStates.collect { states ->
+                val now = System.currentTimeMillis()
+                for ((id, frame) in states) {
+                    receivedAt[id] = now
+                    val playing = frame.playback == "playing"
+                    if (playing && wasPlaying[id] != true) startedAt[id] = now
+                    wasPlaying[id] = playing
+                }
+                (startedAt.keys - states.keys - LOCAL).forEach { startedAt.remove(it); wasPlaying.remove(it) }
+                recompute()
+            }
+        }
+    }
+
+    private fun recompute() {
+        val online = manager.remoteStates.value.keys
+        val best = startedAt.entries.filter { it.key == LOCAL || it.key in online }.maxByOrNull { it.value }?.key
+        _target.value = best?.takeIf { it != LOCAL }
+    }
+
+    private fun pausePlayingPeers() {
+        for ((id, frame) in manager.remoteStates.value) {
+            if (frame.playback == "playing") scope.launch { runCatching { manager.sendCommand(id, "pause") } }
+        }
+    }
+
+    /** Make [deviceId] current right away (used after a successful transfer). */
+    private fun markCurrent(deviceId: String?) {
+        startedAt[deviceId ?: LOCAL] = System.currentTimeMillis()
+        recompute()
+    }
+
+    /** Remote position, advanced by the time since the frame arrived while it plays. */
+    private fun livePosition(id: String, frame: Frame.State): Long {
+        if (frame.playback != "playing") return frame.positionMs
+        val elapsed = System.currentTimeMillis() - (receivedAt[id] ?: System.currentTimeMillis())
+        return (frame.positionMs + elapsed).let { if (frame.durationMs > 0) it.coerceAtMost(frame.durationMs) else it }
+    }
+
+    /**
+     * One-tap transfer: move whatever the current device plays to [deviceId]
+     * (null = this device) at the same position; the old device stops once
+     * the new one has started.
+     */
+    fun transferTo(deviceId: String?, onDone: (Boolean) -> Unit = {}) {
+        val from = _target.value
+        if (deviceId == from) return onDone(true)
+        scope.launch {
+            val ok = if (from == null) pushLocal(deviceId!!) else {
+                val frame = remoteFrame(from) ?: return@launch onDone(false)
+                if (deviceId == null) pullTo(from, frame) else pushRemote(from, frame, deviceId)
+            }
+            if (ok) markCurrent(deviceId)
+            onDone(ok)
+        }
+    }
+
+    private suspend fun pushLocal(deviceId: String): Boolean {
+        val ui = playback.uiState.value
+        if (ui.queue.isEmpty()) return false
+        val ok = runCatching { manager.handoff(deviceId, Frame.Handoff(
+            transferId = "",
+            queue = ui.queue.map { it.toMeta() },
+            index = ui.queueIndex.coerceAtLeast(0),
+            positionMs = ui.currentPositionMs,
+            playing = true,
+            shuffle = ui.shuffleEnabled,
+            repeat = repeatName(ui.repeatMode),
+        )) }.isSuccess
+        if (ok) playback.pause()
+        return ok
+    }
+
+    private suspend fun pullTo(from: String, frame: Frame.State): Boolean {
+        val tracks = (frame.queue ?: emptyList()).map { it.toTrack() }
+        if (tracks.isEmpty()) return false
+        val ok = playback.handoffQueue(
+            tracks = tracks,
+            index = frame.queueIndex.toInt().coerceIn(0, tracks.size - 1),
+            positionMs = livePosition(from, frame),
+            playing = true,
+            shuffle = frame.shuffle,
+            repeatMode = repeatMode(frame.repeat),
+        )
+        if (ok) runCatching { manager.sendCommand(from, "pause") }
+        return ok
+    }
+
+    private suspend fun pushRemote(from: String, frame: Frame.State, to: String): Boolean {
+        val queue = frame.queue ?: emptyList()
+        if (queue.isEmpty()) return false
+        val ok = runCatching { manager.handoff(to, Frame.Handoff(
+            transferId = "",
+            queue = queue,
+            index = frame.queueIndex.toInt().coerceIn(0, queue.size - 1),
+            positionMs = livePosition(from, frame),
+            playing = true,
+            shuffle = frame.shuffle,
+            repeat = frame.repeat,
+        )) }.isSuccess
+        if (ok) runCatching { manager.sendCommand(from, "pause") }
+        return ok
+    }
+
+    fun setVolume(volume: Float) {
+        send("setVolume", buildJsonObject { put("volume", volume.coerceIn(0f, 1f)) })
+    }
+
+    /** Close the session to [deviceId] until it is announced again. */
+    fun disconnect(deviceId: String) {
+        scope.launch { runCatching { manager.disconnect(deviceId) } }
     }
 
     fun pair(target: String) {
@@ -38,7 +165,8 @@ class RemoteController(
     }
 
     fun unpair(deviceId: String) {
-        if (_target.value == deviceId) _target.value = null
+        startedAt.remove(deviceId)
+        recompute()
         scope.launch { runCatching { manager.unpair(deviceId) } }
     }
 
@@ -125,51 +253,6 @@ class RemoteController(
     private fun metaJson(meta: TrackMeta): kotlinx.serialization.json.JsonElement =
         ConnectJson.json.encodeToJsonElement(TrackMeta.serializer(), meta)
 
-    /** Push the local queue + position to a paired device; pause locally only after ack. */
-    fun transferTo(deviceId: String, onDone: (Boolean) -> Unit = {}) {
-        val ui = playback.uiState.value
-        val request = Frame.Handoff(
-            transferId = "",
-            queue = ui.queue.map { it.toMeta() },
-            index = ui.queueIndex.coerceAtLeast(0),
-            positionMs = ui.currentPositionMs,
-            playing = ui.isPlaying,
-            shuffle = ui.shuffleEnabled,
-            repeat = when (ui.repeatMode) {
-                Player.REPEAT_MODE_ALL -> "all"
-                Player.REPEAT_MODE_ONE -> "one"
-                else -> "off"
-            },
-        )
-        scope.launch {
-            val ok = runCatching { manager.handoff(deviceId, request) }.isSuccess
-            if (ok && ui.isPlaying) playback.pause()
-            onDone(ok)
-        }
-    }
-
-    /** Pull: start the remote snapshot locally, then pause the remote. */
-    fun playHere(deviceId: String, onDone: (Boolean) -> Unit = {}) {
-        val frame = remoteFrame(deviceId) ?: return onDone(false)
-        scope.launch {
-            val tracks = (frame.queue ?: emptyList()).map { it.toTrack() }
-            val ok = tracks.isNotEmpty() && playback.handoffQueue(
-                tracks = tracks,
-                index = frame.queueIndex.toInt().coerceIn(0, tracks.size - 1),
-                positionMs = frame.positionMs,
-                playing = frame.playback == "playing",
-                shuffle = frame.shuffle,
-                repeatMode = when (frame.repeat) {
-                    "all" -> Player.REPEAT_MODE_ALL
-                    "one" -> Player.REPEAT_MODE_ONE
-                    else -> Player.REPEAT_MODE_OFF
-                },
-            )
-            if (ok) runCatching { manager.sendCommand(deviceId, "pause") }
-            onDone(ok)
-        }
-    }
-
     /** Collection play-all/shuffle on the remote = a handoff of that queue. */
     fun playTracksRemotely(deviceId: String, tracks: List<Track>, shuffle: Boolean, onDone: (Boolean) -> Unit = {}) {
         scope.launch {
@@ -187,6 +270,20 @@ class RemoteController(
                 ))
             }.isSuccess
             onDone(ok)
+        }
+    }
+
+    private companion object {
+        const val LOCAL = ""
+        fun repeatName(mode: Int) = when (mode) {
+            Player.REPEAT_MODE_ALL -> "all"
+            Player.REPEAT_MODE_ONE -> "one"
+            else -> "off"
+        }
+        fun repeatMode(name: String) = when (name) {
+            "all" -> Player.REPEAT_MODE_ALL
+            "one" -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
         }
     }
 }

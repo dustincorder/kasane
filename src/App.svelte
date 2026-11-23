@@ -4,16 +4,16 @@
   import SearchView from '$lib/components/SearchView.svelte';
   import LibraryView from '$lib/components/LibraryView.svelte';
   import QueueView from '$lib/components/QueueView.svelte';
-  import DevicesView from '$lib/components/DevicesView.svelte';
+  import ConnectPanel from '$lib/components/ConnectPanel.svelte';
   import PairingDialog from '$lib/components/PairingDialog.svelte';
   import { player } from '$lib/stores/player.svelte';
   import { connect } from '$lib/stores/connect.svelte';
   import SettingsView from '$lib/components/SettingsView.svelte';
   import { account } from '$lib/stores/account.svelte';
-  import { Search, Library, ListMusic, MonitorSmartphone, Settings } from 'lucide-svelte';
+  import { Search, Library, ListMusic, Settings } from 'lucide-svelte';
   import { onMount } from 'svelte';
 
-  type Tab = 'search' | 'library' | 'queue' | 'devices' | 'settings';
+  type Tab = 'search' | 'library' | 'queue' | 'settings';
   onMount(() => { void account.init(); });
   let activeTab = $state<Tab>('search');
 </script>
@@ -56,13 +56,6 @@
             <span class="sr-only sm:not-sr-only">Queue</span>
           </button>
 
-          <button
-            onclick={() => (activeTab = 'devices')}
-            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition {activeTab === 'devices' ? 'bg-surface-hover text-accent-highlight' : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover/50'}"
-          >
-            <MonitorSmartphone size={16} />
-            <span class="sr-only sm:not-sr-only">Devices</span>
-          </button>
 
           <button
             onclick={() => (activeTab = 'settings')}
@@ -93,8 +86,6 @@
         <LibraryView />
       {:else if activeTab === 'queue'}
         <QueueView />
-      {:else if activeTab === 'devices'}
-        <DevicesView />
       {:else if activeTab === 'settings'}
         <SettingsView />
       {/if}
@@ -114,21 +105,20 @@
     </div>
   {/if}
   <PlayerBar />
+  {#if connect.target}
+    <!-- Like Spotify: an unmistakable strip while another device plays. -->
+    <button
+      class="flex h-6 w-full items-center justify-end gap-1.5 bg-accent-active px-4 text-[11px] font-medium text-white select-none"
+      onclick={() => (connect.showDevices = true)}
+    >Playing on {connect.targetName}</button>
+  {/if}
 
   <!-- Fullscreen Modal View -->
   <NowPlayingView />
 
-  <!-- Devices overlay from the player bar -->
+  <!-- Connect panel from the player bar -->
   {#if connect.showDevices}
-    <div class="fixed inset-0 z-40 bg-surface-base/95 overflow-y-auto" role="dialog" aria-label="Devices">
-      <div class="flex justify-end p-4">
-        <button
-          class="text-text-secondary hover:text-text-primary text-sm px-3 py-1.5 rounded-lg hover:bg-surface-hover transition"
-          onclick={() => (connect.showDevices = false)}
-        >Close</button>
-      </div>
-      <DevicesView />
-    </div>
+    <ConnectPanel onAddDevice={() => (activeTab = 'settings')} />
   {/if}
 
   <!-- Pairing prompts can appear from any screen -->

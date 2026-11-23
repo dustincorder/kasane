@@ -175,7 +175,7 @@ fun PlayerSheet(
         ) {
             Box(Modifier.fillMaxSize()) {
                 if (p < 0.6f) MiniContent(state, track, actions, remoteName, Modifier.graphicsLayer { alpha = (1f - p * 2.2f).coerceIn(0f, 1f) },
-                    onOpen = sheet::expand, coverStart = 0.dp)
+                    onOpen = sheet::expand, coverStart = 0.dp, onOpenDevices = onOpenDevices)
                 if (p > 0.02f) FullContent(state, track, actions, isFavorite, remoteName, onOpenDevices, onCollapse = sheet::collapse,
                     topInset = statusTop, bottomInset = navBottom, coverSize = cover, gapTop = g.gapTop, gap = g.gap,
                     modifier = Modifier.graphicsLayer { alpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) })
@@ -212,7 +212,8 @@ private fun CoverArtwork(track: Track, queueIndex: Int, size: Dp, playing: Boole
 }
 
 @Composable
-private fun MiniContent(state: PlaybackUiState, track: Track, actions: PlayerActions, remoteName: String?, modifier: Modifier, onOpen: () -> Unit, coverStart: Dp) {
+private fun MiniContent(state: PlaybackUiState, track: Track, actions: PlayerActions, remoteName: String?, modifier: Modifier, onOpen: () -> Unit, coverStart: Dp,
+    onOpenDevices: (() -> Unit)? = null) {
     val haptics = LocalHapticFeedback.current
     Column(modifier.fillMaxSize()) {
         Row(
@@ -237,6 +238,12 @@ private fun MiniContent(state: PlaybackUiState, track: Track, actions: PlayerAct
                         if (state.errorMessage != null) it.copy(color = MaterialTheme.colorScheme.error)
                         else if (remoteName != null) it.copy(color = MaterialTheme.colorScheme.primary) else it },
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            // Playing on another device: its icon sits here and opens Connect, like Spotify.
+            if (remoteName != null && onOpenDevices != null) {
+                IconButton(onClick = onOpenDevices) {
+                    Icon(Icons.Outlined.Devices, "Playing on $remoteName", tint = MaterialTheme.colorScheme.primary)
+                }
             }
             FilledIconButton(onClick = actions.togglePlay, modifier = Modifier.size(40.dp)) {
                 if (state.isLoading) CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
@@ -266,13 +273,9 @@ private fun FullContent(
         // Title is centred on the screen, independent of how wide the action group is.
         Box(Modifier.fillMaxWidth().padding(top = topInset).height(56.dp).padding(horizontal = 4.dp)) {
             IconButton(onClick = onCollapse, modifier = Modifier.align(Alignment.CenterStart)) { Icon(Icons.Default.KeyboardArrowDown, "Minimize player") }
-            Text(remoteName?.let { "Controlling $it" } ?: "Now playing", Modifier.align(Alignment.Center),
-                style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center,
-                color = if (remoteName != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+            Text("Now playing", Modifier.align(Alignment.Center),
+                style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
             Row(Modifier.align(Alignment.CenterEnd)) {
-                if (onOpenDevices != null) {
-                    IconButton(onClick = onOpenDevices) { Icon(Icons.Outlined.Devices, "Devices") }
-                }
                 Box {
                     IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "More options") }
                     TrackContextMenu(track, menuOpen, { menuOpen = false }, onPlay = { if (!state.isPlaying) actions.togglePlay() },
@@ -350,9 +353,22 @@ private fun FullContent(
         }
         Spacer(Modifier.height(gap / 2))
         // Queue access sits at the bottom and spans the width, so either thumb reaches it without stretching to the top.
-        FilledTonalButton(onClick = actions.openQueue, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = MaterialTheme.shapes.medium) {
-            Icon(Icons.AutoMirrored.Filled.QueueMusic, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
-            Text(if (state.queue.size > 1) "Up next · ${state.queue.size} tracks" else "Up next")
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // Which device plays, bottom-left like Spotify; a tap opens Connect.
+            if (onOpenDevices != null) {
+                TextButton(onClick = onOpenDevices, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Icon(Icons.Outlined.Devices, null, Modifier.size(18.dp),
+                        tint = if (remoteName != null) colors.primary else colors.onSurfaceVariant)
+                    Spacer(Modifier.width(8.dp))
+                    Text(remoteName ?: "This phone", maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = if (remoteName != null) colors.primary else colors.onSurfaceVariant)
+                }
+                Spacer(Modifier.width(8.dp))
+            }
+            FilledTonalButton(onClick = actions.openQueue, modifier = Modifier.weight(1f).heightIn(min = 48.dp), shape = MaterialTheme.shapes.medium) {
+                Icon(Icons.AutoMirrored.Filled.QueueMusic, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                Text(if (state.queue.size > 1) "Up next · ${state.queue.size}" else "Up next", maxLines = 1)
+            }
         }
         }
     }

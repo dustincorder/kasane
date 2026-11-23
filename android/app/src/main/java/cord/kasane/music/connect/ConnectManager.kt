@@ -32,9 +32,9 @@ private const val MAX_PAIR_FAILURES = 3
 private const val PAIR_FAILURE_WINDOW_MS = 600_000L
 private const val PAIR_COOLDOWN_MS = 300_000L
 private const val AUTH_IDLE_MS = 20_000L
+private const val RECONNECT_INTERVAL_MS = 5_000L
 private const val MAX_UNAUTH_PER_IP = 2
 private const val MAX_UNAUTH_TOTAL = 4
-private const val RESOLVE_FRESH_MS = 120_000L
 private const val CONNECT_TIMEOUT_MS = 10_000L
 
 data class ConnectDeviceView(
@@ -179,6 +179,26 @@ class ConnectManager(private val config: ConnectConfig) {
         port = listener.localPort
         scope.launch(Dispatchers.IO) { acceptLoop(listener) }
         scope.launch { publisher() }
+        scope.launch { reconnectLoop() }
+    }
+
+    /** Keep sessions to online paired devices alive; one attempt per device at a time. */
+    private suspend fun reconnectLoop() {
+        val inflight = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+        while (running) {
+            delay(RECONNECT_INTERVAL_MS)
+            for (id in wanted.toList()) {
+                if (sessions[id]?.closed == false || !inflight.add(id)) continue
+                val entry = entries[id]
+                // NSD reports a lost service explicitly (lastResolve = 0); it does not re-resolve.
+                val online = entry != null && entry.lastResolve > 0
+                if (!online) { inflight.remove(id); continue }
+                scope.launch {
+                    try { runCatching { connect(id) } } finally { inflight.remove(id) }
+                }
+            }
+            refreshDevices()
+        }
     }
 
     fun stop() {
@@ -275,7 +295,11 @@ class ConnectManager(private val config: ConnectConfig) {
         session.pending.clear()
         session.peer?.let { peer ->
             val wasAuthed = session.authed
-            if (sessions.remove(peer.id, session)) refreshDevices()
+            if (sessions.remove(peer.id, session)) {
+                // A device that went away is no longer "playing" anywhere in the UI.
+                _remoteStates.value = _remoteStates.value - peer.id
+                refreshDevices()
+            }
             if (!wasAuthed) releaseUnauth(session.socket.inetAddress?.hostAddress ?: "?")
         } ?: releaseUnauth(session.socket.inetAddress?.hostAddress ?: "?")
     }
@@ -835,6 +859,14 @@ class ConnectManager(private val config: ConnectConfig) {
         if (!ok) throw CmdException(error?.code ?: "failed", error?.message ?: "handoff failed")
     }
 
+    /** Close the session to a paired device; it reconnects when it is announced again. */
+    fun disconnect(deviceId: String) {
+        wanted.remove(deviceId)
+        sessions.remove(deviceId)?.link?.close()
+        _remoteStates.value = _remoteStates.value - deviceId
+        refreshDevices()
+    }
+
     suspend fun unpair(deviceId: String) {
         sessions.remove(deviceId)?.let { session ->
             session.link.send(Frame.Unpair)
@@ -858,7 +890,9 @@ class ConnectManager(private val config: ConnectConfig) {
             addr = "$host:$port"
             lastResolve = System.currentTimeMillis()
         }
-        // A fresh resolve of a trusted/wanted device triggers an immediate reconnect.
+        // Paired devices connect on their own as soon as they appear, so this
+        // device always knows what they are playing.
+        if (id != null && trust.get(id) != null) wanted.add(id)
         if (id != null && wanted.contains(id) && sessions[id]?.closed != false) {
             scope.launch {
                 runCatching { connect(id) }
@@ -918,11 +952,9 @@ class ConnectManager(private val config: ConnectConfig) {
                 online = false, trusted = true, connection = "disconnected",
             )
         }
-        val now = System.currentTimeMillis()
         for ((key, e) in entries) {
             val id = e.id ?: key
-            val online = e.lastResolve > 0 && now - e.lastResolve < RESOLVE_FRESH_MS ||
-                sessions[id]?.closed == false
+            val online = e.lastResolve > 0 || sessions[id]?.closed == false
             val view = ConnectDeviceView(
                 id = e.id, name = e.name, platform = e.platform, addr = e.addr,
                 online = online,

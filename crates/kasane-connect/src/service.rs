@@ -356,6 +356,26 @@ impl ConnectService {
             .map(|h| h.state_tx.subscribe())
     }
 
+    /// Latest playback state of every connected, paired device, keyed by device id.
+    pub fn remote_states(&self) -> HashMap<String, StateFrame> {
+        let book = self.inner.book.lock().unwrap();
+        book.sessions
+            .values()
+            .filter(|h| h.authed.load(Ordering::SeqCst))
+            .filter_map(|h| h.state_tx.borrow().clone().map(|st| (h.peer.id.clone(), st)))
+            .collect()
+    }
+
+    /// Close the session to a paired device; it reconnects when announced again.
+    pub fn disconnect(&self, device_id: &str) {
+        {
+            let mut book = self.inner.book.lock().unwrap();
+            book.wanted.remove(device_id);
+            book.sessions.retain(|_, h| h.peer.id != device_id);
+        }
+        self.inner.refresh_devices();
+    }
+
     /// Resolve a device id or `host[:port]` into a live, authenticated session,
     /// starting one if necessary.
     pub async fn connect(&self, target: &str) -> Result<Arc<ClientHandle>, ConnError> {
@@ -1557,6 +1577,10 @@ fn mdns_events(inner: Arc<Inner>, rx: std::sync::mpsc::Receiver<DiscoveryEvent>)
                     entry.platform = platform.or_else(|| entry.platform.clone());
                     entry.addr = Some(addr.clone());
                     entry.last_resolve = Some(Instant::now());
+                    // Paired devices connect on their own once they are seen.
+                    if inner.trust.lock().unwrap().get(&key).is_some() {
+                        book.wanted.insert(key.clone());
+                    }
                     immediate = book.wanted.contains(&key) && !book.sessions.contains_key(&key);
                 }
                 inner.refresh_devices();
@@ -1593,9 +1617,23 @@ async fn maintain(inner: Arc<Inner>, mut mdns_rx: mpsc::UnboundedReceiver<String
             inner.refresh_devices();
         }
         let wanted: Vec<(String, String)> = {
+            // Every paired device is followed, so each one always knows what
+            // the others are playing (Spotify Connect style), not only the
+            // device the user picked.
+            let trusted: HashSet<String> = inner
+                .trust
+                .lock()
+                .unwrap()
+                .all()
+                .into_iter()
+                .map(|d| d.device_id)
+                .collect();
             let book = inner.book.lock().unwrap();
             book.wanted
                 .iter()
+                .chain(trusted.iter())
+                .collect::<HashSet<_>>()
+                .into_iter()
                 .filter(|id| !book.sessions.contains_key(*id))
                 .filter_map(|id| {
                     book.entries

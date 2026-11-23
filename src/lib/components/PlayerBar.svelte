@@ -101,24 +101,14 @@
 
   <!-- Volume & Modal Expand -->
   <div class="flex items-center justify-end gap-2 w-1/4 min-w-0">
-    {#if view.controlling}
-      <button
-        onclick={() => connect.stopControlling()}
-        class="hidden sm:flex items-center gap-1.5 text-[11px] text-accent-highlight border border-accent-highlight/40 rounded px-2 py-1 hover:bg-surface-hover transition flex-shrink-0"
-        title="Return control to this PC"
-      >
-        <MonitorSmartphone size={12} />
-        Controlling {connect.targetName}
-      </button>
-    {:else}
-      <button
-        onclick={() => (connect.showDevices = !connect.showDevices)}
-        class="text-text-muted hover:text-text-primary transition-colors p-1 flex-shrink-0"
-        aria-label="Devices"
-      >
-        <MonitorSmartphone size={16} />
-      </button>
-    {/if}
+    <button
+      onclick={() => (connect.showDevices = !connect.showDevices)}
+      class="p-1 flex-shrink-0 transition-colors {view.controlling ? 'text-accent-highlight' : 'text-text-muted hover:text-text-primary'}"
+      aria-label={view.controlling ? `Playing on ${connect.targetName}` : 'Connect to a device'}
+      title={view.controlling ? `Playing on ${connect.targetName}` : 'Connect to a device'}
+    >
+      <MonitorSmartphone size={16} />
+    </button>
     <Volume2 size={16} class="hidden sm:block text-text-muted flex-shrink-0" />
     <input
       type="range"
