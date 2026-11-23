@@ -31,6 +31,10 @@ class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPla
 
     private val server = ServerSocket(0, 16, InetAddress.getLoopbackAddress())
     private val entries = ConcurrentHashMap<String, Entry>()
+    private val cutOff: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** True once if YouTube stopped serving [videoId] part-way; mpv then reports a normal end of file. */
+    fun consumeCutOff(videoId: String): Boolean = cutOff.remove(videoId)
     private val random = SecureRandom()
 
     init {
@@ -50,6 +54,9 @@ class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPla
         return "http://127.0.0.1:${server.localPort}/a/$token"
     }
 
+    private val debug = System.getenv("KASANE_PROXY_DEBUG") == "1"
+    private fun log(msg: String) { if (debug) System.err.println("proxy: $msg") }
+
     private fun serve(socket: Socket) {
         val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.ISO_8859_1))
         val requestLine = reader.readLine() ?: return
@@ -64,6 +71,7 @@ class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPla
             if (entry.total <= 0) entry.total = probeLength(entry)
             val (start, endInclusive) = parseRange(headers["range"], entry.total) ?: return out.status(416, "Range Not Satisfiable")
             val partial = headers.containsKey("range")
+            log("${parts[0]} range=${headers["range"]} -> $start-$endInclusive of ${entry.total}")
             val head = buildString {
                 append(if (partial) "HTTP/1.1 206 Partial Content\r\n" else "HTTP/1.1 200 OK\r\n")
                 append("Content-Type: ${entry.stream.mimeType.substringBefore(';')}\r\n")
@@ -75,8 +83,10 @@ class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPla
             out.write(head.toByteArray(Charsets.ISO_8859_1))
             if (parts[0] == "GET") copyRange(entry, start, endInclusive, out)
             out.flush()
-        } catch (_: IOException) {
-            // mpv closed the connection (seek or stop) or the CDN failed; mpv reports and retries.
+        } catch (e: IOException) {
+            // mpv closed the connection (seek or stop), or the CDN refused the rest of the stream.
+            if (e is CdnRefusedException) cutOff.add(entry.videoId)
+            log("connection ended: $e")
         }
     }
 
@@ -90,10 +100,11 @@ class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPla
                 .apply { entry.stream.headers.forEach { (k, v) -> header(k, v) } }.build()
             http.newCall(request).execute().use { response ->
                 if (response.code == 403 || response.code == 410) {
-                    budget.beforeRefresh()
+                    try { budget.beforeRefresh() } catch (e: IOException) { throw CdnRefusedException() }
                     entry.stream = runBlocking { resolver.resolve(entry.videoId, forceRefresh = true, requiredItag = entry.stream.itag) }
                     return@use
                 }
+                log("chunk $position+$length -> ${response.code} len=${response.header("Content-Length")}")
                 if (!response.isSuccessful) throw IOException("Audio server returned ${response.code}.")
                 val body = response.body?.byteStream() ?: throw IOException("Empty audio response.")
                 while (true) {
@@ -134,3 +145,5 @@ class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPla
 
     override fun close() { runCatching { server.close() } }
 }
+
+private class CdnRefusedException : IOException("YouTube refused the rest of this stream.")

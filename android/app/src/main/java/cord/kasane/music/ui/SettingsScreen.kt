@@ -7,6 +7,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -67,13 +69,15 @@ fun SettingsScreen(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SettingsSection("Devices") {
                 val connectOn by app.settings.connectEnabled.collectAsState()
+                // One navigable row; the on/off switch lives on the Connect screen itself, not twice.
                 ListItem(
                     headlineContent = { Text("Kasane Connect", style = MaterialTheme.typography.titleSmall) },
-                    supportingContent = { Text(if (connectOn) "On · pair and manage your devices" else "Off",
+                    supportingContent = { Text(if (connectOn) "On · pair and manage phones, tablets and computers" else "Off",
                         style = MaterialTheme.typography.bodySmall) },
-                    trailingContent = { Switch(checked = connectOn, onCheckedChange = app.settings::setConnectEnabled) },
+                    leadingContent = { Icon(Icons.Outlined.Devices, null) },
+                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
                     colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                    modifier = Modifier.clickable(onClick = onOpenConnect),
+                    modifier = Modifier.clickable(onClickLabel = "Open devices", onClick = onOpenConnect),
                 )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

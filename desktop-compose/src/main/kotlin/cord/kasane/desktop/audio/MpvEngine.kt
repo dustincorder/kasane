@@ -66,6 +66,8 @@ class MpvEngine(private val audioOutput: String? = null) : AutoCloseable {
             "mpv", "--idle=yes", "--no-video", "--no-terminal", "--no-config", "--ytdl=no",
             "--audio-display=no", "--input-ipc-server=$socket", "--cache=yes", "--demuxer-max-bytes=64MiB",
             "--network-timeout=20",
+            // HLS variants carry video; take the lowest so audio-only playback does not pull HD video.
+            "--hls-bitrate=min",
         )
         audioOutput?.let { args += "--ao=$it" }
         process = try {

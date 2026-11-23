@@ -235,6 +235,12 @@ internal fun KasaneWindow(app: DesktopApp, nav: Nav) {
             }
             if (nav.nowPlaying && state.current != null) NowPlaying(state, controls, actions, onClose = { nav.nowPlaying = false }, deviceButton = { DeviceButton(app, openSettings) })
             PairingPrompts(app)
+            localState.notice?.let { notice ->
+                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.inverseSurface,
+                    modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(bottom = 112.dp)) {
+                    Text(notice, color = MaterialTheme.colorScheme.inverseOnSurface, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+                }
+            }
         }
     }
 }

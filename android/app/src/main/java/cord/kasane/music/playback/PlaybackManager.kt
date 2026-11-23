@@ -97,7 +97,13 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
         }
         return order
     }
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    /**
+     * MediaController may only be used on the main thread. Callers such as Kasane Connect run on background
+     * dispatchers, so every command is moved there here, once, instead of at each call site.
+     */
     private fun command(action: (Player) -> Unit) {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { mainHandler.post { command(action) }; return }
         val player = controller
         if (player != null) { action(player); publish(player) }
         else if (pendingCommands.size < 20) pendingCommands.addLast(action)

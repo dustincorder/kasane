@@ -98,7 +98,7 @@ class AndroidPlayerAdapter(
                     ?: cmdFail("invalid_args", "missing or bad volume")
                 val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 audio.setStreamVolume(AudioManager.STREAM_MUSIC,
-                    (v.coerceIn(0.0, 1.0) * max).toInt().coerceIn(0, max), 0)
+                    (v.coerceIn(0.0, 1.0) * max).toInt().coerceIn(0, max), AudioManager.FLAG_SHOW_UI)
             }
             "setShuffle" -> {
                 val enabled = args["enabled"]?.jsonPrimitive?.booleanOrNull

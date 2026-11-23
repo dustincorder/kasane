@@ -31,6 +31,8 @@ data class PlayerState(
     val shuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.OFF,
     val error: String? = null,
+    /** A short, self-clearing message, e.g. that another device changed the volume. */
+    val notice: String? = null,
 ) {
     val current: Track? get() = queue.getOrNull(index)
     val canNext: Boolean get() = index + 1 < queue.size || (repeat == RepeatMode.ALL && queue.isNotEmpty())
@@ -46,6 +48,7 @@ class DesktopPlayer(
     private val engine: MpvEngine,
     private val resolver: GuestPlayerResolver,
     private val proxy: StreamProxy,
+    private val hls: cord.kasane.music.provider.IosHlsResolver,
     private val catalog: SharedOnlineCatalog,
     private val library: LocalLibrary,
 ) {
@@ -144,9 +147,16 @@ class DesktopPlayer(
         _state.update { it.copy(isLoading = true, error = null, positionSec = startSec, durationSec = track.durationSeconds) }
         loadJob = scope.launch {
             try {
-                val stream = resolver.resolve(track.id, forceRefresh = forceRefresh)
+                // iOS HLS gives full-length audio when YouTube offers it; otherwise the guest direct stream,
+                // which YouTube may cut after its first part (detected in onEnded, never skipped silently).
+                val manifest = runCatching { hls.resolve(track.id) }.getOrNull()
                 if (_state.value.current?.id != track.id) return@launch
-                engine.load(proxy.register(track.id, stream), null, startSec, play)
+                if (manifest != null) engine.load(manifest.url, manifest.userAgent, startSec, play)
+                else {
+                    val stream = resolver.resolve(track.id, forceRefresh = forceRefresh)
+                    if (_state.value.current?.id != track.id) return@launch
+                    engine.load(proxy.register(track.id, stream), null, startSec, play)
+                }
                 library.recordPlayed(track)
                 maybeExtendRadio()
             } catch (e: CancellationException) { throw e
@@ -158,6 +168,12 @@ class DesktopPlayer(
 
     private fun onEnded() {
         val s = _state.value
+        val id = s.current?.id
+        if (id != null && proxy.consumeCutOff(id)) {
+            _state.update { it.copy(isPlaying = false, isLoading = false, error = "YouTube stopped this track after its first part. " +
+                "Full-length playback on this desktop build needs verified, signed-in playback, which is not available here yet.") }
+            return
+        }
         when {
             s.repeat == RepeatMode.ONE -> loadCurrent(0.0, play = true)
             s.index + 1 < s.queue.size -> moveTo(s.index + 1)
@@ -263,6 +279,13 @@ class DesktopPlayer(
     fun cycleRepeat() = _state.update { it.copy(repeat = RepeatMode.entries[(it.repeat.ordinal + 1) % 3]) }
 
     fun clearError() = _state.update { it.copy(error = null) }
+
+    private var noticeJob: Job? = null
+    fun notify(message: String) {
+        _state.update { it.copy(notice = message) }
+        noticeJob?.cancel()
+        noticeJob = scope.launch { kotlinx.coroutines.delay(3_000); _state.update { s -> if (s.notice == message) s.copy(notice = null) else s } }
+    }
 
     /** Connect handoff target: start a queue at a position, resolving media locally. */
     fun startHandoff(queue: List<Track>, index: Int, positionSec: Double, play: Boolean, shuffle: Boolean, repeat: RepeatMode) {

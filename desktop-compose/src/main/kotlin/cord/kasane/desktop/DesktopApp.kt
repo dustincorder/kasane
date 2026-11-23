@@ -40,7 +40,7 @@ class DesktopApp(
         ProcessBuilder("mpv", "--version").start().inputStream.bufferedReader().readLine()?.split(' ')?.getOrNull(1)
     }.getOrNull() ?: "unknown version"
     val proxy = StreamProxy(http, resolver)
-    val player = DesktopPlayer(scope, engine, resolver, proxy, catalog, library)
+    val player = DesktopPlayer(scope, engine, resolver, proxy, cord.kasane.music.provider.IosHlsResolver(http), catalog, library)
     /** Same Connect core as Android; null when it could not start (reported in Settings). */
     val connect: cord.kasane.desktop.connect.DesktopConnect?
     val connectError: String?

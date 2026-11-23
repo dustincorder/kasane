@@ -71,7 +71,12 @@ class DesktopPlayerAdapter(private val player: DesktopPlayer, scope: CoroutineSc
             "next" -> player.next()
             "previous" -> player.previous()
             "seek" -> player.seek(argLong(args, "positionMs") / 1000.0)
-            "setVolume" -> player.setVolume((args["volume"]?.jsonPrimitive?.doubleOrNull ?: cmdFail("invalid_args", "missing or bad volume")).toFloat())
+            "setVolume" -> {
+                val v = (args["volume"]?.jsonPrimitive?.doubleOrNull ?: cmdFail("invalid_args", "missing or bad volume")).toFloat().coerceIn(0f, 1f)
+                player.setVolume(v)
+                // Never change loudness silently: say so on this computer too.
+                player.notify("Volume set to ${(v * 100).toInt()} % from another device")
+            }
             "setShuffle" -> {
                 val enabled = args["enabled"]?.jsonPrimitive?.booleanOrNull ?: cmdFail("invalid_args", "missing or bad enabled")
                 if (enabled != player.state.value.shuffle) player.toggleShuffle()

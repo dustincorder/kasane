@@ -36,3 +36,19 @@ fun runSmoke(query: String): Int = DesktopApp(audioOutput = "null", root = kotli
         if (nextState?.isPlaying == true && !paused.isPlaying) 0 else 1
     }
 }
+
+/** `--play QUERY... SECONDS`: play the first song result headless and print the position every 5 s. */
+fun runPlay(args: List<String>): Int = DesktopApp(audioOutput = "null", root = kotlin.io.path.createTempDirectory("kasane-play").toFile(), autoStartConnect = false).use { app ->
+    val seconds = args.last().toIntOrNull() ?: 60
+    val query = args.dropLast(1).joinToString(" ")
+    runBlocking {
+        val t = app.catalog.search(query, CatalogKind.SONG, null).tracks.first()
+        app.player.playTrack(t)
+        repeat(seconds / 5) {
+            delay(5_000)
+            val s = app.player.state.value
+            println("t=${(it + 1) * 5}s ${s.current?.title} idx=${s.index} pos=${"%.1f".format(s.positionSec)} playing=${s.isPlaying} err=${s.error}")
+        }
+    }
+    0
+}
