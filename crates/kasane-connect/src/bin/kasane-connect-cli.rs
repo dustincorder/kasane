@@ -68,7 +68,7 @@ async fn main() {
                         let pending = prompts.borrow().clone();
                         for p in pending {
                             if p.incoming {
-                                eprintln!("[cli] auto-accepting pairing with {}", p.peer_name);
+                                eprintln!("[cli] auto-accepting pairing with {} (code {})", p.peer_name, p.code);
                                 svc2.confirm_pairing(&p.prompt_id, true);
                             }
                         }

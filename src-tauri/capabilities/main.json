@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Kasane's own UI. The Google sign-in and verifier windows get no IPC access.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}
