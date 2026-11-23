@@ -37,26 +37,6 @@ private const val MAX_UNAUTH_PER_IP = 2
 private const val MAX_UNAUTH_TOTAL = 4
 private const val CONNECT_TIMEOUT_MS = 10_000L
 
-data class ConnectDeviceView(
-    val id: String?,
-    val name: String,
-    val platform: String?,
-    val addr: String?,
-    val online: Boolean,
-    val trusted: Boolean,
-    /** disconnected | connecting | connected | paired */
-    val connection: String,
-    val lastError: String? = null,
-)
-
-data class ConnectPairingPrompt(
-    val promptId: String,
-    val incoming: Boolean,
-    val peerName: String,
-    val code: String,
-    val deviceId: String?,
-)
-
 data class ConnectConfig(
     val identity: ConnectIdentity,
     val adapter: ConnectPlayerAdapter,
@@ -66,6 +46,8 @@ data class ConnectConfig(
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     /** Preferred listening port; an ephemeral port is used when it is taken. */
     val listenPort: Int = DEFAULT_PORT,
+    /** True for an address that belongs to this machine (another app instance here is not a remote device). */
+    val isLocalAddress: (String) -> Boolean = ::isThisMachine,
 )
 
 /** Callback for discovered services; ConnectManager owns what happens next. */
@@ -117,7 +99,7 @@ class ConnectManager(private val config: ConnectConfig) {
     private val trust = TrustStore(config.trustFile)
     private val adapter = config.adapter
 
-    private val entries = LinkedHashMap<String, DeviceEntry>()
+    private val entries = ConcurrentHashMap<String, DeviceEntry>()
     private val sessions = ConcurrentHashMap<String, Session>()
     /** Sessions other devices opened to us; subscribed ones receive our state updates. */
     private val inbound: MutableSet<Session> = ConcurrentHashMap.newKeySet()
@@ -126,6 +108,7 @@ class ConnectManager(private val config: ConnectConfig) {
     private val pairFailures = ArrayDeque<Long>()
 
     val localDeviceName: String get() = identity.deviceName
+    val localDeviceId: String get() = identity.deviceId
 
     private val _devices = MutableStateFlow<List<ConnectDeviceView>>(emptyList())
     val devices: StateFlow<List<ConnectDeviceView>> = _devices.asStateFlow()
@@ -358,6 +341,7 @@ class ConnectManager(private val config: ConnectConfig) {
                 session.peer?.let { peer ->
                     _remoteStates.value = _remoteStates.value + (peer.id to merged)
                 }
+                if (previous?.playback != merged.playback) refreshDevices()
             }
             is Frame.Command -> {
                 if (!server) return
@@ -389,7 +373,13 @@ class ConnectManager(private val config: ConnectConfig) {
             return
         }
         val previous = session.peer?.id
+        if (hello.device.id == identity.deviceId) {
+            // This device reached itself (own address, or mDNS echo). Never a pairing candidate.
+            session.link.close()
+            return
+        }
         session.peer = hello.device
+        if (session.clientMode) remoteAddr(session)?.let { mergeAddressEntries(hello.device.id, it) }
         if (session.clientMode) {
             val expected = wantedSessionFor(session)
             if (expected != null && expected != hello.device.id) {
@@ -670,7 +660,11 @@ class ConnectManager(private val config: ConnectConfig) {
     private fun String.withDefaultPort(): String =
         if (contains(':')) this else "$this:$DEFAULT_PORT"
 
-    private suspend fun dial(addr: String, wantId: String?): Session {
+    /**
+     * Dial a peer. If the peer still trusts this device from a pairing this device has since forgotten, ask it
+     * to forget us too and dial again: the user gets a normal pairing with a code, not a dead end.
+     */
+    private suspend fun dial(addr: String, wantId: String?, resetStale: Boolean = true): Session {
         markEntry(wantId ?: addr) { conn = "connecting" }
         refreshDevices()
         val socket = tls.clientSocket()
@@ -724,9 +718,16 @@ class ConnectManager(private val config: ConnectConfig) {
         val peer = session.peer
         if (authed && (peer == null || !trust.isTrusted(peer.id, session.peerFp))) {
             session.authed = false
+            if (resetStale) {
+                // The peer authenticated our certificate, so this request can only come from us.
+                link.send(Frame.Unpair)
+                delay(300)
+                link.close()
+                return dial(addr, wantId, resetStale = false)
+            }
             link.close()
             val name = peer?.name ?: "The other device"
-            throw ConnectException("$name trusts this device, but this device has no matching record of it. Remove this device on $name and pair again.")
+            throw ConnectException("$name still trusts this device from an earlier pairing. Remove this device on $name and pair again.")
         }
         if (authed) {
             session.authed = true
@@ -772,29 +773,38 @@ class ConnectManager(private val config: ConnectConfig) {
             val peerFp = conn.peerFp.unhex() ?: throw ConnectException("no peer fingerprint")
             val code = Sas.code(peerFp, identity.fingerprint, nsBytes, nc)
             val promptId = UUID.randomUUID().toString()
-            val reply = CompletableDeferred<Boolean>()
-            outgoingPrompts[promptId] = reply
+            // This device only displays the code. The user compares it on the other device and confirms there,
+            // once; this side's confirmation is implied by having started the pairing.
+            val cancelled = CompletableDeferred<Boolean>()
+            outgoingPrompts[promptId] = cancelled
             addPrompt(ConnectPairingPrompt(promptId, incoming = false,
-                peerName = conn.peer?.name ?: "device", code = code, deviceId = conn.peer?.id))
+                peerName = conn.peer?.name ?: "device", code = code, deviceId = conn.peer?.id, awaitingPeer = true))
+            refreshDevices()
+            conn.link.send(Frame.PairConfirm(true))
             scope.launch {
-                val accepted = withTimeoutOrNull(deadline - System.currentTimeMillis() + 1000) {
-                    reply.await()
-                } ?: false
+                val watcher = launch { if (!cancelled.await()) conn.link.send(Frame.PairConfirm(false)) }
+                val result = waitPairEvent(conn, deadline) { it as? Frame.PairResult }
+                watcher.cancel()
                 outgoingPrompts.remove(promptId)
                 removePrompt(promptId)
-                conn.link.send(Frame.PairConfirm(accepted))
-                val left = deadline - System.currentTimeMillis()
-                val result = waitPairEvent(conn, deadline) { it as? Frame.PairResult }
                 if (result?.accepted == true) {
                     conn.peer?.let { dev ->
                         trust.put(TrustedDevice(dev.id, dev.name, dev.platform,
                             conn.peerFp, System.currentTimeMillis() / 1000))
                     }
                     conn.authed = true
-                    upsertEntry(conn.peer?.id) { this.conn = "paired" }
+                    upsertEntry(conn.peer?.id) { this.conn = "paired"; lastError = null }
                     subscribeRemote(conn)
-                    refreshDevices()
+                } else {
+                    val why = when (result?.reason) {
+                        null -> "pairing timed out"
+                        "rejected" -> "${conn.peer?.name ?: "The other device"} declined the pairing"
+                        else -> "pairing failed (${result.reason})"
+                    }
+                    conn.peer?.let { dev -> upsertEntry(dev.id) { lastError = why } }
+                    conn.link.close()
                 }
+                refreshDevices()
             }
             return promptId
         }
@@ -892,19 +902,24 @@ class ConnectManager(private val config: ConnectConfig) {
 
     /** Called by discovery when a `_kasane._tcp` service resolves. */
     fun onServiceDiscovered(id: String?, name: String, platform: String?, host: String, port: Int) {
-        if (id == identity.deviceId) return
-        val key = id ?: "$host:$port"
-        upsertEntry(id ?: key) {
-            if (id != null) this.id = id
+        // A record without the device id is half-resolved (the TXT data has not arrived): wait for the complete
+        // one rather than inventing an address-keyed device that later duplicates the real entry.
+        if (id.isNullOrBlank()) return
+        // Never this device (stable id), and never another app instance on this machine (its address is ours).
+        if (id == identity.deviceId || config.isLocalAddress(host)) return
+        val addr = "$host:$port"
+        mergeAddressEntries(id, addr)
+        upsertEntry(id) {
+            this.id = id
             this.name = name
             this.platform = platform ?: this.platform
-            addr = "$host:$port"
+            this.addr = addr
             lastResolve = System.currentTimeMillis()
         }
         // Paired devices connect on their own as soon as they appear, so this
         // device always knows what they are playing.
-        if (id != null && trust.get(id) != null) wanted.add(id)
-        if (id != null && wanted.contains(id) && sessions[id]?.closed != false) {
+        if (trust.get(id) != null) wanted.add(id)
+        if (wanted.contains(id) && sessions[id]?.closed != false) {
             scope.launch {
                 runCatching { connect(id) }
             }
@@ -912,10 +927,23 @@ class ConnectManager(private val config: ConnectConfig) {
         refreshDevices()
     }
 
+    /** A service disappeared. Match by id when known, else by address, so no record stays "online" for ever. */
     fun onServiceLost(id: String?, host: String?, port: Int) {
-        val key = id ?: "${host ?: ""}:$port"
-        entries[key]?.lastResolve = 0
+        val addr = host?.let { "$it:$port" }
+        val key = id?.takeIf { entries.containsKey(it) } ?: entries.entries.firstOrNull { it.value.addr == addr }?.key
+        key?.let { entries[it]?.lastResolve = 0 }
         refreshDevices()
+    }
+
+    /**
+     * An entry created from an address (manual pairing, or a connection before the id was known) and the
+     * entry for the same endpoint with a real id are one device: fold the first into the second.
+     */
+    private fun mergeAddressEntries(id: String, addr: String) {
+        entries.entries.filter { (k, e) -> k != id && e.id == null && e.addr == addr }.forEach { (k, e) ->
+            entries.remove(k)
+            upsertEntry(id) { conn = e.conn; lastError = e.lastError }
+        }
     }
 
     private fun upsertEntry(key: String?, block: DeviceEntry.() -> Unit) {
@@ -955,30 +983,52 @@ class ConnectManager(private val config: ConnectConfig) {
 
     private fun refreshDevices() {
         val trusted = trust.all().associateBy { it.deviceId }
+        val remote = _remoteStates.value
+        val pairingWith = _prompts.value.mapNotNull { it.deviceId }.toSet()
+        fun stateOf(id: String?, online: Boolean, isTrusted: Boolean): DeviceState {
+            val live = id?.let { sessions[it] }?.let { it.authed && !it.closed } == true
+            return when {
+                id != null && id in pairingWith -> DeviceState.PAIRING
+                isTrusted && live -> when (remote[id]?.playback) {
+                    "playing", "buffering" -> DeviceState.PLAYING
+                    "paused", "idle", "ended", "error" -> DeviceState.PAUSED
+                    else -> DeviceState.CONNECTED
+                }
+                isTrusted && online -> DeviceState.PAIRED
+                isTrusted -> DeviceState.OFFLINE
+                online -> DeviceState.AVAILABLE
+                else -> DeviceState.OFFLINE
+            }
+        }
         val out = LinkedHashMap<String, ConnectDeviceView>()
         for ((id, d) in trusted) {
             out[id] = ConnectDeviceView(
                 id = id, name = d.name, platform = d.platform,
                 addr = d.endpoints.lastOrNull(),
                 online = false, trusted = true, connection = "disconnected",
+                state = DeviceState.OFFLINE,
             )
         }
+        val knownAddrs = entries.values.filter { it.id != null }.mapNotNull { it.addr }.toSet() +
+            sessions.values.mapNotNull { remoteAddr(it) }
         for ((key, e) in entries) {
             val id = e.id ?: key
-            val online = e.lastResolve > 0 || sessions[id]?.closed == false
+            // An address-only record for an endpoint that already has an identified device is the same device.
+            if (e.id == null && e.addr in knownAddrs) continue
+            val live = sessions[id]?.closed == false
+            val online = e.lastResolve > 0 || live
+            val isTrusted = trusted.containsKey(id)
+            // A never-paired device that is gone (not announced, not connecting) is stale: do not list it.
+            if (!isTrusted && !online && e.conn == "disconnected" && e.lastError == null) continue
             val view = ConnectDeviceView(
                 id = e.id, name = e.name, platform = e.platform, addr = e.addr,
-                online = online,
-                trusted = trusted.containsKey(id),
-                connection = e.conn,
-                lastError = e.lastError,
+                online = online, trusted = isTrusted, connection = e.conn, lastError = e.lastError,
             )
             out[id] = out[id]?.copy(
                 name = e.name.ifEmpty { out[id]!!.name },
                 platform = e.platform ?: out[id]!!.platform,
                 addr = e.addr ?: out[id]!!.addr,
-                online = online, connection = e.conn,
-                lastError = e.lastError,
+                online = online, connection = e.conn, lastError = e.lastError,
             ) ?: view
         }
         for ((id, session) in sessions) {
@@ -988,7 +1038,8 @@ class ConnectManager(private val config: ConnectConfig) {
                 remoteAddr(session), online = true, trusted = trust.isTrusted(id, session.peerFp), connection = conn))
                 .copy(online = true, connection = conn, name = peer.name, platform = peer.platform)
         }
-        _devices.value = out.values.toList()
+        _devices.value = out.entries.map { (id, v) -> v.copy(state = stateOf(v.id ?: id.takeIf { v.id != null }, v.online, v.trusted)) }
+            .sortedWith(compareBy({ it.state.ordinal }, { it.name.lowercase() }))
     }
 
     fun remoteState(deviceId: String): Frame.State? = sessions[deviceId]?.remoteState?.value
@@ -1010,6 +1061,13 @@ class ConnectManager(private val config: ConnectConfig) {
 }
 
 class ConnectException(message: String) : Exception(message)
+
+/** Loopback, or an address bound to one of this machine's interfaces. */
+fun isThisMachine(host: String): Boolean {
+    val address = runCatching { java.net.InetAddress.getByName(host) }.getOrNull() ?: return false
+    if (address.isLoopbackAddress) return true
+    return runCatching { java.net.NetworkInterface.getByInetAddress(address) != null }.getOrDefault(false)
+}
 
 /** Platform log sink; Android routes it to logcat, the desktop to stderr. */
 object ConnectLog {

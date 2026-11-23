@@ -268,11 +268,17 @@ class ConnectLoopbackTest {
             val promptId = client.pair("127.0.0.1:${server.port}")
             assertNotNull(promptId)
             awaitTrue { server.prompts.value.isNotEmpty() }
-            client.confirmPairing(promptId!!, true)
+            // The initiator only displays the code, the same one the receiver shows; one confirmation, on the receiver.
+            val shown = client.prompts.value.single()
+            assertTrue(shown.awaitingPeer && !shown.incoming)
+            assertEquals(server.prompts.value.single().code, shown.code)
+            assertEquals(6, shown.code.length)
             server.confirmPairing(server.prompts.value.first().promptId, true)
             awaitTrue {
                 client.devices.value.any { it.connection == "paired" }
             }
+            awaitTrue { client.prompts.value.isEmpty() && server.prompts.value.isEmpty() }
+            assertTrue(client.devices.value.single { it.trusted }.state != DeviceState.OFFLINE)
             val deviceId = client.devices.value.first { it.connection == "paired" }.id!!
             client.sendCommand(deviceId, "pause")
             awaitTrue { adapter.executed.contains("pause") }
@@ -286,4 +292,44 @@ class ConnectLoopbackTest {
             client.stop()
         }
     }
+
+    @Test
+    fun receiverRejectingLeavesNoTrustOnEitherSide() = runBlocking {
+        val client = manager(fixture("test-identity-2.p12"), FakeAdapter(), clientDir)
+        client.start()
+        try {
+            client.pair("127.0.0.1:${server.port}")
+            awaitTrue { server.prompts.value.isNotEmpty() }
+            server.confirmPairing(server.prompts.value.first().promptId, false)
+            awaitTrue { client.prompts.value.isEmpty() }
+            awaitTrue { client.devices.value.none { it.trusted } && server.devices.value.none { it.trusted } }
+            awaitTrue { client.devices.value.any { it.lastError?.contains("declined") == true } }
+        } finally { client.stop() }
+    }
+
+    @Test
+    fun discoveryNeverListsThisDeviceOrItsOwnMachine() {
+        val me = server
+        val ownId = fixtureIdOf(me)
+        me.onServiceDiscovered(ownId, "Me", "android", "10.9.9.9", 47650)       // own stable id
+        me.onServiceDiscovered("other-app", "Same machine", "linux", "127.0.0.1", 47651) // another app here
+        me.onServiceDiscovered(null, "Half resolved", null, "10.9.9.8", 47650)  // TXT not arrived yet
+        assertTrue("got ${me.devices.value}", me.devices.value.isEmpty())
+    }
+
+    @Test
+    fun oneDeviceIsOneEntryWhateverTheRouteOrRecordOrder() {
+        val me = server
+        // Same phone announced twice (two interfaces), with a platform that must not flip to a desktop.
+        me.onServiceDiscovered("phone-1", "Pixel 6 Pro", "android", "10.9.9.20", 47650)
+        me.onServiceDiscovered("phone-1", "Pixel 6 Pro", "android", "10.9.9.21", 47650)
+        assertEquals(1, me.devices.value.size)
+        assertEquals("android", me.devices.value.single().platform)
+        assertEquals(DeviceState.AVAILABLE, me.devices.value.single().state)
+        // Gone from the network: an unpaired device disappears, no stale record.
+        me.onServiceLost(null, "10.9.9.21", 47650)
+        assertTrue("got ${me.devices.value}", me.devices.value.isEmpty())
+    }
+
+    private fun fixtureIdOf(m: ConnectManager) = m.localDeviceId
 }

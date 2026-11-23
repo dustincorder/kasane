@@ -99,6 +99,7 @@ class ConnectService(
     private val name = identity.deviceName
     private val txt = mapOf(
         "id" to identity.deviceId,
+        "name" to identity.deviceName,
         "platform" to "android",
         "proto" to "1",
         "fp" to identity.fingerprintHex.take(16),

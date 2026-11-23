@@ -47,9 +47,11 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import cord.kasane.desktop.DesktopApp
 import cord.kasane.desktop.connect.DesktopRemote
+import cord.kasane.ui.components.deviceIcon
+import cord.kasane.ui.screens.ConnectDevicesActions
+import cord.kasane.ui.screens.ConnectDevicesContent
 import cord.kasane.music.connect.ConnectDeviceView
 
-private fun deviceIcon(platform: String?) = if (platform == "android") Icons.Outlined.Smartphone else Icons.Outlined.Computer
 
 /** Player-bar device button; highlighted while another device plays. Opens the Connect popover. */
 @Composable
@@ -101,6 +103,7 @@ private fun ConnectPanel(app: DesktopApp, remote: DesktopRemote, onAddDevice: ()
                     Slider(volume, { dragged = it; if (current == null) app.player.setVolume(it) },
                         onValueChangeFinished = { if (current != null) dragged?.let(remote::setVolume); dragged = null }, modifier = Modifier.weight(1f))
                     Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, Modifier.size(18.dp))
+                    Text("${(volume * 100).toInt()} %", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp).width(44.dp))
                 }
             }
         }
@@ -141,7 +144,7 @@ private fun DeviceRow(name: String, subtitle: String?, platform: String?, busy: 
     }
 }
 
-/** Settings → Kasane Connect: on/off, paired devices, devices to pair, pairing by address. */
+/** Settings → Kasane Connect: the shared screen, wired to this computer's ConnectManager. */
 @Composable
 fun ConnectSettings(app: DesktopApp) {
     val connect = app.connect
@@ -151,92 +154,31 @@ fun ConnectSettings(app: DesktopApp) {
         return
     }
     val devices by connect.manager.devices.collectAsState()
-    var address by remember { mutableStateOf("") }
-    var pairError by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val actions = remember(connect) {
+        object : ConnectDevicesActions {
+            override val localName = connect.identity.deviceName
+            override fun pair(target: String) { error = null; app.scope.launchCatching({ error = it }) { connect.manager.pair(target) } }
+            override fun forget(deviceId: String) { app.scope.launchCatching { connect.manager.unpair(deviceId) } }
+        }
+    }
     Column(Modifier.widthIn(max = 640.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Control and move playback between your devices on the same network", style = MaterialTheme.typography.titleSmall)
-                Text("This device: ${connect.identity.deviceName} · port ${connect.manager.port}", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Switch(prefs.connectEnabled, { app.setConnectEnabled(it) })
-        }
-        if (!prefs.connectEnabled) return@Column
-        val paired = devices.filter { it.trusted && it.id != null }
-        val nearby = devices.filter { !it.trusted && it.online }
-        Text("Paired devices", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
-        if (paired.isEmpty()) Text("None yet. Each pair of devices is paired once, with a code shown on both screens.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        paired.forEach { d -> PairedRow(d) { app.scope.launchCatching { d.id?.let { connect.manager.unpair(it) } } } }
-        Text("Available on this network", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
-        if (nearby.isEmpty()) Text("Open Kasane on the other device and keep it on the same network.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        nearby.forEach { d ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(deviceIcon(d.platform), null)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(d.name, style = MaterialTheme.typography.bodyMedium)
-                    d.lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                }
-                FilledTonalButton(onClick = { pair(app, d.id ?: d.addr ?: return@FilledTonalButton) { pairError = it } }) { Text("Pair") }
-            }
-        }
-        Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(address, { address = it }, label = { Text("Pair by address") }, placeholder = { Text("10.0.0.5") }, singleLine = true)
-            Spacer(Modifier.width(8.dp))
-            FilledTonalButton(onClick = { pair(app, address.trim()) { pairError = it }; address = "" }, enabled = address.isNotBlank()) { Text("Pair") }
-        }
-        pairError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 6.dp)) }
+        // The list scrolls with the settings page, so it gets a fixed viewport instead of an unbounded height.
+        ConnectDevicesContent(devices, prefs.connectEnabled, { app.setConnectEnabled(it) }, actions, Modifier.height(480.dp))
+        error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
     }
-}
-
-@Composable
-private fun PairedRow(d: ConnectDeviceView, onForget: () -> Unit) {
-    var confirm by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(deviceIcon(d.platform), null)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(d.name, style = MaterialTheme.typography.bodyMedium)
-            Text(if (d.online) "Online" else "Offline", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        TextButton(onClick = { confirm = true }) { Text("Forget") }
-    }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("Forget ${d.name}?") },
-        text = { Text("It will have to be paired again with a code before it can control or play.") },
-        confirmButton = { TextButton(onClick = { confirm = false; onForget() }) { Text("Forget") } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } })
-}
-
-private fun pair(app: DesktopApp, target: String, onError: (String?) -> Unit) {
-    val connect = app.connect ?: return
-    onError(null)
-    app.scope.launchCatching(onError) { connect.manager.pair(target) }
 }
 
 private fun kotlinx.coroutines.CoroutineScope.launchCatching(onError: (String?) -> Unit = {}, block: suspend () -> Unit) =
     launch { runCatching { block() }.onFailure { onError(it.message ?: "Failed.") } }
 
-/** Numeric comparison for incoming and outgoing pairing, shown over any screen. */
+/** Pairing over any screen: the receiver confirms once, the initiator only shows the code. */
 @Composable
 fun PairingPrompts(app: DesktopApp) {
     val connect = app.connect ?: return
     val prompts by connect.manager.prompts.collectAsState()
     val prompt = prompts.firstOrNull() ?: return
-    AlertDialog(onDismissRequest = {},
-        icon = { Icon(Icons.Outlined.Devices, null) },
-        title = { Text(if (prompt.incoming) "Pair with ${prompt.peerName}?" else "Confirm on ${prompt.peerName}") },
-        text = {
-            Column {
-                Text("Check that this number matches on the other device.")
-                Spacer(Modifier.height(12.dp))
-                Text(prompt.code.chunked(3).joinToString(" "), style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            }
-        },
-        confirmButton = { Button(onClick = { connect.manager.confirmPairing(prompt.promptId, true) }) { Text("Confirm") } },
-        dismissButton = { TextButton(onClick = { connect.manager.confirmPairing(prompt.promptId, false) }) { Text("Reject") } })
+    cord.kasane.ui.components.PairingDialog(prompt,
+        onConfirm = { connect.manager.confirmPairing(prompt.promptId, true) },
+        onReject = { connect.manager.confirmPairing(prompt.promptId, false) })
 }
-

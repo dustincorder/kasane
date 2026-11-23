@@ -18,6 +18,7 @@ class NsdDiscovery(
     private var resolving = false
     private val pending = ArrayDeque<NsdServiceInfo>()
     var lost: ((id: String?, host: String?, port: Int) -> Unit)? = null
+    private val resolvedByName = java.util.concurrent.ConcurrentHashMap<String, Triple<String, String, Int>>()
 
     /** Advertise our Connect server. */
     fun register(name: String, port: Int, txt: Map<String, String>) {
@@ -52,11 +53,11 @@ class NsdDiscovery(
                 enqueueResolve(service)
             }
             override fun onServiceLost(service: NsdServiceInfo) {
-                lost?.invoke(
-                    service.attributes["id"]?.decode(),
-                    service.host?.hostAddress,
-                    service.port,
-                )
+                // Lost events carry only the service name (no TXT, no address): map it back to what it resolved to,
+                // otherwise the record stays listed as available for ever.
+                val known = resolvedByName.remove(service.serviceName)
+                lost?.invoke(known?.first ?: service.attributes["id"]?.decode(), known?.second ?: service.host?.hostAddress,
+                    known?.third ?: service.port)
             }
             override fun onStartDiscoveryFailed(type: String?, error: Int) {}
             override fun onStopDiscoveryFailed(type: String?, error: Int) {}
@@ -94,9 +95,11 @@ class NsdDiscovery(
             override fun onServiceResolved(service: NsdServiceInfo) {
                 val txt = service.attributes
                 val host = service.host?.hostAddress ?: return drainResolves()
+                txt["id"]?.decode()?.let { resolvedByName[service.serviceName] = Triple(it, host, service.port) }
                 listener.onService(
                     txt["id"]?.decode(),
-                    service.serviceName,
+                    // The display name travels in TXT; the instance name carries an id suffix to stay unique.
+                    txt["name"]?.decode()?.takeIf { it.isNotBlank() } ?: service.serviceName,
                     txt["platform"]?.decode(),
                     host,
                     service.port,

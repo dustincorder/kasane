@@ -67,9 +67,8 @@ import androidx.compose.ui.unit.dp
 import cord.kasane.music.connect.ConnectDeviceView
 import cord.kasane.music.connect.ConnectPairingPrompt
 import cord.kasane.music.connect.RemoteController
+import cord.kasane.ui.components.deviceIcon
 
-private fun deviceIcon(platform: String?) =
-    if (platform == "android") Icons.Outlined.Smartphone else Icons.Outlined.Computer
 
 /**
  * Spotify-Connect-style sheet: the device that is playing at the top (track and
@@ -154,11 +153,13 @@ private fun CurrentDeviceCard(
                     Slider(value = volume, onValueChange = {
                         if (local) {
                             localVolume = it
-                            audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, (it * max).roundToInt(), 0)
+                            audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, (it * max).roundToInt(), android.media.AudioManager.FLAG_SHOW_UI)
                         } else dragged = it
                     }, onValueChangeFinished = { if (!local) dragged?.let(onRemoteVolume) },
                         modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
                     Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, Modifier.size(20.dp))
+                    Text("${(volume * 100).roundToInt()} %", style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(start = 8.dp).width(44.dp))
                 }
             }
         }
@@ -197,62 +198,6 @@ private fun DeviceListRow(
     }
 }
 
-/**
- * Settings → Kasane Connect: on/off, paired devices (online or not) with
- * Forget, devices nearby that can be paired, and pairing by address.
- */
-@Composable
-fun ConnectDevicesContent(
-    remote: RemoteController?,
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-    localName: String,
-    modifier: Modifier = Modifier,
-) {
-    val devices by remote?.manager?.devices?.collectAsState() ?: remember { mutableStateOf(emptyList<ConnectDeviceView>()) }
-    var manualAddr by remember { mutableStateOf("") }
-    LazyColumn(modifier.fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
-        item {
-            ListItem(
-                headlineContent = { Text("Kasane Connect") },
-                supportingContent = { Text("Control and move playback between your devices on the same network. This device: $localName") },
-                trailingContent = { Switch(checked = enabled, onCheckedChange = onEnabledChange) },
-            )
-        }
-        if (remote != null && enabled) {
-            val paired = devices.filter { it.trusted && it.id != null }
-            val nearby = devices.filter { !it.trusted && it.online }
-            item { SectionLabel("Paired devices") }
-            if (paired.isEmpty()) item { HintText("No paired devices yet. Pair one below; each pair of devices is paired once.") }
-            items(paired, key = { "p:" + it.id }) { d ->
-                DeviceListRow(d.name, if (d.online) "Online" else "Offline", d.platform, onClick = {},
-                    onForget = { d.id?.let(remote::unpair) })
-            }
-            item { SectionLabel("Available on this network") }
-            if (nearby.isEmpty()) item { HintText("Open Kasane on the other device and keep it on the same Wi-Fi.") }
-            items(nearby, key = { "n:" + (it.id ?: it.addr ?: it.name) }) { d ->
-                ListItem(
-                    headlineContent = { Text(d.name) },
-                    supportingContent = d.lastError?.let { { Text(it) } },
-                    leadingContent = { Icon(deviceIcon(d.platform), null) },
-                    trailingContent = { FilledTonalButton(onClick = { remote.pair(d.id ?: d.addr ?: return@FilledTonalButton) }) { Text("Pair") } },
-                )
-            }
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    OutlinedTextField(value = manualAddr, onValueChange = { manualAddr = it },
-                        label = { Text("Pair by address") }, placeholder = { Text("10.0.0.5") },
-                        singleLine = true, modifier = Modifier.weight(1f))
-                    Spacer(Modifier.width(8.dp))
-                    FilledTonalButton(onClick = { remote.pair(manualAddr.trim()); manualAddr = "" },
-                        enabled = manualAddr.isNotBlank()) { Text("Pair") }
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectDevicesScreen(
@@ -265,35 +210,19 @@ fun ConnectDevicesScreen(
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
-        ConnectDevicesContent(remote, enabled, onEnabledChange, localName, Modifier.weight(1f))
+        val devices by (remote?.manager?.devices?.collectAsState() ?: remember { mutableStateOf(emptyList<ConnectDeviceView>()) })
+        val actions = remember(remote, localName) {
+            object : cord.kasane.ui.screens.ConnectDevicesActions {
+                override val localName = localName
+                override fun pair(target: String) { remote?.pair(target) }
+                override fun forget(deviceId: String) { remote?.unpair(deviceId) }
+            }
+        }
+        cord.kasane.ui.screens.ConnectDevicesContent(devices, enabled, onEnabledChange, actions, Modifier.weight(1f))
     }
 }
 
+/** Pairing dialog for incoming and outgoing prompts (common UI): the receiver confirms once, the initiator waits. */
 @Composable
-private fun SectionLabel(text: String) = Text(text, style = MaterialTheme.typography.titleSmall,
-    color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp))
-
-@Composable
-private fun HintText(text: String) = Text(text, style = MaterialTheme.typography.bodyMedium,
-    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-
-/** Numeric-comparison dialog for both incoming and outgoing pairing prompts. */
-@Composable
-fun PairingDialog(prompt: ConnectPairingPrompt, onRespond: (Boolean) -> Unit) {
-    AlertDialog(
-        onDismissRequest = { onRespond(false) },
-        icon = { Icon(Icons.Outlined.Devices, null) },
-        title = { Text(if (prompt.incoming) "Pair with ${prompt.peerName}?" else "Confirm on ${prompt.peerName}") },
-        text = {
-            Column {
-                Text("Check that this number matches on the other device.")
-                Spacer(Modifier.height(12.dp))
-                Text(prompt.code, style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            }
-        },
-        confirmButton = { Button(onClick = { onRespond(true) }) { Text("Confirm") } },
-        dismissButton = { TextButton(onClick = { onRespond(false) }) { Text("Reject") } },
-        shape = RoundedCornerShape(24.dp),
-    )
-}
+fun PairingDialog(prompt: ConnectPairingPrompt, onRespond: (Boolean) -> Unit) =
+    cord.kasane.ui.components.PairingDialog(prompt, onConfirm = { onRespond(true) }, onReject = { onRespond(false) })
