@@ -1,111 +1,83 @@
-# Kotlin Multiplatform migration
+# Kasane as one Kotlin Multiplatform application (Android + Linux)
 
-## Current implemented boundary
+Branch `exp/compose-desktop`. Built from `android/` (`./gradlew :app:assembleRelease`, `:desktop:run`,
+`:desktop:createDistributable`). The Tauri client is untouched and still builds; it is no longer the target.
 
-`shared/src/commonMain/kotlin/cord/kasane/music` owns the existing serializable
-Track/catalog models and QueuePolicy. Android depends on `project(":shared")`;
-there is no second copy of these classes in Android sources. Public packages,
-constructor defaults, source IDs and serialization names remain unchanged.
+## Modules
 
-The initial KMP target is JVM: Android and Linux both execute JVM bytecode.
-The Android app stays under `android/app`; a desktop app will consume the same
-core. This target configuration is sufficient for portable domain logic, not a
-claim of completed Compose Multiplatform UI or native platform adapters. Shared
-UI needs platform-aware target configuration in a later verified stage.
+| Module | Targets | Holds |
+|---|---|---|
+| `:shared` (`shared/`) | android, jvm | `commonMain`: models (Track, Catalog), InnerTube client + parsers, `QueuePolicy`, import/export, mix analysis, Connect device/prompt models. `jvmCommonMain` (android + jvm): OkHttp transport, guest/iOS stream resolvers, `AudioRange`, the whole Kasane Connect core (`ConnectManager`, TLS, protocol, SAS, trust). |
+| `:ui` (`shared-ui/`) | android, jvm | Compose Multiplatform UI used by both apps (below). |
+| `:app` (`android/app`) | Android | Activity, Media3 playback/MediaSession, Room, WebView sign-in and verification, NSD, Material You colour selection, remaining Android screens. |
+| `:desktop` (`desktop-compose/`) | JVM | Window, mpv engine, display-scale detection, mDNS responder/browser, desktop Connect adapter, remaining desktop screens. |
 
-The existing Kotlin/serialization/Compose-compiler versions remain 2.0.21, Gradle
-8.9 and AGP 8.7.3. No simultaneous compiler/Room/UI upgrade is part of this step.
-The [KMP compatibility guide](https://kotlinlang.org/docs/multiplatform/multiplatform-compatibility-guide.html)
-notes JVM-target `withJava()` limitations for this Gradle range; this module does
-not use that DSL. No Android Gradle plugin is applied to the shared JVM module.
+### UI code in common source sets (`shared-ui/src/commonMain`)
 
-## Android storage compatibility
+- `theme/Theme.kt`: shape and type scales, accent presets, `seedColorScheme` (HCT/Material You algorithm), `KasaneMaterialTheme`, muted text styles. Android passes its wallpaper `dynamic*ColorScheme` (Android 12+) into it, so Material You is preserved; desktop passes a seed scheme.
+- `settings/Appearance.kt`: `ThemeMode`, `AccentSource` (Android's `AppSettings` aliases them).
+- `components/Artwork.kt`: `TrackArtwork` with size-bucketed artwork; platforms provide an `ArtworkLoader` (Coil on Android, OkHttp + Skia on desktop).
+- `components/TrackListItem.kt`: track row with playing/loading state, overflow menu, long-press, accessibility actions.
+- `components/ConnectComponents.kt`: device icons and state labels, `DeviceRow`, the pairing dialog.
+- `screens/QueueScreen.kt`: the complete queue screen (now playing, up next in real order, played, drag reorder, swipe/menu remove). Android hosts it in a bottom sheet; desktop in the side panel and Now Playing.
+- `screens/AppearanceSection.kt`: Appearance settings (theme, colour source, accents, custom hue) with a platform slot (desktop interface scale).
+- `screens/ConnectDevicesScreen.kt`: Settings → Kasane Connect (switch, paired devices with real state, nearby devices, pair by address, forget).
 
-Domain Track has no Room annotations. Android `data/TrackRecord.kt` owns the
-`tracks` table mapping; TrackDao retains its public domain methods and converts
-only at insert boundaries. Query projections still return the shared Track.
-Room stays at schema version 3 with identity hash
-`9e8ed8bf833155ca561f290dd5a603e2`. Debug and release generated CREATE TABLE SQL
-and identity match the preceding schema. No migration or destructive fallback
-was added, and no account-store or signing configuration was changed.
+Next to move, in order: catalog page (album/artist/playlist), search results, home shelves, player controls and the Now Playing layout (with per-form-factor wrappers), library. Navigation stays per platform until the screens are shared.
 
-An isolated API 35 `.dev` test verified single/batch inserts, every Track field,
-and the favorite join in an in-memory database. The pre-existing emulator cache
-DB opened after the app update; real guest Home/Search and fresh repository Room
-reads passed with no repeat HTTP requests. This is not a Pixel update test.
+## Desktop scaling
 
-## Validation of the domain extraction
+The JVM reports scale 1.0 under KDE Wayland even at 165 %, which is why the UI was tiny. `SystemScale` reads the real scale (KASANE_SCALE, GDK/Qt variables, `kscreen-doctor -o`, Xft.dpi) and `ScaledDensity` multiplies the window density by it and by the user's interface scale (Settings slider 75–250 %, Ctrl +/−/0, persisted), never twice when the JVM already scaled. Every dp/sp scales through Compose density; `ScaleTest` measures rendered pixels (100 dp → 165 px at 1.65).
 
-From `android/`:
+## Kasane Connect: root causes fixed here
 
-- `./gradlew :shared:jvmTest :app:assembleDebug :app:testDebugUnitTest`: passed;
-  10 shared tests, 187 Android tests (178 passed, nine opt-in live tests skipped).
-- `./gradlew :shared:jvmTest :app:assembleRelease :app:assembleDebugAndroidTest -PkasaneCacheProbe=true`: passed.
-- Explicit instrumentation on `emulator-5580` only:
-  `cord.kasane.music.dev.test/cord.kasane.music.CatalogCacheInstrumentation`: passed.
-- Guest metadata timings in that run: fresh Home 2037 ms/one HTTP request, search
-  615 ms/one request, memory median 17 us and 875 us/zero HTTP requests, fresh
-  repository Room reads 6 ms and 5 ms/zero requests. No UI/image timing claim.
+- **Self-discovery.** Two Kasane instances on one computer have different identities, so id filtering alone listed the other one. Discovery now drops this device's id *and* any address bound to this machine; a client that reaches itself (same id in `hello`) closes the session.
+- **Duplicate devices / desktop icon on a phone.** Entries were keyed `id ?: host:port`: a half-resolved mDNS record (TXT not yet arrived) or a manual address created a second, platform-less entry, drawn with the computer icon. Records without an id are ignored, address entries are folded into the identified device, unknown platforms get a neutral icon, and lost services expire (Android lost events carry only the service name; JmDNS removals may lack TXT, both now mapped back).
+- **Desktop invisible to the phone.** The desktop announced on its ZeroTier interface (first site-local address) and Android's mDNS rejected JmDNS's packets. A minimal responder now advertises on the default-route interface; JmDNS only browses and re-queries so a phone's new Wi-Fi address is picked up.
+- **Pairing.** The initiator shows the code and waits; the receiver's user confirms once; trust is stored on both sides. The SAS commit/reveal, mutual TLS and certificate pinning are unchanged. Trade-off: the initiating device trusts the result reported by the receiver, so code comparison by the receiving user is the authentication; an active attacker during pairing could make only the initiator believe pairing succeeded after the receiver's user rejected it. Mutual confirmation would remove that, at the cost of the second tap.
+- **States.** Available, pairing, paired, connected, playing, paused/idle and offline are derived from discovery, trust, the session and remote playback, not conflated.
 
-## Next boundaries
+Also fixed: handoff to the phone crashed (MediaController used off its thread); remote volume changes are announced; the stale-trust dead end ("X trusts this device but...") resets and re-pairs.
 
-Extract account/library contracts and the existing provider into shared code;
-keep Keystore/WebView and platform playback at their respective boundaries. Port
-JSON/request logic without maintaining two evolving provider implementations.
-Then add Compose Desktop with a real libmpv adapter (already available on the host),
-shared catalog/queue and verified audio. Keep Rust/Tauri until parity passes.
-See `../ROADMAP.md` and `../ACCEPTANCE.md` for the complete product scope.
+Android limitation found on the test phone: with Android's *Restricted networking mode* on, a backgrounded app has no network, so Connect to the phone works only while Kasane is in the foreground or playing (foreground service). Not something the app can override.
 
-## Shared account/library contracts (subsequent extraction)
+## Offline library: implementation path
 
-commonMain now also owns AccountSession/Identity/State and SessionStore,
-AccountCollection/AccountLibraryProvider, CatalogRemote, CloudLikeState and
-TrackLinks. Android continues using these exact public packages; the Keystore,
-WebView, AccountRepository, HTTP/parser, Room cache and rating controller
-implementations remain their existing Android implementations for now. No account
-cookies/IDs, session file format, login behavior or remote writes were changed.
-The common session model has no serialization annotation and retains redacted
-`toString()` and input validation; sensitive values do not become domain exports.
+What exists: Android has the offline core (Room `audio_files` with QUEUED/DOWNLOADING/SAVED states, separate saved store and LRU stream cache with configurable limit, `OfflineGateInterceptor` that blocks network in Offline Only mode, saved-music screen). Desktop has only a JSON liked/history file.
 
-`./gradlew :shared:jvmTest assembleDebug testDebugUnitTest assembleRelease` passed:
-12 shared tests, 187 Android tests (178 passed, nine live skipped). This is common
-contract/compiler validation plus Android regression coverage, not a new live login
-or verified Linux account session. The native Room test above belongs to the prior
-Track extraction and does not claim real account coverage.
+1. **Shared schema.** Move `TrackRecord`, `AudioFileRecord`, history, favorites, playlists and the catalog cache to `:shared` with Room KMP (Android + JVM, bundled SQLite driver), keeping the current Android table names and a migration so existing data stays. Desktop gets the same database under `~/.local/share/cord.kasane.compose/`.
+2. **Library model.** One `LibraryItem` source enum: `LOCAL_FILE` (path/URI, imported folder id), `SAVED_ONLINE` (permanent, never evicted), `CACHED_STREAM` (evictable), plus user playlists, favorites, history. Eviction runs only over `CACHED_STREAM`.
+3. **Modes.** `NetworkMode { ONLINE, OFFLINE }` in shared settings; the OkHttp gate moves to `jvmCommonMain` so both apps block YouTube requests in Offline mode; shared screens render online-only items as unavailable instead of hiding them.
+4. **Import.** Shared `LocalImportPlanner` (dedupe by content hash + path, unavailable-path state, copy/move only on request). Platform scanners: Android Storage Access Framework (`OpenDocumentTree`, persisted permissions, `MediaMetadataRetriever` for tags/artwork); desktop file/folder picker (xdg-desktop-portal FileChooser, AWT fallback) and a JVM tag reader for MP3/FLAC/Ogg/Opus/M4A/ALAC/WAV. Playback: Media3 on Android, mpv on desktop (both decode those formats).
+5. **Later imports.** The existing `ImportPlanner`/`TrackMatcher` (source ids, candidates, confirmation) take archive (ZIP/RAR/7z with path-traversal and size limits), InnerTune/OpenTune/Metrolist backups (InnerTune adapter exists) and service playlists matched by metadata; a Spotify playlist never implies audio access.
 
-**Next concrete implementation:** move request construction/error policy to a common
-InnerTube client with a bounded, cancellable HTTP port and platform SHA/clock ports;
-port parser traversal to existing kotlinx.serialization JSON. Android OnlineCatalog
-must delegate to this implementation, preserving its validated response, auth-host,
-cancellation and error behavior. Keep one provider, not a copied Linux provider;
-then wire Compose Desktop and libmpv to that shared catalog/queue.
+## Google sign-in on desktop
 
+Shareable now: the session model (`AccountSession`), signed InnerTube requests (`SAPISIDHASH`), account library/playlist/like parsing (all in `:shared`). Platform adapters needed:
+- **Login capture.** Compose Desktop has no WebView. Options: embed Chromium (JCEF/KCEF, ~100 MB) and reuse Android's cookie-capture rules; or read the session the Tauri client already stores on this computer (Secret Service, `cord.kasane.desktop` / `youtube-session`), which is this machine's own credential, never Android's.
+- **Secure storage.** Secret Service/KWallet via D-Bus, memory-only fallback (Tauri already does this).
+- **Verified playback.** Full-length signed-in streams on Android come from WEB_REMIX with a BotGuard proof run in a WebView (`VerifiedPlayerResolver`); the desktop needs the same JS runtime (JCEF) for it. Until then the desktop plays full tracks through the iOS HLS profile when YouTube offers it, and stops with an explanation when YouTube cuts a guest stream after its first part (it now does that for ANDROID_VR guest URLs).
 
-## Verified provider checkpoint (2026-11-16)
+The Android account session is not touched by any of this.
 
-Android OnlineCatalog now delegates typed reads and explicit library writes to
-SharedOnlineCatalog in commonMain. InnerTubeClient owns request/context/error
-policy; common JSON parsers own catalog, artwork, radio, rating and playlist
-response conversion. The JVM OkHttp adapter bounds responses, cancels calls,
-rejects redirects and avoids persistent cookie jars. Platform clock/SHA ports
-keep Android APIs out of common code. Remaining org.json entry points are
-compatibility facades for login and stream consumers, not a second provider.
+## Feature parity (Android vs desktop), current state
 
-Blank rating acknowledgements now require a read-only status confirmation; an
-unknown result rolls back the optimistic controller state without repeating the
-mutation. A partial HTTP body failure is classified NETWORK rather than malformed
-JSON. Both corrections have regression coverage with synthetic credentials only.
-
-Verification: shared JVM tests 37 passed; Android tests 188 total, 179 passed,
-nine opt-in live tests skipped. Debug, release and isolated test APK builds passed.
-The isolated emulator guest cache probe passed (Home 1794 ms/one request, search
-929 ms/one request; memory medians 19/1090 us and Room 6/5 ms, zero HTTP requests).
-These are metadata timings, not UI/image timings or a controlled speed comparison.
-The isolated MediaSession radio probe passed: queue 51, deduplicated, manual entry
-preserved and populated before the first track ended. No Pixel installation,
-account credential access or personal-account mutation was performed.
-
-This checkpoint does not implement or prove full SABR playback. Earlier partial
-SABR results remain as documented in sabr-playback.md; full real-track EOF is not
-confirmed. Cache and session/controller migration, Kotlin desktop and the remaining
-product roadmap are unfinished. Work paused here at the user's explicit request.
+| Area | Android | Desktop | Shared code today |
+|---|---|---|---|
+| Theme, accents, light/dark | yes, Material You | yes, seed colours, KDE/GNOME dark | theme, Appearance screen |
+| Interface scale / DPI | system | detected + user scale | — |
+| Home, mood chips | yes, cached | yes, guest | catalog client |
+| Search | yes, suggestions, history | yes | catalog client |
+| Album / artist / playlist pages | rich | basic | catalog models |
+| Queue screen | yes | yes | **queue screen** |
+| Player bar / Now Playing | sheet with gestures | bar + full window | — (next) |
+| Radio, autoplay | yes | yes | QueuePolicy |
+| Liked songs, history | Room | JSON | — (Room KMP planned) |
+| Account sign-in, cloud likes, account playlists | yes | no | session + requests |
+| Verified / age-restricted playback | yes | no | — |
+| Guest full-length playback | via account/verified paths | iOS HLS when offered | IosHlsResolver |
+| Offline saving, stream cache, Offline Only | yes | no | — (planned) |
+| Local file import | partial (backup import) | no | ImportPlanner |
+| Connect pairing/control/handoff | yes | yes | **core + settings screen + dialog** |
+| Media keys / notifications | MediaSession | no MPRIS yet | — |
+| Lyrics, AutoMix, SponsorBlock, silence skip | no / partial | no | mix analysis |
