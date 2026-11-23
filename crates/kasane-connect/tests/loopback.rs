@@ -247,6 +247,12 @@ async fn revoked_device_gets_auth_required() {
         .unwrap();
     assert!(raw.authed);
     a.unpair(&identity.device_id).await;
+    // A removed device no longer lingers in the list as an unremovable row.
+    assert!(!a
+        .devices()
+        .borrow()
+        .iter()
+        .any(|d| d.id.as_deref() == Some(identity.device_id.as_str())));
     let raw2 = RawClient::connect(&format!("127.0.0.1:{}", a.port()), &identity, &tls)
         .await
         .unwrap();

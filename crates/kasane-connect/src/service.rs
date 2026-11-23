@@ -568,7 +568,13 @@ impl ConnectService {
             let _ = conn.send(&Frame::Unpair);
         }
         let _ = self.inner.trust.lock().unwrap().remove(device_id);
-        self.inner.book.lock().unwrap().wanted.remove(device_id);
+        {
+            let mut book = self.inner.book.lock().unwrap();
+            book.wanted.remove(device_id);
+            // A removed device leaves the list; it reappears only if it is
+            // announced on the network again.
+            book.entries.remove(device_id);
+        }
         self.inner.refresh_devices();
     }
 
@@ -860,6 +866,14 @@ impl Inner {
         let mut list: Vec<DeviceView> = Vec::new();
         let now = Instant::now();
         let live: HashSet<String> = book.sessions.keys().cloned().collect();
+        // Untrusted devices that are neither connected nor announced recently
+        // are stale: drop them instead of listing unreachable, unremovable rows.
+        book.entries.retain(|_, e| {
+            let trusted = e.id.as_ref().is_some_and(|id| trusted_ids.contains(id));
+            let live_now = e.id.as_ref().is_some_and(|id| live.contains(id)) || e.conn != "disconnected";
+            let announced = e.last_resolve.is_some_and(|t| now.duration_since(t) < ONLINE_TTL);
+            trusted || live_now || announced
+        });
         for (key, e) in book.entries.iter_mut() {
             let connected = e
                 .id
@@ -1560,6 +1574,10 @@ fn mdns_events(inner: Arc<Inner>, rx: std::sync::mpsc::Receiver<DiscoveryEvent>)
 async fn maintain(inner: Arc<Inner>, mut mdns_rx: mpsc::UnboundedReceiver<String>) {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut attempts: HashMap<String, u32> = HashMap::new();
+    // One reconnect attempt per device at a time; without this every tick
+    // queued another delayed dial for the same device.
+    let inflight: Arc<Mutex<HashSet<String>>> = Arc::default();
+    let mut ticks: u64 = 0;
     loop {
         tokio::select! {
             _ = tick.tick() => {}
@@ -1568,6 +1586,11 @@ async fn maintain(inner: Arc<Inner>, mut mdns_rx: mpsc::UnboundedReceiver<String
                 attempts.clear();
             }
             _ = inner.shutdown.notified() => return,
+        }
+        ticks += 1;
+        if ticks.is_multiple_of(10) {
+            // Online flags expire and stale untrusted rows are pruned.
+            inner.refresh_devices();
         }
         let wanted: Vec<(String, String)> = {
             let book = inner.book.lock().unwrap();
@@ -1583,6 +1606,9 @@ async fn maintain(inner: Arc<Inner>, mut mdns_rx: mpsc::UnboundedReceiver<String
                 .collect()
         };
         for (id, addr) in wanted {
+            if !inflight.lock().unwrap().insert(id.clone()) {
+                continue;
+            }
             let tries = attempts.entry(id.clone()).or_insert(0);
             let delay = Duration::from_secs(1 << (*tries).min(5));
             *tries += 1;
@@ -1591,11 +1617,13 @@ async fn maintain(inner: Arc<Inner>, mut mdns_rx: mpsc::UnboundedReceiver<String
             let id2 = id.clone();
             inner.set_conn_state(&id, "connecting");
             let svc = ConnectService { inner: inner2.clone() };
+            let inflight2 = inflight.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(delay).await;
                 if let Err(e) = svc.dial(&addr2, Some(&id2)).await {
                     inner2.mark_error(&id2, e.to_string());
                 }
+                inflight2.lock().unwrap().remove(&id2);
             });
         }
     }
