@@ -34,3 +34,10 @@ This document establishes the collaboration contract between the lead developer 
 
 ## Build notes
 - Desktop release binary: `npx tauri build --no-bundle` → `target/release/kasane`. A plain `cargo build --release -p kasane` omits Tauri's `custom-protocol` feature, so the binary loads the dev server (`localhost:5173`) and shows "Connection refused".
+
+## Compose desktop prototype (experimental, branch `exp/compose-desktop`)
+
+- Gradle project `:desktop` (`desktop-compose/`), built from `android/`: `./gradlew :desktop:run`,
+  `:desktop:test`, `:desktop:createDistributable`. Needs `mpv` at runtime.
+- Headless checks: `--smoke`, `--connect-smoke` (set `KASANE_RUST_CLI` for Rust interop), `--render DIR`.
+- Details and parity status: `docs/architecture/compose-desktop.md`. The Tauri client is unaffected.

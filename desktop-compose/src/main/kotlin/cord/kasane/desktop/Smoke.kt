@@ -11,7 +11,7 @@ import kotlinx.coroutines.withTimeout
  * (mpv `--ao=null`): Home shelves, search, stream resolution, decoding,
  * position advance, next track. Prints facts only, never URLs.
  */
-fun runSmoke(query: String): Int = DesktopApp(audioOutput = "null").use { app ->
+fun runSmoke(query: String): Int = DesktopApp(audioOutput = "null", root = kotlin.io.path.createTempDirectory("kasane-smoke").toFile(), autoStartConnect = false).use { app ->
     runBlocking {
         val home = app.catalog.home(null)
         println("home: ${home.shelves.size} shelves, first: ${home.shelves.take(3).joinToString { "\"${it.title}\" (${it.items.size})" }}")
