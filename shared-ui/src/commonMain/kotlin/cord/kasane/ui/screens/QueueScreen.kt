@@ -18,6 +18,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
@@ -68,6 +72,7 @@ fun QueueContent(
     onMove: (from: Int, to: Int) -> Unit,
     onRemove: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    headerTrailing: (@Composable () -> Unit)? = null,
 ) {
     val sections = remember(state.queue.size, state.currentIndex, state.upcomingOrder) {
         QueuePolicy.sections(state.queue.size, state.currentIndex, state.upcomingOrder)
@@ -86,29 +91,46 @@ fun QueueContent(
     val idsUnique = remember(state.queue) { state.queue.map { it.id }.toSet().size == state.queue.size }
     fun key(prefix: String, queueIndex: Int) = if (idsUnique) prefix + state.queue[queueIndex].id else "$prefix#$queueIndex"
     Column(modifier.fillMaxWidth()) {
-        Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = if (headerTrailing != null) 8.dp else 16.dp, top = 12.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text("Queue", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            Text(if (state.shuffle) "Shuffle on" else "${state.queue.size} tracks", style = MaterialTheme.typography.labelMediumMuted)
+            Text(
+                if (state.shuffle) "Shuffle on" else "${state.queue.size} tracks",
+                style = MaterialTheme.typography.labelMediumMuted,
+            )
+            headerTrailing?.invoke()
         }
         if (state.queue.isEmpty()) {
-            Text("Nothing is queued. Play a song and Kasane builds a radio from it.", style = MaterialTheme.typography.bodyMediumMuted, modifier = Modifier.padding(20.dp))
+            Text("Nothing is queued. Play a song and Kasane builds a radio from it.", style = MaterialTheme.typography.bodyMediumMuted, modifier = Modifier.padding(16.dp))
             return@Column
         }
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f, fill = false), contentPadding = PaddingValues(bottom = 16.dp)) {
             item(key = "h-now") { SectionLabel("Now playing") }
             item(key = "current") {
                 val current = state.queue.getOrNull(sections.currentIndex)
-                if (current != null) TrackListItem(current, onClick = { onPlayIndex(sections.currentIndex) }, isPlaying = state.isPlaying, isLoading = state.isLoading,
-                    modifier = Modifier.background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)))
+                if (current != null) {
+                    TrackListItem(
+                        current,
+                        onClick = { onPlayIndex(sections.currentIndex) },
+                        isPlaying = state.isPlaying,
+                        isLoading = state.isLoading,
+                        modifier = Modifier
+                            .padding(horizontal = 8.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)),
+                    )
+                }
             }
             item(key = "h-up") { SectionLabel(if (upNext.isEmpty()) "Up next · nothing yet" else "Up next") }
             itemsIndexed(upNext, key = { _, queueIndex -> key("q:", queueIndex) }) { position, queueIndex ->
                 val track = state.queue[queueIndex]
                 ReorderableItem(reorderState, key = key("q:", queueIndex)) { dragging ->
                     val menu = buildList {
-                        if (reorderable && position > 0) add(MenuEntry("Move up") { onMove(queueIndex, queueIndex - 1) })
-                        if (reorderable && position < upNext.lastIndex) add(MenuEntry("Move down") { onMove(queueIndex, queueIndex + 1) })
-                        add(MenuEntry("Remove from queue") { onRemove(queueIndex) })
+                        if (reorderable && position > 0) add(MenuEntry("Move up", icon = Icons.Outlined.ArrowUpward) { onMove(queueIndex, queueIndex - 1) })
+                        if (reorderable && position < upNext.lastIndex) add(MenuEntry("Move down", icon = Icons.Outlined.ArrowDownward) { onMove(queueIndex, queueIndex + 1) })
+                        add(MenuEntry("Remove from queue", icon = Icons.Outlined.RemoveCircleOutline) { onRemove(queueIndex) })
                     }
                     val dismiss = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
                         if (value == SwipeToDismissBoxValue.EndToStart) { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onRemove(queueIndex); true } else false
@@ -122,7 +144,7 @@ fun QueueContent(
                             modifier = Modifier.background(if (dragging) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surface),
                             trailing = if (reorderable) ({
                                 Icon(Icons.Default.DragHandle, "Reorder ${track.title}", tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(48.dp).padding(12.dp).draggableHandle(
+                                    modifier = Modifier.size(40.dp).padding(10.dp).draggableHandle(
                                         onDragStarted = { dragStartIndex = queueIndex; haptics.performHapticFeedback(HapticFeedbackType.LongPress) },
                                         onDragStopped = {
                                             val start = dragStartIndex; dragStartIndex = null
@@ -136,14 +158,14 @@ fun QueueContent(
             }
             if (sections.played.isNotEmpty()) {
                 item(key = "h-played") {
-                    Row(Modifier.fillMaxWidth().clickable { showPlayed = !showPlayed }.padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().clickable { showPlayed = !showPlayed }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Played · ${sections.played.size}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
                         Icon(if (showPlayed) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (showPlayed) "Hide played" else "Show played")
                     }
                 }
                 if (showPlayed) itemsIndexed(sections.played, key = { _, i -> key("p:", i) }) { _, queueIndex ->
                     TrackListItem(state.queue[queueIndex], onClick = { onPlayIndex(queueIndex) },
-                        menu = listOf(MenuEntry("Remove from queue") { onRemove(queueIndex) }))
+                        menu = listOf(MenuEntry("Remove from queue", icon = Icons.Outlined.RemoveCircleOutline) { onRemove(queueIndex) }))
                 }
             }
         }
@@ -152,5 +174,5 @@ fun QueueContent(
 
 @Composable
 private fun SectionLabel(text: String) {
-    Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
+    Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
 }

@@ -90,34 +90,44 @@ class DesktopConnect(player: DesktopPlayer, private val scope: CoroutineScope, d
         if (running) return
         manager.start()
         running = true
-        val address = lanAddress()
         Thread({
-            runCatching {
-                val jmdns = JmDNS.create(address, hostName)
-                mdns = jmdns
-                // Advertised by our own responder; JmDNS only browses (Android could not parse its announcements).
-                (address as? java.net.Inet4Address)?.let { lan ->
-                    responder = MdnsResponder(lan, instance = "${identity.deviceName} ${identity.deviceId.take(8)}",
-                        hostLabel = "kasane-${identity.deviceId.take(8)}", port = manager.port, txt = mapOf(
-                            "id" to identity.deviceId, "name" to identity.deviceName, "platform" to "linux",
-                            "proto" to "1", "fp" to identity.fingerprintHex.take(16)))
-                }
-                // JmDNS can report a removal without the TXT data; idByService remembers which device each name was.
-                jmdns.addServiceListener(SERVICE_TYPE, object : ServiceListener {
-                    override fun serviceAdded(event: ServiceEvent) = jmdns.requestServiceInfo(event.type, event.name, 3_000)
-                    override fun serviceRemoved(event: ServiceEvent) {
-                        val (id, addr) = idByService.remove(event.name) ?: return
-                        manager.onServiceLost(id, addr?.substringBefore(':'), addr?.substringAfter(':')?.toIntOrNull() ?: 0)
+            // Rebind on a LAN change: Wi-Fi→Ethernet or a reconnected link hands us another IPv4,
+            // and the old announcement would keep pointing at a dead address.
+            while (running) {
+                val address = lanAddress()
+                if (address == null) { Thread.sleep(15_000); continue }
+                runCatching {
+                    val jmdns = JmDNS.create(address, hostName)
+                    mdns = jmdns
+                    // Advertised by our own responder; JmDNS only browses (Android could not parse its announcements).
+                    (address as? java.net.Inet4Address)?.let { lan ->
+                        responder = MdnsResponder(lan, instance = "${identity.deviceName} ${identity.deviceId.take(8)}",
+                            hostLabel = "kasane-${identity.deviceId.take(8)}", port = manager.port, txt = mapOf(
+                                "id" to identity.deviceId, "name" to identity.deviceName, "platform" to "linux",
+                                "proto" to "1", "fp" to identity.fingerprintHex.take(16)))
                     }
-                    override fun serviceResolved(event: ServiceEvent) = report(event.info)
-                })
-                // JmDNS raises no new event when a known service only changes address (a phone rejoining Wi-Fi with
-                // a new IP), so look the services up again periodically; the manager updates the stored address.
-                while (running && mdns === jmdns) {
-                    Thread.sleep(15_000)
-                    runCatching { jmdns.list(SERVICE_TYPE, 3_000).forEach(::report) }
-                }
-            }.onFailure { System.err.println("Kasane Connect discovery unavailable: $it") }
+                    // JmDNS can report a removal without the TXT data; idByService remembers which device each name was.
+                    jmdns.addServiceListener(SERVICE_TYPE, object : ServiceListener {
+                        override fun serviceAdded(event: ServiceEvent) = jmdns.requestServiceInfo(event.type, event.name, 3_000)
+                        override fun serviceRemoved(event: ServiceEvent) {
+                            val (id, addr) = idByService.remove(event.name) ?: return
+                            manager.onServiceLost(id, addr?.substringBefore(':'), addr?.substringAfter(':')?.toIntOrNull() ?: 0)
+                        }
+                        override fun serviceResolved(event: ServiceEvent) = report(event.info)
+                    })
+                    // JmDNS raises no new event when a known service only changes address (a phone rejoining Wi-Fi
+                    // with a new IP), so look the services up again periodically; the manager updates the address.
+                    while (running && mdns === jmdns && lanAddress() == address) {
+                        Thread.sleep(15_000)
+                        runCatching { jmdns.list(SERVICE_TYPE, 3_000).forEach(::report) }
+                    }
+                    // The interface/address changed (or we are stopping): release this binding and re-open.
+                    runCatching { responder?.close() }
+                    responder = null
+                    runCatching { jmdns.unregisterAllServices(); jmdns.close() }
+                    if (mdns === jmdns) mdns = null
+                }.onFailure { System.err.println("Kasane Connect discovery unavailable: $it"); Thread.sleep(15_000) }
+            }
         }, "connect-mdns").apply { isDaemon = true }.start()
     }
 

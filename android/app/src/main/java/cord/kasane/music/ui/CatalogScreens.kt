@@ -12,6 +12,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -292,16 +295,23 @@ private fun CatalogResult(item: CatalogItem, onClick: () -> Unit) {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () -> Unit,
     onOpen: (CatalogItem) -> Unit, onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
     cachedCatalog: CachedCatalogRepository? = null, cacheScope: String = "guest", accountSession: AccountSession? = null,
-    accountIdentity: cord.kasane.music.auth.AccountIdentity? = null) {
+    accountIdentity: cord.kasane.music.auth.AccountIdentity? = null,
+    onPlayNext: ((List<Track>) -> Unit)? = null, onAddAllToQueue: ((List<Track>) -> Unit)? = null,
+    onSaveAll: ((List<Track>) -> Unit)? = null,
+    bulkAddToPlaylist: (suspend (List<Track>, String) -> Unit)? = null) {
     var page by remember(item.id) { mutableStateOf<CatalogPage?>(null) }
     var revision by remember(item.id) { mutableIntStateOf(0) }
     var loading by remember(item.id) { mutableStateOf(true) }
     var error by remember(item.id) { mutableStateOf<String?>(null) }
     var loadingMore by remember(item.id) { mutableStateOf(false) }
     var handledRevision by remember(item.id) { mutableIntStateOf(0) }
+    var bulkMessage by remember(item.id) { mutableStateOf<String?>(null) }
+    var bulkBusy by remember(item.id) { mutableStateOf(false) }
+    var destinationPick by remember(item.id) { mutableStateOf<List<cord.kasane.music.provider.PlaylistDestination>?>(null) }
     val scope = rememberCoroutineScope()
     val accountPlaylist = item.kind == CatalogKind.PLAYLIST && accountSession != null
     LaunchedEffect(cachedCatalog, cacheScope, item.id) {
@@ -327,31 +337,107 @@ fun CatalogDetailScreen(item: CatalogItem, catalog: OnlineCatalog, onBack: () ->
         catch (e: Exception) { error = e.message ?: "This page is unavailable." }
         finally { loading = false; handledRevision = revision }
     }
-    CatalogDetailContent(item, page, loading, error, loadingMore, onBack, { revision++ }, onOpen, onPlay, onQueue, owner = accountIdentity, onMix = {
-        val playlist = page?.radioPlaylistId ?: return@CatalogDetailContent
-        scope.launch {
-            try { val radio = if (accountSession != null) cachedCatalog?.library(cacheScope, accountSession, cord.kasane.music.provider.AccountCollection.PLAYLISTS, playlist) ?: catalog.playlist(playlist) else catalog.playlist(playlist); if (radio.tracks.isNotEmpty()) onPlay(radio.tracks, false) }
-            catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message ?: "Could not start the artist mix." }
-        }
-    }) {
-        val current = page ?: return@CatalogDetailContent
-        val token = current.continuation ?: return@CatalogDetailContent
+    suspend fun loadMorePage() {
+        val current = page ?: return
+        val token = current.continuation ?: return
         loadingMore = true; error = null
+        try {
+            val next = when {
+                accountPlaylist && cachedCatalog != null -> cachedCatalog.library(cacheScope, requireNotNull(accountSession), AccountCollection.PLAYLISTS, item.id, token)
+                accountPlaylist -> catalog.playlistFor(requireNotNull(accountSession), item.id, token)
+                cachedCatalog != null -> cachedCatalog.browse(cacheScope, item.id, token)
+                else -> catalog.browse(item.id, token)
+            }
+            page = if (cachedCatalog != null) next else current.copy(
+                shelves = (current.shelves + next.shelves).groupBy { it.title }.map { (title, shelves) ->
+                    CatalogShelf(title, shelves.flatMap { it.items }.distinctBy { it.kind to it.id })
+                }, continuation = next.continuation?.takeUnless { it == token })
+        } catch (e: CancellationException) { throw e
+        } catch (e: Exception) { error = e.message ?: "Could not load more tracks."
+        } finally { loadingMore = false }
+    }
+    /** The whole collection, following continuations until the server stops sending them (same cap as the list). */
+    suspend fun collectAllTracks(progress: (Int) -> Unit): List<Track> {
+        var guard = 0
+        while (page?.continuation != null && guard++ < 60) {
+            val before = page?.shelves?.sumOf { it.items.size } ?: 0
+            if (before >= 2000) break
+            loadMorePage()
+            val after = page?.shelves?.sumOf { it.items.size } ?: 0
+            if (after <= before || error != null) break
+            progress(after)
+        }
+        return page?.tracks.orEmpty()
+    }
+    /** Preloads every page so find/sort cover the whole collection, not just the first screenful. */
+    fun ensureAllLoaded() {
+        if (bulkBusy || page?.continuation == null) return
         scope.launch {
+            bulkBusy = true
+            bulkMessage = "Loading tracks…"
+            try { collectAllTracks { bulkMessage = "Loading tracks… $it" } }
+            catch (e: CancellationException) { throw e }
+            finally { bulkBusy = false; bulkMessage = null }
+        }
+    }
+    /** A bulk action over the complete collection: fetch every page, then run the action, with status text throughout. */
+    fun bulk(verb: String, act: suspend (List<Track>) -> String) {
+        scope.launch {
+            while (bulkBusy) kotlinx.coroutines.delay(150)
+            bulkBusy = true
             try {
-                val next = when {
-                    accountPlaylist && cachedCatalog != null -> cachedCatalog.library(cacheScope, requireNotNull(accountSession), AccountCollection.PLAYLISTS, item.id, token)
-                    accountPlaylist -> catalog.playlistFor(requireNotNull(accountSession), item.id, token)
-                    cachedCatalog != null -> cachedCatalog.browse(cacheScope, item.id, token)
-                    else -> catalog.browse(item.id, token)
-                }
-                page = if (cachedCatalog != null) next else current.copy(
-                    shelves = (current.shelves + next.shelves).groupBy { it.title }.map { (title, shelves) ->
-                        CatalogShelf(title, shelves.flatMap { it.items }.distinctBy { it.kind to it.id })
-                    }, continuation = next.continuation?.takeUnless { it == token })
+                val all = collectAllTracks { bulkMessage = "Loading tracks… $it" }
+                bulkMessage = if (all.isEmpty()) "Nothing to $verb." else act(all)
+            } catch (e: CancellationException) { bulkMessage = null; throw e
+            } catch (e: Exception) { bulkMessage = e.message ?: "Could not $verb."
+            } finally { bulkBusy = false }
+        }
+    }
+    val destinations: suspend () -> Unit = {
+        if (bulkAddToPlaylist != null && accountSession != null) {
+            bulkBusy = true; bulkMessage = "Loading playlists…"
+            try { destinationPick = page?.tracks?.firstOrNull()?.let { catalog.playlistDestinations(accountSession, it.id) } ?: emptyList()
             } catch (e: CancellationException) { throw e
-            } catch (e: Exception) { error = e.message ?: "Could not load more tracks."
-            } finally { loadingMore = false }
+            } catch (e: Exception) { bulkMessage = e.message ?: "Could not load playlists."
+            } finally { bulkBusy = false; if (destinationPick == null) bulkMessage = null }
+        }
+    }
+    CatalogDetailContent(item, page, loading, error, loadingMore, onBack, { revision++ }, onOpen, onPlay, onQueue, owner = accountIdentity,
+        bulkStatus = bulkMessage?.let { it to bulkBusy }, onFilterAll = { ensureAllLoaded() },
+        onPlayNext = onPlayNext?.let { call -> { bulk("queue") { tracks -> call(tracks); "Playing ${tracks.size} tracks next." } } },
+        onAddAllToQueue = onAddAllToQueue?.let { call -> { bulk("queue") { tracks -> call(tracks); "Added ${tracks.size} tracks to the queue." } } },
+        onSaveAll = onSaveAll?.let { call -> { bulk("save") { tracks -> call(tracks); "Queued ${tracks.size} tracks for offline." } } },
+        onAddToPlaylist = if (bulkAddToPlaylist != null && accountSession != null) { { scope.launch { destinations() } } } else null,
+        onMix = {
+            val playlist = page?.radioPlaylistId ?: return@CatalogDetailContent
+            scope.launch {
+                try { val radio = if (accountSession != null) cachedCatalog?.library(cacheScope, accountSession, cord.kasane.music.provider.AccountCollection.PLAYLISTS, playlist) ?: catalog.playlist(playlist) else catalog.playlist(playlist); if (radio.tracks.isNotEmpty()) onPlay(radio.tracks, false) }
+                catch (e: CancellationException) { throw e } catch (e: Exception) { error = e.message ?: "Could not start the artist mix." }
+            }
+        }) {
+        scope.launch { loadMorePage() }
+    }
+    destinationPick?.let { options ->
+        ModalBottomSheet(onDismissRequest = { destinationPick = null }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+            Column(Modifier.navigationBarsPadding().padding(bottom = 8.dp)) {
+                Text("Add all tracks to playlist", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                if (options.isEmpty()) Text("No editable playlists were returned.", style = MaterialTheme.typography.bodyMediumMuted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+                LazyColumn {
+                    items(options, key = { it.id }) { destination ->
+                        ListItem(headlineContent = { Text(destination.title) },
+                            leadingContent = { if (destination.artwork != null) TrackArtwork(destination.artwork, Modifier.size(44.dp))
+                                else Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(44.dp).padding(8.dp)) },
+                            supportingContent = if (destination.alreadyAdded) ({ Text("Some tracks already in this playlist") }) else null,
+                            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                            modifier = Modifier.heightIn(min = 56.dp).clickable {
+                                val target = destination.id
+                                destinationPick = null
+                                bulk("add") { tracks -> bulkAddToPlaylist?.invoke(tracks, target); "Added ${tracks.size} tracks." }
+                            })
+                    }
+                }
+            }
         }
     }
 }
@@ -363,10 +449,36 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
     onPlay: (List<Track>, Boolean) -> Unit, onQueue: (Track) -> Unit,
     owner: cord.kasane.music.auth.AccountIdentity? = null,
     onMix: () -> Unit = {},
+    bulkStatus: Pair<String, Boolean>? = null,
+    onPlayNext: (() -> Unit)? = null,
+    onAddAllToQueue: (() -> Unit)? = null,
+    onSaveAll: (() -> Unit)? = null,
+    onAddToPlaylist: (() -> Unit)? = null,
+    onFilterAll: () -> Unit = {},
     onLoadMore: () -> Unit) {
     // Album rows carry no artwork of their own, so they show (and queue with) the album cover instead of a placeholder note.
     val albumCover = if (item.kind == CatalogKind.ALBUM) page?.artwork ?: item.artwork else null
     val shownTracks = remember(page, albumCover) { page?.tracks.orEmpty().map { it.withCover(albumCover) } }
+    // Find and sort rearrange the displayed rows; an album keeps its disc order, a playlist may be reordered.
+    var findOpen by rememberSaveable { mutableStateOf(false) }
+    var findQuery by rememberSaveable { mutableStateOf("") }
+    var sortMode by rememberSaveable { mutableStateOf("default") }
+    val sortable = item.kind == CatalogKind.PLAYLIST
+    val findActive = findOpen && findQuery.isNotBlank()
+    val displayedTracks = remember(shownTracks, findActive, findQuery, sortMode, sortable) {
+        var tracks = shownTracks
+        if (findActive) tracks = tracks.filter { it.title.contains(findQuery, true) || it.artist.contains(findQuery, true) || it.album.orEmpty().contains(findQuery, true) }
+        if (sortable) tracks = when (sortMode) {
+            "title" -> tracks.sortedBy { it.title.lowercase() }
+            "artist" -> tracks.sortedBy { it.artist.lowercase() }
+            "album" -> tracks.sortedBy { it.album.orEmpty().lowercase() }
+            else -> tracks
+        }
+        tracks
+    }
+    // Find and re-sort are only honest over the complete collection, so the first filter loads every page.
+    val filterNeedsAll = findActive || (sortable && sortMode != "default")
+    LaunchedEffect(filterNeedsAll) { if (filterNeedsAll) onFilterAll() }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Back is also the system gesture (either edge), so the top button is a convenience, not the only way out.
         val listState = rememberLazyListState()
@@ -389,6 +501,7 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                 val subtitle = page?.listeners?.takeIf { it.isNotBlank() } ?: page?.subtitle?.ifBlank { item.subtitle } ?: item.subtitle
                 val offline = cord.kasane.music.ui.components.LocalOfflineActions.current
                 var more by remember { mutableStateOf(false) }
+                var sortSheet by remember { mutableStateOf(false) }
                 val artwork: @Composable (Modifier) -> Unit = { m ->
                     TrackArtwork(page?.artwork ?: item.artwork, m.aspectRatio(1f), minPixels = 800,
                         shape = if (item.kind == CatalogKind.ARTIST) androidx.compose.foundation.shape.CircleShape else MaterialTheme.shapes.medium)
@@ -410,17 +523,23 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                 // One clear primary action; Shuffle and More are icon buttons so they never claim half the screen.
                 val actions: @Composable () -> Unit = {
                     if (tracks.isNotEmpty()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = { onPlay(tracks, false) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp), shape = MaterialTheme.shapes.medium) {
+                        Button(onClick = { onPlay(displayedTracks, false) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp), shape = MaterialTheme.shapes.medium) {
                             Icon(Icons.Default.PlayArrow, null, Modifier.size(22.dp)); Spacer(Modifier.width(8.dp)); Text("Play", style = MaterialTheme.typography.labelLarge)
                         }
-                        FilledTonalIconButton(onClick = { onPlay(tracks, true) }, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
+                        FilledTonalIconButton(onClick = { onPlay(displayedTracks, true) }, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
                             Icon(Icons.Default.Shuffle, "Shuffle play")
                         }
                         if (page?.radioPlaylistId != null) FilledTonalIconButton(onClick = onMix, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
-                            Icon(Icons.Default.Radio, "Start artist mix")
+                            Icon(Icons.Default.Radio, "Start mix")
                         }
                         FilledTonalIconButton(onClick = { more = true }, modifier = Modifier.size(48.dp), shape = MaterialTheme.shapes.medium) {
                             Icon(Icons.Default.MoreVert, "More actions for this ${item.kind.label.removeSuffix("s").lowercase()}")
+                        }
+                    }
+                    bulkStatus?.let { (message, busy) ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Text(message, style = MaterialTheme.typography.labelMediumMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -478,12 +597,31 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
                 }
                 if (more) ModalBottomSheet(onDismissRequest = { more = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                     Column(Modifier.navigationBarsPadding().padding(bottom = 8.dp)) {
-                        ListItem(headlineContent = { Text("Add to queue") }, leadingContent = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
-                            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                            modifier = Modifier.heightIn(min = 56.dp).clickable { more = false; tracks.forEach(onQueue) })
-                        if (offline != null) ListItem(headlineContent = { Text("Save loaded tracks offline") }, leadingContent = { Icon(Icons.Default.Download, null) },
-                            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                            modifier = Modifier.heightIn(min = 56.dp).clickable { more = false; offline.save(tracks) })
+                        val menuItem: @Composable (String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit) -> Unit =
+                            { label, icon, onClick ->
+                                ListItem(headlineContent = { Text(label) }, leadingContent = { Icon(icon, null) },
+                                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                                    modifier = Modifier.heightIn(min = 56.dp).clickable { more = false; onClick() })
+                            }
+                        if (onPlayNext != null) menuItem("Play next", Icons.Default.PlayArrow, onPlayNext)
+                        if (onAddAllToQueue != null) menuItem("Add to queue", Icons.AutoMirrored.Filled.QueueMusic, onAddAllToQueue)
+                        if (item.kind == CatalogKind.PLAYLIST || item.kind == CatalogKind.ALBUM)
+                            menuItem("Find in ${item.kind.label.removeSuffix("s").lowercase()}", Icons.Default.Search) { findOpen = true }
+                        if (sortable) menuItem("Sort by…", Icons.AutoMirrored.Filled.Sort) { sortSheet = true }
+                        if (onAddToPlaylist != null) menuItem("Add all to playlist…", Icons.AutoMirrored.Filled.PlaylistAdd, onAddToPlaylist)
+                        if (onSaveAll != null) menuItem("Save all offline", Icons.Default.Download, onSaveAll)
+                        else if (offline != null) menuItem("Save shown tracks offline", Icons.Default.Download) { offline.save(tracks) }
+                    }
+                }
+                if (sortSheet) ModalBottomSheet(onDismissRequest = { sortSheet = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                    Column(Modifier.navigationBarsPadding().padding(bottom = 8.dp)) {
+                        Text("Sort by", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                        listOf("default" to "Default order", "title" to "Title", "artist" to "Artist", "album" to "Album").forEach { (mode, label) ->
+                            ListItem(headlineContent = { Text(label) },
+                                leadingContent = { RadioButton(selected = sortMode == mode, onClick = null) },
+                                colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                                modifier = Modifier.heightIn(min = 48.dp).clickable { sortMode = mode; sortSheet = false })
+                        }
                     }
                 }
             }
@@ -495,7 +633,23 @@ fun CatalogDetailContent(item: CatalogItem, page: CatalogPage?, loading: Boolean
             if (!loading && page != null && page.shelves.isEmpty() && error == null) item {
                 Text("No available items in this collection.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
             }
-            page?.shelves?.forEachIndexed { index, shelf ->
+            // The find bar lives with the list it filters, not with the header buttons.
+            if (findOpen) item(key = "find") {
+                OutlinedTextField(value = findQuery, onValueChange = { findQuery = it }, singleLine = true,
+                    placeholder = { Text("Find in this ${item.kind.label.removeSuffix("s").lowercase()}") },
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                    trailingIcon = { IconButton(onClick = { findOpen = false; findQuery = "" }) { Icon(Icons.Default.Close, "Close search") } })
+            }
+            if (findActive || (sortable && sortMode != "default")) {
+                if (displayedTracks.isEmpty() && page != null) item {
+                    Text("Nothing matches “$findQuery”.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
+                }
+                itemsIndexed(displayedTracks, key = { position, it -> "custom:$position:${it.id}" }) { position, track ->
+                    TrackRow(track, onClick = { onPlay(displayedTracks.drop(position), false) },
+                        onAddToQueue = { onQueue(track) })
+                }
+            } else page?.shelves?.forEachIndexed { index, shelf ->
                 val playable = shelf.items.all { it.track() != null }
                 if (playable) {
                     if (shelf.title.isNotBlank()) item { Text(shelf.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(20.dp)) }

@@ -48,16 +48,19 @@ class HlsPlayerResolver(
         }
         if (authenticated != null) {
             report(videoId, "WEB_REMIX", authenticated)
-            val selected = select(authenticated, videoId, allowProgressive = true)
-            if (selected is HlsStream) return@withContext HlsStream(selected.url, "WEB_REMIX")
-            prepareSabr(authenticated, videoId, "WEB_REMIX")?.let { if (it is SabrStream) return@withContext it }
-            // A direct URL in an OK/SABR response is not proof of CDN access. In
-            // particular, WEB_REMIX can return a URL that rejects the first byte.
+            // A plain audio file is preferred over HLS/SABR: it can be cached for
+            // offline replay and saved to the offline library. A direct URL in an
+            // OK/SABR response is not proof of CDN access, so the candidate is
+            // probed before use and rejected URLs fall back to the old order.
+            var selected = select(authenticated, videoId, allowProgressive = true, preferProgressive = true)
             if (selected is ProgressiveStream) {
                 val accessible = (progressiveCheck ?: ::checkProgressive)(videoId, selected.audio)
                 if (accessible) return@withContext selected
-                diagnostic("videoId=$videoId client=WEB_REMIX event=direct_rejected fallback=IOS_HLS")
+                diagnostic("videoId=$videoId client=WEB_REMIX event=direct_rejected fallback=HLS_SABR")
+                selected = select(authenticated, videoId)
             }
+            if (selected is HlsStream) return@withContext HlsStream(selected.url, "WEB_REMIX")
+            prepareSabr(authenticated, videoId, "WEB_REMIX")?.let { if (it is SabrStream) return@withContext it }
         }
         // Verified WEB_REMIX (real BotGuard proof + official player transform).
         // On failure the iOS HLS profile is tried and both outcomes are reported.
@@ -78,13 +81,44 @@ class HlsPlayerResolver(
             }
         }
     }
+    /**
+     * Resolution for the offline library: only a byte-exact progressive file can be stored,
+     * so HLS and SABR are never returned here. The account session's direct format is probed
+     * first; otherwise the verified resolver (which deciphers and proves the URL) is used.
+     */
+    suspend fun resolveForSave(videoId: String): PlaybackStream = withContext(Dispatchers.IO) {
+        if (!Regex("[A-Za-z0-9_-]{11}").matches(videoId)) return@withContext UnavailableStream("Invalid track identifier.")
+        val authenticated = try { authenticatedPlayer(videoId) } catch (e: kotlinx.coroutines.CancellationException) { throw e
+        } catch (e: java.io.IOException) {
+            diagnostic("videoId=$videoId client=WEB_REMIX playerHttp=${(e as? PlayerHttpException)?.code ?: -1} error=${e.javaClass.simpleName}")
+            null
+        }
+        if (authenticated != null) {
+            report(videoId, "WEB_REMIX", authenticated)
+            val selected = select(authenticated, videoId, allowProgressive = true, preferProgressive = true)
+            if (selected is ProgressiveStream) {
+                val accessible = (progressiveCheck ?: ::checkProgressive)(videoId, selected.audio)
+                if (accessible) return@withContext selected
+                diagnostic("videoId=$videoId client=WEB_REMIX event=direct_rejected fallback=verified")
+            }
+        }
+        when (val verification = verified?.invoke(videoId)) {
+            is ProgressiveStream -> {
+                diagnostic("videoId=$videoId client=${verification.clientProfile} event=verified")
+                return@withContext verification
+            }
+            is UnavailableStream -> return@withContext verification
+            else -> return@withContext UnavailableStream(
+                "YouTube did not offer a savable audio file for this track.", "NO_SAVABLE_STREAM")
+        }
+    }
     private suspend fun resolveIos(videoId: String): PlaybackStream {
         val body = JSONObject().put("videoId", videoId).put("context", JSONObject().put("client", JSONObject()
-            .put("clientName", "IOS").put("clientVersion", "21.26.4").put("deviceModel", "iPhone16,2")
+            .put("clientName", "IOS").put("clientVersion", IosHlsResolver.VERSION).put("deviceModel", "iPhone16,2")
             .put("osName", "iPhone").put("osVersion", "18.5.0.22F76").put("hl", "en").put("gl", "US")))
         val request = Request.Builder().url(endpoint)
-            .header("User-Agent", "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_5 like Mac OS X;)")
-            .header("X-Youtube-Client-Name", "5").header("X-Youtube-Client-Version", "21.26.4")
+            .header("User-Agent", IosHlsResolver.USER_AGENT)
+            .header("X-Youtube-Client-Name", "5").header("X-Youtube-Client-Version", IosHlsResolver.VERSION)
             .post(body.toString().toRequestBody("application/json".toMediaType())).build()
         await(client.newCall(request)).use { response ->
             if (!response.isSuccessful) return UnavailableStream("YouTube player request failed (${response.code}).", "PLAYER_HTTP_${response.code}")
@@ -155,11 +189,12 @@ class HlsPlayerResolver(
         })
     }
     companion object {
-        fun select(root: JSONObject, videoId: String, allowProgressive: Boolean = false): PlaybackStream {
+        fun select(root: JSONObject, videoId: String, allowProgressive: Boolean = false, preferProgressive: Boolean = false): PlaybackStream {
             val returnedId = root.optJSONObject("videoDetails")?.optString("videoId").orEmpty()
             if (returnedId.isNotEmpty() && returnedId != videoId) return UnavailableStream("YouTube returned a different track.")
             val status = root.optJSONObject("playabilityStatus")?.optString("status").orEmpty()
             if (status != "OK") return UnavailableStream(StreamUnavailableException(status).message.orEmpty(), status)
+            WatchEndpoints.put(videoId, StreamResponse.playbackTracking(root))
             val data = root.optJSONObject("streamingData") ?: return UnavailableStream("YouTube returned no audio formats.")
             fun allowed(url: String): Boolean {
                 val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
@@ -167,12 +202,15 @@ class HlsPlayerResolver(
                 return uri.scheme == "https" && uri.userInfo == null && (host == "googlevideo.com" || host.endsWith(".googlevideo.com"))
             }
             val url = data.optString("hlsManifestUrl")
-            if (allowed(url)) return HlsStream(url)
-            if (allowProgressive) {
+            fun progressive(): ProgressiveStream? {
+                if (!allowProgressive) return null
                 val audio = runCatching { StreamResponse.audioStream(root, System.currentTimeMillis()) }.getOrNull()
-                if (audio != null && allowed(audio.url) && audio.expiresAtMs > System.currentTimeMillis() + 30000)
-                    return ProgressiveStream(audio, "WEB_REMIX")
+                return if (audio != null && allowed(audio.url) && audio.expiresAtMs > System.currentTimeMillis() + 30000)
+                    ProgressiveStream(audio, "WEB_REMIX") else null
             }
+            if (preferProgressive) progressive()?.let { return it }
+            if (allowed(url)) return HlsStream(url)
+            if (!preferProgressive) progressive()?.let { return it }
             return UnavailableStream(if (data.optString("serverAbrStreamingUrl").isNotBlank())
                 "YouTube returned SABR without a supported clear AAC bootstrap. No compatible stream was supplied."
                 else "YouTube did not provide a supported full-length stream for this track.",
@@ -192,4 +230,16 @@ fun playbackFailure(error: Exception): UnavailableStream = when (error) {
 
 object PlaybackRetryPolicy {
     fun canRetry(httpStatus: Int?, errorCount: Int): Boolean = errorCount <= 2 && httpStatus !in setOf(401, 403, 404, 410)
+}
+
+/** `playbackTracking` endpoints captured per resolved video; the player pings them when a play counts toward history. */
+internal object WatchEndpoints {
+    private val urls = java.util.concurrent.ConcurrentHashMap<String, Pair<String?, String?>>()
+    fun put(videoId: String, endpoints: Pair<String?, String?>) {
+        if (endpoints.first == null && endpoints.second == null) return
+        urls[videoId] = endpoints
+        if (urls.size > 512) urls.keys.take(64).forEach(urls::remove)
+    }
+    /** (stats, watchtime) templates for the video, when the last player response carried them. */
+    fun get(videoId: String): Pair<String?, String?>? = urls[videoId]
 }

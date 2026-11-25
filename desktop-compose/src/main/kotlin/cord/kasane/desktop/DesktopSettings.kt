@@ -18,6 +18,17 @@ data class Preferences(
     val uiScale: Float = 1f,
     val connectEnabled: Boolean = true,
     val volume: Float = 1f,
+    /** Block every network request and play only music stored on this computer. */
+    val offlineOnly: Boolean = false,
+    /** Keep streamed audio in the temporary cache so recently played songs replay offline. */
+    val cacheEnabled: Boolean = true,
+    val cacheLimitMb: Int = 1024,
+    /** Fetch release date, genre and official artwork from MusicBrainz for saved tracks. */
+    val enrichMetadata: Boolean = true,
+    /** First-run setup was completed (or skipped); the onboarding screen no longer shows. */
+    val onboardingDone: Boolean = false,
+    /** Signed-in / guest / undecided — persisted so "Continue as a guest" stays guest across restarts. */
+    val sessionMode: cord.kasane.music.auth.SessionMode = cord.kasane.music.auth.SessionMode.UNDECIDED,
 )
 
 class DesktopSettings(private val file: File) {
@@ -30,6 +41,15 @@ class DesktopSettings(private val file: File) {
         val next = change(_prefs.value)
         _prefs.value = next
         file.parentFile?.mkdirs()
-        file.writeText(json.encodeToString(Preferences.serializer(), next))
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        val text = json.encodeToString(Preferences.serializer(), next)
+        tmp.writeText(text)
+        if (!tmp.renameTo(file)) file.writeText(text)
+    }
+
+    /** Shared session-mode contract — the guest choice survives restarts. */
+    val sessionModeStore = object : cord.kasane.music.auth.SessionModeStore {
+        override fun read() = _prefs.value.sessionMode
+        override fun write(mode: cord.kasane.music.auth.SessionMode) = update { it.copy(sessionMode = mode) }
     }
 }

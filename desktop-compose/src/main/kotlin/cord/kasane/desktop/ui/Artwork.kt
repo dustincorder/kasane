@@ -33,7 +33,8 @@ class DesktopArtworkLoader(private val http: OkHttpClient) : ArtworkLoader {
         if (!owner) return deferred.await()
         val image = withContext(Dispatchers.IO) {
             runCatching {
-                http.newCall(Request.Builder().url(url).build()).execute().use { r ->
+                if (url.startsWith("file:")) SkiaImage.makeFromEncoded(java.io.File(java.net.URI(url)).readBytes()).toComposeImageBitmap()
+                else http.newCall(Request.Builder().url(url).build()).execute().use { r ->
                     if (!r.isSuccessful) null else r.body?.bytes()?.let { SkiaImage.makeFromEncoded(it).toComposeImageBitmap() }
                 }
             }.getOrNull()

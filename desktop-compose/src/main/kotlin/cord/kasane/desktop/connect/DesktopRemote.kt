@@ -41,8 +41,13 @@ class DesktopRemote(val manager: ConnectManager, private val player: DesktopPlay
             player.state.map { it.isPlaying }.distinctUntilChanged().collect { playing ->
                 if (playing) {
                     startedAt[LOCAL] = System.currentTimeMillis()
-                    if (_busy.value == null) for ((id, frame) in manager.remoteStates.value) {
-                        if (frame.playback == "playing") scope.launch { runCatching { manager.sendCommand(id, "pause") } }
+                    if (_busy.value == null) {
+                        // §Active device: claim the performer role first — the current performer
+                        // gets a `yield` (claim + pause), not just a bare pause.
+                        scope.launch { runCatching { manager.claimPerformer() } }
+                        for ((id, frame) in manager.remoteStates.value) {
+                            if (frame.playback == "playing") scope.launch { runCatching { manager.sendCommand(id, "pause") } }
+                        }
                     }
                 }
                 recompute()
@@ -109,21 +114,27 @@ class DesktopRemote(val manager: ConnectManager, private val player: DesktopPlay
                 if (from == null) {
                     val s = player.state.value
                     if (s.queue.isEmpty()) error("Nothing is playing on this computer.")
-                    manager.handoff(deviceId!!, Frame.Handoff("", s.queue.map { it.toMeta() }, s.index.coerceAtLeast(0),
+                    // §Active device: the target plays via `takeover` first; the manager pauses
+                    // local playback only after its ack — never a double-play gap.
+                    manager.transferTo(deviceId!!, Frame.Handoff("", s.queue.map { it.toMeta() }, s.index.coerceAtLeast(0),
                         (s.positionSec * 1000).toLong(), true, s.shuffle, s.repeat.name.lowercase()))
-                    player.pause()
                 } else {
                     val frame = frame(from) ?: error("The device went offline.")
                     val queue = frame.queue ?: listOfNotNull(frame.track)
                     if (queue.isEmpty()) error("Nothing is playing there.")
                     val index = frame.queueIndex.toInt().coerceIn(0, queue.lastIndex)
                     if (deviceId == null) {
+                        // "Play here": yield the current performer (it pauses on our claim), then start.
+                        manager.claimPerformer()
                         player.startHandoff(queue.map { it.toTrack() }, index, livePosition(from, frame) / 1000.0, true, frame.shuffle,
                             when (frame.repeat) { "all" -> RepeatMode.ALL; "one" -> RepeatMode.ONE; else -> RepeatMode.OFF })
                     } else {
-                        manager.handoff(deviceId, Frame.Handoff("", queue, index, livePosition(from, frame), true, frame.shuffle, frame.repeat))
+                        manager.transferTo(deviceId, Frame.Handoff("", queue, index, livePosition(from, frame), true, frame.shuffle, frame.repeat))
+                        // The source yields to the new performer — a claim, not just a pause.
+                        runCatching {
+                            manager.sendCommand(from, "yield", buildJsonObject { put("activeId", deviceId) })
+                        }.recoverCatching { manager.sendCommand(from, "pause") }
                     }
-                    runCatching { manager.sendCommand(from, "pause") }
                 }
             }.onFailure { _error.value = it.message ?: "Transfer failed." }.isSuccess
             _busy.value = null

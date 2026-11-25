@@ -21,6 +21,7 @@ import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,7 +47,7 @@ class HomeActions(
     val startRadio: (Track) -> Unit,
     val open: (CatalogItem) -> Unit,
     val openSearch: () -> Unit,
-    val openSettings: () -> Unit,
+    val openProfile: () -> Unit,
     val openSaved: () -> Unit,
     val refresh: () -> Unit,
     val openShelf: (title: String, browseId: String) -> Unit = { _, _ -> },
@@ -70,13 +71,22 @@ fun HomeScreen(
     chips: List<CatalogChip> = emptyList(),
     selectedChip: String? = null,
     onChip: (CatalogChip?) -> Unit = {},
+    accountAvatar: String? = null,
 ) {
-    PullToRefreshBox(isRefreshing = refreshing, onRefresh = actions.refresh, modifier = Modifier.fillMaxSize()) {
+    val ptrState = rememberPullToRefreshState()
+    PullToRefreshBox(isRefreshing = refreshing, state = ptrState, onRefresh = actions.refresh, modifier = Modifier.fillMaxSize(),
+        // The app bar and mood chips sit at the top of the list, so the spinner starts below them.
+        indicator = {
+            androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.Indicator(
+                isRefreshing = refreshing, state = ptrState,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 112.dp))
+        }) {
         LazyColumn(Modifier.fillMaxSize(), state = rememberLazyListState(), contentPadding = PaddingValues(bottom = 24.dp)) {
             item(key = "header") {
-                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Kasane", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                    IconButton(onClick = actions.openSettings) { Icon(Icons.Outlined.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Box(Modifier.size(48.dp).clickable(onClickLabel = "Open profile", onClick = actions.openProfile),
+                        contentAlignment = Alignment.Center) { AccountAvatar(accountAvatar, 32.dp) }
                 }
             }
             if (chips.isNotEmpty()) item(key = "chips") {
@@ -184,11 +194,26 @@ private fun ArtworkTile(track: Track, size: Dp, playing: Boolean, modifier: Modi
     }
 }
 
+/** A square cover that opens a collection detail — the grid sibling of [ArtworkTile] for albums and playlists. */
+@Composable
+private fun CoverTile(item: CatalogItem, size: Dp, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    Box(modifier.size(size).pressScale(source).clip(MaterialTheme.shapes.small).androidxClickable(source, "Open ${item.title}", onClick)) {
+        TrackArtwork(item.artwork, Modifier.fillMaxSize(), shape = MaterialTheme.shapes.small, minPixels = 360)
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth()
+            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))))
+            .padding(start = 8.dp, end = 8.dp, top = 22.dp, bottom = 7.dp)) {
+            Text(item.title, style = MaterialTheme.typography.labelLarge, color = Color.White,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
 @Composable
 private fun QuickPicks(section: HomeSection.QuickPicks, currentTrackId: String?, actions: HomeActions) {
     val width = LocalConfiguration.current.screenWidthDp.dp
     val tile = (width - 32.dp - 16.dp) / 3
-    val pages = section.tracks.chunked(HomeComposer.PAGE_SIZE)
+    val pages = section.items.chunked(HomeComposer.PAGE_SIZE)
     val state = rememberLazyListState()
     Column {
         SectionHeader(section.title)
@@ -198,7 +223,11 @@ private fun QuickPicks(section: HomeSection.QuickPicks, currentTrackId: String?,
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.width(width - 32.dp)) {
                     page.chunked(3).forEach { row ->
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            row.forEach { track -> ArtworkTile(track, tile, track.id == currentTrackId) { actions.playTrack(track) } }
+                            row.forEach { item ->
+                                val track = item.track()
+                                if (track != null) ArtworkTile(track, tile, track.id == currentTrackId) { actions.playTrack(track) }
+                                else CoverTile(item, tile) { actions.open(item) }
+                            }
                         }
                     }
                 }
@@ -336,7 +365,7 @@ fun HomeScreenPreview() {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
                 Box(Modifier.weight(1f)) {
                     HomeScreen(listOf(
-                        HomeSection.QuickPicks("Quick picks", (1..9).map { pt(it, listOf("Midnight City Lights", "Subway Melancholy", "Synthetic Dawn", "Neon Drift", "Glass Rooms", "Low Tide", "Flower Castle", "Love Me Not", "Tic Toc")[it - 1], "Artist $it") }),
+                        HomeSection.QuickPicks("Quick picks", (1..9).map { pt(it, listOf("Midnight City Lights", "Subway Melancholy", "Synthetic Dawn", "Neon Drift", "Glass Rooms", "Low Tide", "Flower Castle", "Love Me Not", "Tic Toc")[it - 1], "Artist $it").asItem() }),
                         HomeSection.SongRows("mix", "Song mixes", (10..17).map { pt(it, "Mix track $it", "Artist $it") }, more = "FEmusic_mixed"),
                         HomeSection.Collections("alb", "Albums for you", (1..4).map { CatalogItem("m$it", CatalogKind.ALBUM, "Album $it", "Artist $it") }, more = "x"),
                         HomeSection.Videos("live", "Listen together", (1..3).map { CatalogItem("v$it", CatalogKind.VIDEO, "STUDY WITH MIKU STATION", "Hatsune Miku") }),

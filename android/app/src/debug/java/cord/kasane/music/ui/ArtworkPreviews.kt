@@ -54,7 +54,7 @@ private fun WithRealArtwork(content: @Composable () -> Unit) {
 @Preview(showBackground = true, widthDp = 390, heightDp = 620)
 @Composable
 fun HomeRealArtworkPreview() = WithRealArtwork {
-    HomeScreen(listOf(HomeSection.QuickPicks("Quick picks", listOf(homeTrack, searchTrack, homeTrack.copy(id = "artwork-preview-3")))),
+    HomeScreen(listOf(HomeSection.QuickPicks("Quick picks", listOf(homeTrack, searchTrack, homeTrack.copy(id = "artwork-preview-3")).map { it.asItem() })),
         loading = false, refreshing = false, error = null, offlineOnly = false, currentTrackId = null,
         actions = HomeActions({}, { _, _ -> }, {}, {}, {}, {}, {}, {}))
 }

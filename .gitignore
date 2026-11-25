@@ -47,6 +47,9 @@ secrets.properties
 scratch/
 brain/
 
+# Release packaging output (built artifacts, not source)
+release/
+
 # Codex local state
 .codex/
 .impeccable/

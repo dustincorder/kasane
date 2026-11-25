@@ -46,7 +46,7 @@ class SabrConfig internal constructor(
             val formatId = SabrWire.number(1, 140) + SabrWire.number(2, modified) +
                 audio.optString("xtags").takeIf(String::isNotBlank).let { if (it == null) byteArrayOf() else SabrWire.text(3, it) }
             val info = if (profile == "IOS") SabrWire.text(1, "en") + SabrWire.text(13, "iPhone16,2") +
-                SabrWire.number(16, 5) + SabrWire.text(17, "21.26.4") + SabrWire.text(18, "iPhone") + SabrWire.text(19, "18.5.0.22F76")
+                SabrWire.number(16, 5) + SabrWire.text(17, cord.kasane.music.provider.IosHlsResolver.VERSION) + SabrWire.text(18, "iPhone") + SabrWire.text(19, "18.5.0.22F76")
                 else SabrWire.text(1, "en") + SabrWire.number(16, when(profile) {"WEB" -> 1; "MWEB" -> 2; else -> 67}) +
                     SabrWire.text(17, clientVersion ?: "1.20260707.12.00")
             return SabrConfig(videoId, profile, url, formatId, ustreamer, info, 140)

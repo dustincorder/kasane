@@ -7,9 +7,12 @@ import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.ContentMetadata
+import androidx.media3.datasource.cache.ContentMetadataMutations
 import cord.kasane.music.data.TrackDao
 import cord.kasane.music.model.Track
 import cord.kasane.music.provider.PlaybackStream
@@ -24,6 +27,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +43,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -68,6 +73,8 @@ class OfflineManager(
     private val network: DataSource.Factory,
     private val http: OkHttpClient,
     private val scope: CoroutineScope,
+    /** Called after a track is fully saved — e.g. to enrich metadata in the background. */
+    private val onTrackSaved: suspend (String) -> Unit = {},
 ) : OfflinePlayback {
     private val app = context.applicationContext
     private val trigger = Channel<Unit>(Channel.CONFLATED)
@@ -75,6 +82,13 @@ class OfflineManager(
     private val mutableUsage = MutableStateFlow(StorageUsage())
     @Volatile private var activeId: String? = null
     @Volatile private var activeJob: Job? = null
+    /** Videos whose last failure was connectivity-related; retried automatically when a network appears. */
+    private val transientFailures = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    /** The transient set also lives on disk so a process restart does not lose the auto-resume promise. */
+    private val transientPrefs = app.getSharedPreferences("offline_transient_failures", android.content.Context.MODE_PRIVATE)
+    private fun persistTransient() {
+        transientPrefs.edit().putStringSet("ids", transientFailures.toSet()).apply()
+    }
 
     val progress: StateFlow<Map<String, DownloadProgress>> = mutableProgress.asStateFlow()
     val usage: StateFlow<StorageUsage> = mutableUsage.asStateFlow()
@@ -84,12 +98,16 @@ class OfflineManager(
     override val offlineOnly: Boolean get() = settings.offlineOnly.value
 
     init {
+        transientFailures += transientPrefs.getStringSet("ids", emptySet()).orEmpty()
         scope.launch(Dispatchers.IO) { workerLoop() }
         scope.launch { combine(settings.offlineOnly, settings.wifiOnlyDownloads) { a, b -> a to b }.drop(1).collect { trigger.trySend(Unit) } }
         scope.launch { settings.cacheLimitMb.drop(1).collect { withContext(Dispatchers.IO) { stores.evictor.trim(stores.temp) }; refreshUsage() } }
         runCatching {
             app.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) { trigger.trySend(Unit) }
+                override fun onAvailable(network: Network) {
+                    scope.launch(Dispatchers.IO) { resumeTransientFailures() }
+                    trigger.trySend(Unit)
+                }
             })
         }
     }
@@ -101,7 +119,7 @@ class OfflineManager(
         if (row.cacheKey.isEmpty() || row.contentLength <= 0) return@withContext null
         val inSaved = stores.saved.getCachedBytes(row.cacheKey, 0, row.contentLength)
         val inTemp = if (inSaved >= row.contentLength) 0 else stores.temp.getCachedBytes(row.cacheKey, 0, row.contentLength)
-        if (!OfflinePolicy.playableFromCache(row, maxOf(inSaved, inTemp))) return@withContext null
+        if (!OfflinePolicy.playableFromCache(row.cacheKey, row.contentLength, maxOf(inSaved, inTemp))) return@withContext null
         dao.touch(videoId, System.currentTimeMillis())
         LocalAudio(row.cacheKey, row.mimeType)
     }
@@ -146,6 +164,7 @@ class OfflineManager(
     /** Cancel an active or queued download, or remove saved audio. Partial and complete bytes are deleted. */
     fun remove(videoId: String) { scope.launch(Dispatchers.IO) {
         if (activeId == videoId) activeJob?.cancelAndJoin()
+        transientFailures -= videoId; persistTransient()
         val row = dao.get(videoId)
         if (row != null && row.cacheKey.isNotEmpty()) runCatching { stores.saved.removeResource(row.cacheKey) }
         dao.delete(videoId)
@@ -170,7 +189,7 @@ class OfflineManager(
 
     fun refreshUsage() { scope.launch(Dispatchers.IO) {
         val replayable = dao.unpinnedRecords().count { r ->
-            OfflinePolicy.playableFromCache(r, stores.temp.getCachedBytes(r.cacheKey.ifEmpty { "-" }, 0, r.contentLength.coerceAtLeast(0)))
+            OfflinePolicy.playableFromCache(r.cacheKey, r.contentLength, stores.temp.getCachedBytes(r.cacheKey.ifEmpty { "-" }, 0, r.contentLength.coerceAtLeast(0)))
         }
         mutableUsage.value = StorageUsage(stores.saved.cacheSpace, stores.temp.cacheSpace,
             settings.cacheLimitMb.value * 1024L * 1024L, dao.pinnedCount(), replayable)
@@ -182,13 +201,19 @@ class OfflineManager(
         dao.resetInterrupted()
         verifySaved()
         refreshUsage()
+        // Transient markers survived the restart only as ids; re-arm them when the network is already up.
+        if (hasNetwork()) resumeTransientFailures()
         while (scope.isActive) {
             val next = dao.nextQueued()
             if (next == null) { trigger.receive(); continue }
-            val block = OfflinePolicy.blockReason(offlineOnly, settings.wifiOnlyDownloads.value, isMetered())
+            val block = OfflinePolicy.blockReason(offlineOnly, settings.wifiOnlyDownloads.value, isMetered(), hasNetwork())
             if (block != null) {
                 if (next.failure != block) dao.upsert(next.copy(failure = block))
-                trigger.receive(); continue
+                // The network callback only fires when the *default* network changes; a blip that
+                // revokes access without dropping Wi-Fi leaves none, so always re-check on a timer.
+                withTimeoutOrNull(DownloadPlan.BLOCK_RECHECK_MS) { trigger.receive() }
+                if (hasNetwork()) resumeTransientFailures()
+                continue
             }
             activeId = next.videoId
             val job = scope.launch(Dispatchers.IO) { download(next) }
@@ -207,16 +232,34 @@ class OfflineManager(
         }
     }
 
+    /** Re-queue pinned rows that stopped on a connectivity error; permanent failures stay failed. */
+    internal suspend fun resumeTransientFailures() {
+        transientFailures.forEach { id ->
+            dao.get(id)?.let {
+                if (it.pinned && it.audioState == AudioState.FAILED)
+                    dao.upsert(it.copy(state = AudioState.QUEUED.key, failure = null, updatedAt = System.currentTimeMillis()))
+            }
+        }
+        transientFailures.clear()
+        persistTransient()
+        trigger.trySend(Unit)
+    }
+
     private suspend fun download(start: AudioFileRecord) {
         val id = start.videoId
         var row = start
-        for (attempt in 1..MAX_ATTEMPTS) {
+        for (attempt in 1..DownloadPlan.MAX_ATTEMPTS) {
             val stream = try { resolve(id) } catch (e: CancellationException) { throw e } catch (e: Exception) { playbackFailure(e) }
-            when (val eligible = OfflinePolicy.eligibility(stream)) {
-                is OfflinePolicy.Eligibility.NotSavable -> return fail(row, eligible.reason)
-                OfflinePolicy.Eligibility.Direct -> Unit
+            when (val eligible = StreamEligibility.eligibility(stream)) {
+                is StreamEligibility.Eligibility.NotSavable -> {
+                    if (!StreamEligibility.transient(stream) || attempt == DownloadPlan.MAX_ATTEMPTS)
+                        return fail(row, eligible.reason, transient = StreamEligibility.transient(stream))
+                    delay(1500L * attempt); continue
+                }
+                StreamEligibility.Eligibility.Direct -> Unit
             }
             val audio = (stream as ProgressiveStream).audio
+            android.util.Log.i("KasanePlayback", "videoId=$id event=save_stream client=${(stream as ProgressiveStream).clientProfile} itag=${audio.itag} mime=${audio.mimeType} bytes=${audio.contentLength}")
             val key = OfflinePolicy.cacheKey(id, audio.itag)
             if (row.cacheKey.isNotEmpty() && row.cacheKey != key) runCatching { stores.saved.removeResource(row.cacheKey) }
             row = row.copy(cacheKey = key, itag = audio.itag, mimeType = audio.mimeType, contentLength = audio.contentLength,
@@ -224,6 +267,7 @@ class OfflineManager(
             dao.upsert(row)
             mutableProgress.value = mutableProgress.value + (id to DownloadProgress(stores.saved.getCachedBytes(key, 0, audio.contentLength), audio.contentLength))
             var lastWrite = 0L
+            val writeStart = System.currentTimeMillis()
             val error = try {
                 write(audio, key) { done ->
                     mutableProgress.value = mutableProgress.value + (id to DownloadProgress(done, audio.contentLength))
@@ -236,46 +280,138 @@ class OfflineManager(
                 val stored = stores.saved.getCachedBytes(key, 0, audio.contentLength)
                 val declared = ContentMetadata.getContentLength(stores.saved.getContentMetadata(key))
                 if (stored >= audio.contentLength && (declared < 0 || declared == audio.contentLength)) {
+                    // Span-by-span commits never learn the file's end; publish it or cache-only reads run past it.
+                    stores.saved.applyContentMetadataMutations(key,
+                        ContentMetadataMutations.setContentLength(ContentMetadataMutations(), audio.contentLength))
+                    android.util.Log.i("KasanePlayback", "videoId=$id event=save_done bytes=$stored ms=${System.currentTimeMillis() - writeStart}")
                     saveArtwork(id)
+                    transientFailures -= id
+                    persistTransient()
                     dao.upsert(row.copy(state = AudioState.SAVED.key, complete = true, bytesDone = audio.contentLength,
                         failure = null, updatedAt = System.currentTimeMillis()))
                     mutableProgress.value = mutableProgress.value - id
+                    onTrackSaved(id)
                     return
                 }
                 return fail(row, "The download ended before the whole file was received. Try again.")
             }
+            android.util.Log.w("KasanePlayback", "videoId=$id event=save_error attempt=$attempt error=${error.javaClass.simpleName}")
             val code = generateSequence<Throwable>(error) { it.cause }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
             // An expired signed URL (403/410) is fixed by resolving again; written spans are kept and reused.
             if (code != 403 && code != 410) delay(1500L * attempt)
-            if (attempt == MAX_ATTEMPTS) return fail(row, if (error is IOException) "The network connection failed. Check it and retry." else "The download could not be completed.")
+            // A dropped connection is retried when a network appears; an HTTP answer or a cache
+            // problem is a real failure. Written spans survive either way.
+            if (attempt == DownloadPlan.MAX_ATTEMPTS) return fail(row,
+                if (error is IOException) "The network connection failed. The download will resume when the connection is back." else "The download could not be completed.",
+                transient = code == null && error is IOException && error !is androidx.media3.datasource.cache.Cache.CacheException)
         }
     }
 
-    private suspend fun fail(row: AudioFileRecord, reason: String) {
+    private suspend fun fail(row: AudioFileRecord, reason: String, transient: Boolean = false) {
+        android.util.Log.w("KasanePlayback", "videoId=${row.videoId} event=save_failed transient=$transient reason=${reason.take(120)}")
+        if (transient) transientFailures += row.videoId else transientFailures -= row.videoId
+        persistTransient()
         dao.upsert(row.copy(state = AudioState.FAILED.key, failure = reason, updatedAt = System.currentTimeMillis()))
         mutableProgress.value = mutableProgress.value - row.videoId
     }
 
     private suspend fun write(audio: ResolvedAudioStream, key: String, onProgress: (Long) -> Unit) = suspendCancellableCoroutine<Unit> { cont ->
-        val source = stores.saveFactory(network).createDataSource()
-        val spec = DataSpec.Builder().setUri(audio.url).setKey(key).build()
-        val writer = CacheWriter(source, spec, null) { _, cached, _ -> onProgress(cached) }
-        cont.invokeOnCancellation { writer.cancel() }
+        val parts = DownloadPlan.chunks(audio.contentLength)
+        if (parts.size == 1) {
+            val source = stores.saveFactory(network).createDataSource()
+            val spec = DataSpec.Builder().setUri(audio.url).setKey(key).build()
+            val writer = CacheWriter(source, spec, null) { _, cached, _ -> onProgress(cached) }
+            cont.invokeOnCancellation { writer.cancel() }
+            Thread({
+                try { writer.cache(); if (cont.isActive) cont.resume(Unit) }
+                catch (e: Throwable) { if (cont.isActive) cont.resumeWithException(e) }
+            }, "kasane-save").start()
+            return@suspendCancellableCoroutine
+        }
+        parallelWrite(audio, key, parts, onProgress, cont)
+    }
+
+    /**
+     * A single googlevideo connection is often capped to a few dozen KB/s; each Range request gets its
+     * own share. Ranges are fetched in parallel into a scratch file, then committed into the saved cache
+     * one span at a time under a lock — concurrent writers on the same cache key corrupt spans.
+     * Committed spans survive process death; an interrupted range is re-fetched on the next attempt.
+     */
+    private fun parallelWrite(audio: ResolvedAudioStream, key: String, parts: List<LongArray>,
+        onProgress: (Long) -> Unit, cont: kotlinx.coroutines.CancellableContinuation<Unit>) {
+        val scratch = try { File.createTempFile("kasane-save-", ".part", app.cacheDir) } catch (e: IOException) {
+            cont.resumeWithException(e); return
+        }
+        try { RandomAccessFile(scratch, "rw").use { it.setLength(audio.contentLength) } }
+        catch (e: IOException) { scratch.delete(); cont.resumeWithException(e); return }
+        val remaining = java.util.concurrent.CountDownLatch(parts.size)
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        val fetched = java.util.concurrent.atomic.AtomicLong(0)
+        val commitLock = Any()
+        cont.invokeOnCancellation { cancelled.set(true) }
+        parts.forEach { (position, length) ->
+            Thread({
+                try {
+                    if (stores.saved.getCachedBytes(key, position, length) < length) {
+                        val got = fetchRange(audio, key, position, length, scratch, cancelled) { fetched.addAndGet(it); onProgress(fetched.get()) }
+                        if (got == length) commitRange(key, position, length, scratch, commitLock)
+                        else if (!cancelled.get()) throw IOException("Short read: $got of $length bytes at $position")
+                    }
+                } catch (e: Throwable) { if (failure.compareAndSet(null, e)) cancelled.set(true) }
+                finally { remaining.countDown() }
+            }, "kasane-save").start()
+        }
         Thread({
-            try { writer.cache(); if (cont.isActive) cont.resume(Unit) }
-            catch (e: Throwable) { if (cont.isActive) cont.resumeWithException(e) }
-        }, "kasane-save").start()
+            try { remaining.await() } catch (_: InterruptedException) { cancelled.set(true) }
+            scratch.delete()
+            if (cont.isActive) failure.get()?.let { cont.resumeWithException(it) } ?: cont.resume(Unit)
+        }, "kasane-save-join").start()
+    }
+
+    private fun fetchRange(audio: ResolvedAudioStream, key: String, position: Long, length: Long,
+        scratch: File, cancelled: java.util.concurrent.atomic.AtomicBoolean, report: (Long) -> Unit): Long {
+        val source = stores.tempReadFactory(network).createDataSource()
+        source.open(DataSpec.Builder().setUri(audio.url).setKey(key).setPosition(position).setLength(length).build())
+        val out = RandomAccessFile(scratch, "rw").apply { seek(position) }
+        val buffer = ByteArray(64 * 1024)
+        var got = 0L
+        try {
+            var read = source.read(buffer, 0, buffer.size)
+            while (read != androidx.media3.common.C.RESULT_END_OF_INPUT && !cancelled.get()) {
+                out.write(buffer, 0, read); got += read; report(read.toLong()); read = source.read(buffer, 0, buffer.size)
+            }
+        } finally { runCatching { source.close() }; out.close() }
+        return got
+    }
+
+    /** Commits one assembled range into the saved cache; serialized because cache keys are single-writer. */
+    private fun commitRange(key: String, position: Long, length: Long, scratch: File, lock: Any) {
+        synchronized(lock) {
+            if (stores.saved.getCachedBytes(key, position, length) >= length) return
+            val source = CacheDataSource.Factory().setCache(stores.saved)
+                .setUpstreamDataSourceFactory(FileDataSource.Factory()).createDataSource()
+            val spec = DataSpec.Builder().setUri(android.net.Uri.fromFile(scratch)).setKey(key)
+                .setPosition(position).setLength(length).build()
+            CacheWriter(source, spec, null, null).cache()
+        }
     }
 
     private suspend fun saveArtwork(videoId: String) {
         val track = trackDao.getTrackById(videoId) ?: return
         val url = track.thumbnailUri?.takeIf { it.startsWith("https://") } ?: return
+        saveArtworkFrom(videoId, url)
+    }
+
+    /** Downloads artwork for a saved track and repoints its thumbnail to the local file. */
+    suspend fun saveArtworkFrom(videoId: String, url: String) {
+        val track = trackDao.getTrackById(videoId) ?: return
         val dir = File(app.filesDir, "offline-artwork").apply { mkdirs() }
         val file = File(dir, "$videoId.img")
         try {
             http.newCall(Request.Builder().url(url).build()).execute().use { response ->
                 val body = response.body ?: return
-                if (!response.isSuccessful || body.contentLength() > MAX_ARTWORK_BYTES) return
+                if (!response.isSuccessful || body.contentLength() > DownloadPlan.MAX_ARTWORK_BYTES) return
                 file.outputStream().use { out -> body.byteStream().copyTo(out) }
             }
             trackDao.insertTrack(track.copy(thumbnailUri = android.net.Uri.fromFile(file).toString()))
@@ -284,10 +420,10 @@ class OfflineManager(
 
     private fun isMetered(): Boolean = runCatching { app.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered }.getOrDefault(false)
 
+    /** No network means the worker waits instead of burning attempts on requests that cannot reach anywhere. */
+    private fun hasNetwork(): Boolean =
+        runCatching { app.getSystemService(ConnectivityManager::class.java).activeNetwork != null }.getOrDefault(true)
+
     private suspend fun AudioFileDao.observePinnedSnapshot(): List<AudioFileRecord> = observePinned().first()
 
-    private companion object {
-        const val MAX_ATTEMPTS = 3
-        const val MAX_ARTWORK_BYTES = 2L * 1024 * 1024
-    }
 }

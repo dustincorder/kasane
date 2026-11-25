@@ -44,6 +44,12 @@ class MdnsResponder(
         thread(name = "mdns-announce", isDaemon = true) {
             // RFC 6762 §8.3: at least two announcements, one second apart.
             repeat(3) { i -> if (running) send(response(ttlScale = 1)); Thread.sleep(1000L shl i) }
+            // §Discovery: keep announcing — a browser that joined late or lost its cache must
+            // still find us, and the SRV/A TTLs (120 s) need refreshing before they expire.
+            while (running) {
+                Thread.sleep(60_000)
+                if (running) send(response(ttlScale = 1)).onFailure { if (DEBUG) System.err.println("mdns: announce failed $it") }
+            }
         }
     }
 
@@ -120,7 +126,9 @@ class MdnsResponder(
             return List(count) {
                 val (name, next) = readName(data, length, pos)
                 if (next + 4 > length) throw IllegalArgumentException("truncated")
-                val type = (data[next].toInt() and 0xFF shl 8) or (data[next + 1].toInt() and 0xFF)
+                // Android's NSD asks QU questions — the top bit is a flag, not part of the type
+                // (RFC 6762 §5.4); without the mask a 0x800C query never matches PTR(12).
+                val type = ((data[next].toInt() and 0xFF shl 8) or (data[next + 1].toInt() and 0xFF)) and 0x7FFF
                 pos = next + 4
                 name to type
             }

@@ -107,11 +107,32 @@ class HomeOrderingTest {
         assertEquals(listOf("Listen again", "Quick picks", "Recently played", "Albums for you", "Music videos for you"), titles)
     }
 
-    @Test fun aShelfOfMixedKindsKeepsEachItemsOwnShape() {
+    @Test fun theFeedsLeadShelfBecomesTheCoverGridEvenWithMixedKinds() {
+        // "Listen again" mixes songs and collections; YouTube Music draws its own lead block as square
+        // covers, and so does Home — the albums keep their place in the grid.
         val shelf = CatalogShelf("Listen again", listOf(song("a"), song("b"), album("m"), album("n"), song("c")))
-        // Not an all-songs shelf, so it is not turned into Quick picks.
         val sections = HomeComposer.build(listOf(shelf), emptyList(), emptyList(), emptyList(), false)
-        val mixed = sections.single() as HomeSection.Mixed
+        val grid = sections.single() as HomeSection.QuickPicks
+        assertEquals(5, grid.items.size)
+    }
+
+    @Test fun aDeepAllSongShelfStaysDenseRowsNotTheGrid() {
+        // Regression: the first all-song shelf used to steal the grid layout wherever it sat in the feed,
+        // which drew "Song mixes" as covers and "Listen again" as rows — the wrong way round.
+        val remote = listOf(
+            CatalogShelf("Listen again", listOf(song("a"), song("b"), album("m"), song("c"))),
+            CatalogShelf("Song mixes", (1..10).map { song("m$it") }))
+        val sections = HomeComposer.build(remote, emptyList(), emptyList(), emptyList(), false)
+        assertTrue(sections[0] is HomeSection.QuickPicks)
+        assertTrue(sections[1] is HomeSection.SongRows)
+        assertEquals("Song mixes", sections[1].title)
+    }
+
+    @Test fun aMixedShelfDeeperInTheFeedKeepsEachItemsOwnShape() {
+        val lead = CatalogShelf("Quick picks", listOf(song("a"), song("b"), song("c")))
+        val deep = CatalogShelf("Picked for you", listOf(song("d"), song("e"), album("m"), album("n"), song("f")))
+        val sections = HomeComposer.build(listOf(lead, deep), emptyList(), emptyList(), emptyList(), false)
+        val mixed = sections.last() as HomeSection.Mixed
         assertEquals(5, mixed.items.size)
     }
 

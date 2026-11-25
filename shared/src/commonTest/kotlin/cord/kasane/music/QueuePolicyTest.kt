@@ -15,4 +15,20 @@ class QueuePolicyTest {
     @Test fun capsUnboundedLists() {
         assertEquals(QueuePolicy.LIMIT, QueuePolicy.prepare((0..3000).map { Track("$it", "$it", "") }).size)
     }
+
+    @Test fun radioOnCurrentTrackAnchorsAtIt() {
+        val tracks = (0..4).map { Track("t$it", "T$it", "") }
+        val start = QueuePolicy.anchoredRadio(tracks, index = 2, seedId = "t2")!!
+        // The playing item stays put with its position — only the upcoming tail is replaced.
+        assertEquals(tracks.take(3), start.items)
+        assertEquals(2, start.startIndex)
+        assertFalse(start.shuffle)
+    }
+
+    @Test fun radioOnAnotherTrackStartsFresh() {
+        val tracks = (0..4).map { Track("t$it", "T$it", "") }
+        assertNull(QueuePolicy.anchoredRadio(tracks, index = 1, seedId = "t3"))
+        assertNull(QueuePolicy.anchoredRadio(tracks, index = 9, seedId = "t1"))
+        assertNull(QueuePolicy.anchoredRadio(emptyList(), index = 0, seedId = "t0"))
+    }
 }

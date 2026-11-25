@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -43,7 +44,16 @@ import androidx.compose.ui.unit.dp
 import cord.kasane.music.model.Track
 
 /** One menu action. [action] never dismisses anything; callers decide what happens around it. */
-class MenuEntry(val label: String, val enabled: Boolean = true, val action: () -> Unit)
+class MenuEntry(
+    val label: String,
+    val enabled: Boolean = true,
+    val icon: ImageVector? = null,
+    val group: Int = 0,
+    val action: () -> Unit,
+) {
+    constructor(label: String, enabled: Boolean = true, action: () -> Unit) : this(label, enabled, null, 0, action)
+    constructor(label: String, enabled: Boolean = true, icon: ImageVector?, action: () -> Unit) : this(label, enabled, icon, 0, action)
+}
 
 fun formatDuration(seconds: Double): String {
     val total = seconds.toInt()
@@ -103,8 +113,22 @@ fun TrackListItem(
             IconButton(onClick = { menuOpen = true }) {
                 Icon(Icons.Default.MoreVert, "More options for ${track.title}", tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
             }
-            DropdownMenu(menuOpen, { menuOpen = false }) {
-                menu.forEach { e -> DropdownMenuItem({ Text(e.label) }, enabled = e.enabled, onClick = { menuOpen = false; e.action() }) }
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                shape = MaterialTheme.shapes.small,
+                containerColor = colors.surfaceContainerHigh,
+            ) {
+                menu.forEach { e ->
+                    DropdownMenuItem(
+                        text = { Text(e.label, style = MaterialTheme.typography.bodyMedium) },
+                        leadingIcon = e.icon?.let { icon ->
+                            { Icon(icon, null, Modifier.size(20.dp), tint = colors.onSurfaceVariant) }
+                        },
+                        enabled = e.enabled,
+                        onClick = { menuOpen = false; e.action() },
+                    )
+                }
             }
         }
         trailing?.invoke()

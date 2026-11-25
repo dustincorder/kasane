@@ -37,6 +37,16 @@ fun runSmoke(query: String): Int = DesktopApp(audioOutput = "null", root = kotli
     }
 }
 
+/** `--idle [seconds]`: build the full desktop stack (no window, no sound), then sleep. */
+fun runIdle(seconds: Int): Int {
+    val t0 = System.nanoTime()
+    DesktopApp(audioOutput = "null", root = kotlin.io.path.createTempDirectory("kasane-idle").toFile(), autoStartConnect = false).use {
+        println("EVT ready ${(System.nanoTime() - t0) / 1_000_000}")
+        Thread.sleep(seconds * 1000L)
+    }
+    return 0
+}
+
 /** `--play QUERY... SECONDS`: play the first song result headless and print the position every 5 s. */
 fun runPlay(args: List<String>): Int = DesktopApp(audioOutput = "null", root = kotlin.io.path.createTempDirectory("kasane-play").toFile(), autoStartConnect = false).use { app ->
     val seconds = args.last().toIntOrNull() ?: 60

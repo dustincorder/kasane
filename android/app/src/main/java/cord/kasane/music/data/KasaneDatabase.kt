@@ -56,6 +56,19 @@ data class CachedCatalogShelfItemRecord(
     val scopeKey: String, val cacheKey: String, val shelfIndex: Int, val position: Int, val itemKey: String,
 )
 
+/** Offline lyrics: provider payload kept verbatim so parser upgrades apply to stored rows too. */
+@Entity(tableName = "lyrics")
+data class LyricsEntity(
+    @PrimaryKey val trackId: String,
+    val providerId: String,
+    val sourceRef: String?,
+    val rawFormat: String,
+    val rawPayload: String,
+    val offsetMs: Long = 0,
+    val fetchedAtMs: Long = 0,
+    val userPicked: Boolean = false,
+)
+
 @Dao
 interface TrackDao {
     suspend fun insertTrack(track: Track) = insertTrackRecord(TrackRecord.from(track))
@@ -108,6 +121,9 @@ interface TrackDao {
     @Query("SELECT * FROM history ORDER BY playedAt DESC, id DESC")
     suspend fun getHistoryForExport(): List<HistoryEntity>
 
+    @Query("DELETE FROM history")
+    suspend fun clearHistory()
+
     /** Play counts per track since [since], most played first. Metadata comes from the newest history row. */
     @Query("""
         SELECT h.trackId AS trackId, h.title AS title, h.artist AS artist, h.album AS album, h.thumbnailUri AS thumbnailUri,
@@ -125,16 +141,52 @@ interface TrackDao {
     fun recentlySaved(limit: Int = 20): Flow<List<Track>>
 }
 
+/** Enriched release facts (MusicBrainz/CAA) kept per track for offline browsing. */
+@Entity(tableName = "track_metadata")
+data class TrackMetadataEntity(
+    @PrimaryKey val trackId: String,
+    val releaseTitle: String?,
+    val releaseDate: String?,
+    val artistDisplay: String?,
+    val genres: String,
+    val coverArtUrl: String?,
+    val musicBrainzReleaseId: String?,
+    val enrichedAtMs: Long = 0,
+)
+
+@Dao
+interface TrackMetadataDao {
+    @Query("SELECT * FROM track_metadata WHERE trackId = :trackId")
+    suspend fun get(trackId: String): TrackMetadataEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entry: TrackMetadataEntity)
+}
+
+@Dao
+interface LyricsDao {
+    @Query("SELECT * FROM lyrics WHERE trackId = :trackId")
+    suspend fun get(trackId: String): LyricsEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entry: LyricsEntity)
+
+    @Query("UPDATE lyrics SET offsetMs = :offsetMs WHERE trackId = :trackId")
+    suspend fun setOffset(trackId: String, offsetMs: Long)
+}
+
 @Database(
     entities = [TrackRecord::class, FavoriteEntity::class, HistoryEntity::class, CachedCatalogPageRecord::class,
         CachedCatalogShelfRecord::class, CachedCatalogItemEntity::class, CachedCatalogShelfItemRecord::class,
-        cord.kasane.music.offline.AudioFileRecord::class],
-    version = 7,
+        cord.kasane.music.offline.AudioFileRecord::class, LyricsEntity::class, TrackMetadataEntity::class],
+    version = 9,
     exportSchema = false
 )
 abstract class KasaneDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
     abstract fun audioDao(): cord.kasane.music.offline.AudioFileDao
+    abstract fun lyricsDao(): LyricsDao
+    abstract fun metadataDao(): TrackMetadataDao
 
     @Dao
     interface CatalogCacheDao {
@@ -244,6 +296,20 @@ abstract class KasaneDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_catalog_cache_updatedAt ON catalog_cache(updatedAt)")
             }
         }
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `lyrics` (`trackId` TEXT NOT NULL, `providerId` TEXT NOT NULL, `sourceRef` TEXT, `rawFormat` TEXT NOT NULL, `rawPayload` TEXT NOT NULL, `offsetMs` INTEGER NOT NULL DEFAULT 0, `fetchedAtMs` INTEGER NOT NULL DEFAULT 0, `userPicked` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`trackId`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `track_metadata` (`trackId` TEXT NOT NULL, `releaseTitle` TEXT, `releaseDate` TEXT, `artistDisplay` TEXT, `genres` TEXT NOT NULL DEFAULT '', `coverArtUrl` TEXT, `musicBrainzReleaseId` TEXT, `enrichedAtMs` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`trackId`))")
+                db.execSQL("ALTER TABLE `history` ADD COLUMN `owner` TEXT NOT NULL DEFAULT 'account'")
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `history` ADD COLUMN `kind` TEXT NOT NULL DEFAULT 'track'")
+            }
+        }
+
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `catalog_cache_item` ADD COLUMN `album` TEXT")

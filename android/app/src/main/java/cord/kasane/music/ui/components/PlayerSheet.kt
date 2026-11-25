@@ -15,13 +15,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.outlined.Lyrics
 import androidx.compose.material.icons.automirrored.outlined.QueueMusic
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.filled.*
@@ -34,7 +34,6 @@ import androidx.compose.ui.geometry.lerp as lerpOffset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -133,7 +132,46 @@ class PlayerActions(
     val togglePlay: () -> Unit, val next: () -> Unit, val previous: () -> Unit, val seekTo: (Long) -> Unit,
     val shuffle: () -> Unit, val repeat: () -> Unit, val retry: () -> Unit, val dismissError: () -> Unit,
     val toggleFavorite: () -> Unit, val openQueue: () -> Unit,
+    val openLyrics: (() -> Unit)? = null,
 )
+
+/**
+ * Swipe-to-skip: a track changes only when the gesture is confirmed — dragged past the distance
+ * threshold, or flung fast enough in the direction already travelled. Anything else springs the
+ * content back, so pulling back or a short accidental drag never switches. Evaluated once at
+ * release, so a single gesture can switch at most one track.
+ */
+/**
+ * -1 = next (left), +1 = previous (right), 0 = cancelled. Distance past the threshold always
+ * confirms; a fast fling confirms only when it agrees with the direction already dragged, so
+ * pulling back and releasing never switches tracks.
+ */
+internal fun swipeSkipDirection(offsetPx: Float, velocityPxPerSec: Float, minDistancePx: Float, flingPxPerSec: Float): Int = when {
+    offsetPx <= -minDistancePx -> -1
+    offsetPx >= minDistancePx -> 1
+    abs(offsetPx) >= minDistancePx * 0.35f && abs(velocityPxPerSec) >= flingPxPerSec &&
+        (offsetPx < 0f) == (velocityPxPerSec < 0f) -> if (offsetPx < 0f) -1 else 1
+    else -> 0
+}
+
+@Composable
+private fun Modifier.swipeToSkip(
+    enabled: Boolean, canNext: Boolean, canPrev: Boolean,
+    offsetX: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>, minDistancePx: Float, flingPxPerSec: Float,
+    haptics: androidx.compose.ui.hapticfeedback.HapticFeedback, scope: CoroutineScope,
+    onNext: () -> Unit, onPrevious: () -> Unit,
+): Modifier {
+    val drag = rememberDraggableState { delta ->
+        scope.launch { offsetX.snapTo((offsetX.value + delta).coerceIn(-minDistancePx * 2f, minDistancePx * 2f)) }
+    }
+    return draggable(drag, Orientation.Horizontal, enabled = enabled, onDragStopped = { velocity ->
+        when (swipeSkipDirection(offsetX.value, velocity, minDistancePx, flingPxPerSec)) {
+            -1 -> if (canNext) { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onNext() }
+            1 -> if (canPrev) { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); onPrevious() }
+        }
+        scope.launch { offsetX.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow)) }
+    })
+}
 
 /**
  * Mini-player and full-screen Now Playing as one surface. [dockedBottom] is the height of whatever sits below the
@@ -182,14 +220,15 @@ fun PlayerSheet(
                     modifier = Modifier.graphicsLayer { alpha = ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) })
 
                 // One artwork element for both states: it grows and travels, it is never swapped.
-                val swipe = Modifier.pointerInput(track.id, p > 0.5f) {
-                    if (p < 0.5f) return@pointerInput
-                    var total = 0f
-                    detectHorizontalDragGestures(onDragStart = { total = 0f }, onHorizontalDrag = { _, dx -> total += dx },
-                        onDragEnd = { if (total < -90f) actions.next() else if (total > 90f) actions.previous() })
-                }
+                val coverSwipe = remember(track.id) { Animatable(0f) }
+                val coverPx = with(density) { cover.roundToPx() }
                 CoverArtwork(track, state.queueIndex, g.coverSize, state.isPlaying || state.isLoading, p,
-                    Modifier.offset(g.coverX, g.coverY).then(swipe), pixels = with(density) { cover.roundToPx() })
+                    Modifier.offset(g.coverX, g.coverY).graphicsLayer { translationX = coverSwipe.value }
+                        .swipeToSkip(p > 0.5f, state.canSkipNext, state.canSkipPrevious, coverSwipe,
+                            minDistancePx = coverPx * 0.3f, flingPxPerSec = with(density) { 400.dp.toPx() },
+                            haptics = LocalHapticFeedback.current, scope = scope,
+                            onNext = actions.next, onPrevious = actions.previous),
+                    pixels = coverPx)
             }
         }
     }
@@ -216,18 +255,21 @@ private fun CoverArtwork(track: Track, queueIndex: Int, size: Dp, playing: Boole
 private fun MiniContent(state: PlaybackUiState, track: Track, actions: PlayerActions, remoteName: String?, modifier: Modifier, onOpen: () -> Unit, coverStart: Dp,
     onOpenDevices: (() -> Unit)? = null) {
     val haptics = LocalHapticFeedback.current
-    Column(modifier.fillMaxSize()) {
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val swipeX = remember(track.id) { Animatable(0f) }
+    var rowWidth by remember(track.id) { mutableFloatStateOf(1f) }
+    Column(modifier.fillMaxSize().graphicsLayer { translationX = swipeX.value }) {
         Row(
             Modifier.weight(1f).fillMaxWidth()
                 .clickable(role = Role.Button, onClickLabel = "Open player", onClick = onOpen)
-                .pointerInput(track.id) {
-                    var total = 0f
-                    detectHorizontalDragGestures(onDragStart = { total = 0f }, onHorizontalDrag = { _, dx -> total += dx },
-                        onDragEnd = {
-                            if (total < -80f && state.canSkipNext) { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); actions.next() }
-                            else if (total > 80f && state.canSkipPrevious) { haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove); actions.previous() }
-                        })
-                }
+                .onSizeChanged { rowWidth = it.width.toFloat().coerceAtLeast(1f) }
+                .swipeToSkip(enabled = true, canNext = state.canSkipNext, canPrev = state.canSkipPrevious,
+                    offsetX = swipeX,
+                    minDistancePx = (rowWidth * 0.3f).coerceAtLeast(with(density) { 88.dp.toPx() }),
+                    flingPxPerSec = with(density) { 400.dp.toPx() },
+                    haptics = haptics, scope = scope,
+                    onNext = actions.next, onPrevious = actions.previous)
                 .padding(start = 10.dp + 44.dp + 12.dp + coverStart, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -277,6 +319,9 @@ private fun FullContent(
             Text("Now playing", Modifier.align(Alignment.Center),
                 style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
             Row(Modifier.align(Alignment.CenterEnd)) {
+                actions.openLyrics?.let { open ->
+                    IconButton(onClick = open) { Icon(Icons.Outlined.Lyrics, "Lyrics") }
+                }
                 Box {
                     IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "More options") }
                     TrackContextMenu(track, menuOpen, { menuOpen = false }, onPlay = { if (!state.isPlaying) actions.togglePlay() },
@@ -326,12 +371,15 @@ private fun FullContent(
         val duration = state.durationMs
         val position = state.currentPositionMs.coerceIn(0, duration.coerceAtLeast(1))
         var scrub by remember(track.id) { mutableStateOf<Float?>(null) }
-        Slider(
-            value = scrub ?: if (duration > 0) position.toFloat() / duration else 0f, enabled = duration > 0,
-            onValueChange = { scrub = it }, onValueChangeFinished = { scrub?.let { actions.seekTo((it * duration).toLong()) }; scrub = null },
-            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Seek" })
+        cord.kasane.ui.components.KasaneSlider(
+            value = scrub ?: if (duration > 0) position.toFloat() / duration else 0f,
+            enabled = duration > 0,
+            onValueChange = { scrub = it },
+            onValueChangeFinished = { scrub?.let { actions.seekTo((it * duration).toLong()) }; scrub = null },
+            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Seek" },
+        )
         val shown = scrub?.let { (it * duration).toLong() } ?: position
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(formatDuration(shown / 1000.0), style = MaterialTheme.typography.labelMediumMuted)
             Text(if (state.isLoading && duration == 0L) "Buffering…" else formatDuration(duration / 1000.0), style = MaterialTheme.typography.labelMediumMuted)
         }
@@ -352,7 +400,7 @@ private fun FullContent(
                     tint = if (state.repeatMode != 0) colors.primary else colors.onSurfaceVariant)
             }
         }
-        Spacer(Modifier.height(gap / 2))
+        Spacer(Modifier.weight(1f))
         // Queue access sits at the bottom and spans the width, so either thumb reaches it without stretching to the top.
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             // Which device plays, bottom-left like Spotify; a tap opens Connect.

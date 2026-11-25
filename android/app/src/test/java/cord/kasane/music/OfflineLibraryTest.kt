@@ -7,6 +7,7 @@ import cord.kasane.music.offline.LruBudget
 import cord.kasane.music.offline.OfflineGateInterceptor
 import cord.kasane.music.offline.OfflineModeException
 import cord.kasane.music.offline.OfflinePolicy
+import cord.kasane.music.offline.StreamEligibility
 import cord.kasane.music.provider.HlsStream
 import cord.kasane.music.provider.ProgressiveStream
 import cord.kasane.music.provider.ResolvedAudioStream
@@ -59,12 +60,12 @@ class OfflineLibraryTest {
 
     @Test fun onlyPlainProgressiveAudioIsSavable() {
         val audio = ResolvedAudioStream("https://rr1.googlevideo.com/x", 140, "audio/mp4", Long.MAX_VALUE, 1000)
-        assertEquals(OfflinePolicy.Eligibility.Direct, OfflinePolicy.eligibility(ProgressiveStream(audio, "WEB_REMIX")))
+        assertEquals(StreamEligibility.Eligibility.Direct, StreamEligibility.eligibility(ProgressiveStream(audio, "WEB_REMIX")))
         val unknownSize = ResolvedAudioStream("https://rr1.googlevideo.com/x", 140, "audio/mp4", Long.MAX_VALUE, -1)
-        assertTrue(OfflinePolicy.eligibility(ProgressiveStream(unknownSize, "WEB_REMIX")) is OfflinePolicy.Eligibility.NotSavable)
-        assertTrue(OfflinePolicy.eligibility(HlsStream("https://x")) is OfflinePolicy.Eligibility.NotSavable)
-        val unavailable = OfflinePolicy.eligibility(UnavailableStream("Sign in required."))
-        assertEquals("Sign in required.", (unavailable as OfflinePolicy.Eligibility.NotSavable).reason)
+        assertTrue(StreamEligibility.eligibility(ProgressiveStream(unknownSize, "WEB_REMIX")) is StreamEligibility.Eligibility.NotSavable)
+        assertTrue(StreamEligibility.eligibility(HlsStream("https://x")) is StreamEligibility.Eligibility.NotSavable)
+        val unavailable = StreamEligibility.eligibility(UnavailableStream("Sign in required."))
+        assertEquals("Sign in required.", (unavailable as StreamEligibility.Eligibility.NotSavable).reason)
     }
 
     @Test fun downloadsWaitForOfflineModeAndMeteredNetworks() {
@@ -76,11 +77,13 @@ class OfflineLibraryTest {
 
     @Test fun partialCacheIsNeverTreatedAsPlayable() {
         val row = AudioFileRecord("abcdefghijk", "ytm:abcdefghijk:140", 140, "audio/mp4", 1000, AudioState.CACHED.key, false, 0, null, false, 0, 0)
-        assertTrue(OfflinePolicy.playableFromCache(row, 1000))
-        assertFalse(OfflinePolicy.playableFromCache(row, 999))
-        assertFalse(OfflinePolicy.playableFromCache(row.copy(contentLength = 0), 0))
-        assertFalse(OfflinePolicy.playableFromCache(row.copy(cacheKey = ""), 1000))
-        assertFalse(OfflinePolicy.playableFromCache(null, 1000))
+        fun playable(r: AudioFileRecord?, cached: Long) =
+            r != null && OfflinePolicy.playableFromCache(r.cacheKey, r.contentLength, cached)
+        assertTrue(playable(row, 1000))
+        assertFalse(playable(row, 999))
+        assertFalse(playable(row.copy(contentLength = 0), 0))
+        assertFalse(playable(row.copy(cacheKey = ""), 1000))
+        assertFalse(playable(null, 1000))
     }
 
     @Test fun customCacheLimitsAreParsedAndBounded() {

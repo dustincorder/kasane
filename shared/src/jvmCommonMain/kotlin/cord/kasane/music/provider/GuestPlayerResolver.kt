@@ -106,7 +106,12 @@ class GuestPlayerResolver(
 class AudioHttpException(val code: Int) : IOException("Audio server refused the stream ($code).")
 
 /** No data-class toString: a signed CDN URL must never leak into a log. */
-class ResolvedAudioStream(val url: String, val itag: Int, val mimeType: String, val expiresAtMs: Long, val contentLength: Long = -1) {
+class ResolvedAudioStream(
+    val url: String, val itag: Int, val mimeType: String, val expiresAtMs: Long, val contentLength: Long = -1,
+    /** Watch-reporting endpoints from `playbackTracking`; pinged when a play counts toward history. */
+    val playbackStatsUrl: String? = null,
+    val watchtimeUrl: String? = null,
+) {
     val headers: Map<String, String> get() = mapOf("User-Agent" to GuestPlayerResolver.USER_AGENT)
     override fun toString() = "ResolvedAudioStream(itag=$itag, url=[redacted])"
 }

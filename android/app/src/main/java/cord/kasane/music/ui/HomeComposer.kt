@@ -13,7 +13,10 @@ sealed interface HomeSection {
     val title: String
 
     /** A 3-column grid of large covers, paged horizontally: the first thing Home offers to play. */
-    data class QuickPicks(override val title: String, val tracks: List<Track>) : HomeSection { override val key = "quick-picks" }
+    data class QuickPicks(override val title: String, val items: List<CatalogItem>) : HomeSection {
+        override val key = "quick-picks"
+        val tracks: List<Track> get() = items.mapNotNull { it.track() }
+    }
     /** A song shelf as compact rows, four per column, paged horizontally. */
     data class SongRows(override val key: String, override val title: String, val tracks: List<Track>, val more: String? = null) : HomeSection
     /** A shelf YouTube Music fills with several kinds at once ("Listen again"): each item keeps its own shape. */
@@ -56,19 +59,22 @@ internal object HomeComposer {
         val out = mutableListOf<HomeSection>()
 
         val remoteShelves = if (offlineOnly) emptyList() else remote.filter { it.items.isNotEmpty() }
-        // YouTube Music orders its feed by personal relevance, so that order is kept exactly. The first all-songs
-        // shelf is the Quick picks source and is drawn as the grid in its own position.
-        val firstSongShelf = remoteShelves.indexOfFirst { shelf -> shelf.items.all { it.kind == CatalogKind.SONG } }
-        val picks = mutableListOf<Track>()
-        if (firstSongShelf >= 0) picks += remoteShelves[firstSongShelf].items.mapNotNull { it.track() }.distinctBy { it.id }.take(PAGE_SIZE)
+        // YouTube Music opens the feed with its personal picks ("Quick picks", "Listen again"): the lead shelf is
+        // always mostly songs, whatever its exact mix, and that shelf becomes the cover grid. Deeper song shelves
+        // ("Song mixes", "More like…") are dense track lists and stay rows; a video-led shelf keeps its 16:9 cards.
+        val leadShelf = remoteShelves.indexOfFirst { shelf ->
+            shelf.items.count { it.kind == CatalogKind.SONG } * 2 >= shelf.items.size
+        }
+        val picks = mutableListOf<CatalogItem>()
+        if (leadShelf >= 0) picks += remoteShelves[leadShelf].items.distinctBy { it.kind to it.id }.take(PAGE_SIZE)
         if (local) {
             // Habits first (played more than once), then favourites; a single play is not yet a preference.
-            picks += topPlayed.filter { it.plays >= 2 }.map(PlayStat::track)
-            picks += favorites
+            picks += topPlayed.filter { it.plays >= 2 }.map(PlayStat::track).map { it.asItem() }
+            picks += favorites.map { it.asItem() }
         }
-        val quick = picks.distinctBy { it.id }.take(MAX_QUICK_PICKS)
-        val quickSection = if (quick.size >= MIN_ROW_ITEMS) {
-            val title = if (firstSongShelf >= 0) remoteShelves[firstSongShelf].title.ifBlank { "Quick picks" } else "Quick picks"
+        val quick = picks.distinctBy { it.kind to it.id }.take(MAX_QUICK_PICKS)
+        val quickSection = if (quick.count { it.track() != null } >= MIN_ROW_ITEMS) {
+            val title = if (leadShelf >= 0) remoteShelves[leadShelf].title.ifBlank { "Quick picks" } else "Quick picks"
             HomeSection.QuickPicks(title, quick)
         } else null
         // Songs claimed by an earlier section are not repeated: Quick picks wins over later shelves.
@@ -94,7 +100,7 @@ internal object HomeComposer {
         if (offlineOnly) { savedSection?.let { out += it; claim(it.tracks) }; return out + listOfNotNull(recentSection) }
         if (remoteShelves.isEmpty()) { quickSection?.let { out += it }; insertLocal(); return out }
         remoteShelves.forEachIndexed { index, shelf ->
-            val section = if (index == firstSongShelf) quickSection else classify(index, shelf, ::fresh)
+            val section = if (index == leadShelf) quickSection else classify(index, shelf, ::fresh)
             if (section != null) {
                 if (section is HomeSection.SongRows) claim(section.tracks)
                 out += section; remoteSections++
@@ -125,3 +131,5 @@ internal object HomeComposer {
         }
     }
 }
+
+internal fun Track.asItem() = CatalogItem(id, CatalogKind.SONG, title, artist, thumbnailUri, durationSeconds, album)

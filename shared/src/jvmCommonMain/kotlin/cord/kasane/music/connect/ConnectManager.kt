@@ -19,8 +19,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 
 const val DEFAULT_PORT = 47650
 private const val PROTOCOL = 1
@@ -118,6 +123,14 @@ class ConnectManager(private val config: ConnectConfig) {
 
     private val _remoteStates = MutableStateFlow<Map<String, Frame.State>>(emptyMap())
     val remoteStates: StateFlow<Map<String, Frame.State>> = _remoteStates.asStateFlow()
+
+    /** Single-performer arbitration (protocol §Active device): role and the accepted performer. */
+    private val arbiter = PlaybackArbiter(identity.deviceId)
+    private val _localRole = MutableStateFlow(PlaybackRole.SOLO)
+    val localRole: StateFlow<PlaybackRole> = _localRole.asStateFlow()
+    private val _activeDevice = MutableStateFlow<String?>(null)
+    /** The group performer's device id, or null while nothing plays anywhere. */
+    val activeDevice: StateFlow<String?> = _activeDevice.asStateFlow()
 
     private val unauthByIp = ConcurrentHashMap<String, Int>()
     @Volatile private var unauthTotal = 0
@@ -287,6 +300,8 @@ class ConnectManager(private val config: ConnectConfig) {
             if (sessions.remove(peer.id, session)) {
                 // A device that went away is no longer "playing" anywhere in the UI.
                 _remoteStates.value = _remoteStates.value - peer.id
+                arbiter.removeRemote(peer.id)
+                syncRoles()
                 refreshDevices()
             }
             if (!wasAuthed) releaseUnauth(session.socket.inetAddress?.hostAddress ?: "?")
@@ -340,6 +355,8 @@ class ConnectManager(private val config: ConnectConfig) {
                 session.remoteState.value = merged
                 session.peer?.let { peer ->
                     _remoteStates.value = _remoteStates.value + (peer.id to merged)
+                    arbiter.updateRemote(peer.id, merged.playback, merged.activeId, System.currentTimeMillis())
+                    syncRoles()
                 }
                 if (previous?.playback != merged.playback) refreshDevices()
             }
@@ -555,13 +572,46 @@ class ConnectManager(private val config: ConnectConfig) {
             }
         }
         try {
-            adapter.execute(command.action, command.args)
+            when (command.action) {
+                "takeover" -> handleTakeover(session, command)
+                "yield" -> handleYield(session, command)
+                else -> adapter.execute(command.action, command.args)
+            }
             reply(session, peerId, command.id, true, null)
         } catch (e: CmdException) {
             reply(session, peerId, command.id, false, FrameError(e.code, e.message))
         } catch (e: Exception) {
             reply(session, peerId, command.id, false, FrameError("failed", e.message))
         }
+    }
+
+    /** "You are now the group performer": adopt the snapshot, play, and claim the role. */
+    private suspend fun handleTakeover(session: Session, command: Frame.Command) {
+        val args = command.args
+        val queue = args["queue"]?.let {
+            ConnectJson.json.decodeFromJsonElement<List<TrackMeta>>(it)
+        } ?: emptyList()
+        adapter.handoff(Frame.Handoff(
+            transferId = args["transferId"]?.jsonPrimitive?.contentOrNull ?: command.id,
+            queue = queue,
+            index = args["index"]?.jsonPrimitive?.longOrNull?.toInt() ?: 0,
+            positionMs = args["positionMs"]?.jsonPrimitive?.longOrNull ?: 0,
+            playing = args["playing"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: true,
+            shuffle = args["shuffle"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false,
+            repeat = args["repeat"]?.jsonPrimitive?.contentOrNull ?: "off",
+        ))
+        arbiter.claimLocal(System.currentTimeMillis())
+        syncRoles()
+    }
+
+    /** "Stand down; activeId plays from now on": pause and demote this device to listener. */
+    private suspend fun handleYield(session: Session, command: Frame.Command) {
+        val newActive = command.args["activeId"]?.jsonPrimitive?.contentOrNull
+            ?: session.peer?.id
+            ?: cmdFail("invalid_args", "yield needs activeId")
+        adapter.execute("pause", JsonObject(emptyMap()))
+        arbiter.acceptRemoteClaim(newActive, System.currentTimeMillis())
+        syncRoles()
     }
 
     private fun reply(session: Session, peerId: String, id: String, ok: Boolean, error: FrameError?) {
@@ -604,6 +654,8 @@ class ConnectManager(private val config: ConnectConfig) {
     private suspend fun publishOnce() {
         val snap = adapter.snapshot()
         latestSnapshot = snap
+        arbiter.localPlayback = snap.playback
+        syncRoles()
         val sig = snap.queue.hashCode() * 31 + snap.queueIndex.hashCode()
         if (sig != lastQueueSignature) {
             lastQueueSignature = sig
@@ -612,6 +664,18 @@ class ConnectManager(private val config: ConnectConfig) {
         revCounter++
         inbound.forEach { session ->
             if (session.authed && session.subscribed && !session.closed) pushState(session, forceQueue = false)
+        }
+    }
+
+    /**
+     * Refresh role flows and enforce the single-performer invariant: when a remote device is
+     * the accepted performer, local playback must stop before it overlaps the remote.
+     */
+    private fun syncRoles() {
+        _activeDevice.value = arbiter.activeDeviceId(System.currentTimeMillis())
+        _localRole.value = arbiter.localRole()
+        if (arbiter.shouldLocalYield()) {
+            scope.launch { runCatching { adapter.execute("pause", JsonObject(emptyMap())) } }
         }
     }
 
@@ -634,7 +698,9 @@ class ConnectManager(private val config: ConnectConfig) {
                 queueIndex = snap.queueIndex,
                 queue = if (includeQueue) snap.queue else null,
                 error = snap.error,
-                capabilities = adapter.capabilities(),
+                capabilities = (adapter.capabilities() + "takeover").distinct(),
+                role = arbiter.localRole().name.lowercase(),
+                activeId = arbiter.activeDeviceId(System.currentTimeMillis()),
             )
         )
     }
@@ -878,6 +944,52 @@ class ConnectManager(private val config: ConnectConfig) {
         val (ok, error) = withTimeoutOrNull(HANDOFF_TIMEOUT_MS) { reply.await() }
             ?: cmdFail("failed", "handoff timed out")
         if (!ok) throw CmdException(error?.code ?: "failed", error?.message ?: "handoff failed")
+        // The target is the performer now: this device pauses and demotes itself (§Handoff, §Active device).
+        arbiter.acceptRemoteClaim(deviceId, System.currentTimeMillis())
+        runCatching { adapter.execute("pause", JsonObject(emptyMap())) }
+        syncRoles()
+    }
+
+    /**
+     * Push the current (or given) snapshot to `deviceId` as the new group performer:
+     * `takeover` plays there first; only after its ack does local playback stop. Never double-plays.
+     */
+    suspend fun transferTo(deviceId: String, request: Frame.Handoff? = null) {
+        val snap = request ?: latestSnapshot.let { s ->
+            Frame.Handoff(
+                transferId = UUID.randomUUID().toString(),
+                queue = s.queue, index = s.queueIndex.toInt().coerceAtLeast(0),
+                positionMs = s.positionMs, playing = s.playback == "playing" || s.playback == "buffering",
+                shuffle = s.shuffle, repeat = s.repeat,
+            )
+        }
+        sendCommand(deviceId, "takeover", buildJsonObject {
+            put("transferId", snap.transferId)
+            put("queue", ConnectJson.json.encodeToJsonElement(snap.queue))
+            put("index", snap.index)
+            put("positionMs", snap.positionMs)
+            put("playing", snap.playing)
+            put("shuffle", snap.shuffle)
+            put("repeat", snap.repeat)
+        })
+        arbiter.acceptRemoteClaim(deviceId, System.currentTimeMillis())
+        runCatching { adapter.execute("pause", JsonObject(emptyMap())) }
+        syncRoles()
+    }
+
+    /**
+     * "Play here": yields the current remote performer, then returns so the caller can start local
+     * playback with no overlap. The local role becomes performer immediately — a race with a peer
+     * doing the same is resolved deterministically by the smallest-id rule.
+     */
+    suspend fun claimPerformer() {
+        val actions = arbiter.onLocalPlayIntent(System.currentTimeMillis())
+        for (action in actions) when (action) {
+            is ArbiterAction.YieldRemote ->
+                sendCommand(action.deviceId, "yield", buildJsonObject { put("activeId", action.newActiveId) })
+            ArbiterAction.PlayLocally -> {}
+        }
+        syncRoles()
     }
 
     /** Close the session to a paired device; it reconnects when it is announced again. */
@@ -885,6 +997,8 @@ class ConnectManager(private val config: ConnectConfig) {
         wanted.remove(deviceId)
         sessions.remove(deviceId)?.link?.close()
         _remoteStates.value = _remoteStates.value - deviceId
+        arbiter.removeRemote(deviceId)
+        syncRoles()
         refreshDevices()
     }
 
@@ -897,6 +1011,8 @@ class ConnectManager(private val config: ConnectConfig) {
         wanted.remove(deviceId)
         entries.remove(deviceId)
         _remoteStates.value = _remoteStates.value - deviceId
+        arbiter.removeRemote(deviceId)
+        syncRoles()
         refreshDevices()
     }
 

@@ -69,13 +69,52 @@ class ScreensSmokeTest {
         compose.onNodeWithText("Up next").assertExists()
     }
 
-    @Test fun settingsRendersInBothThemes() {
-        var mode by androidx.compose.runtime.mutableStateOf(ThemeMode.LIGHT)
-        compose.setContent { KasaneTheme(mode, AccentSource.AUTO) { Surface(color = MaterialTheme.colorScheme.background) {
-            SettingsContent(AccountState.Guest, {}, {}, {}, {}, {}, {}, mode, AccentSource.AUTO, FallbackSeed, { mode = it }, {}, {})
+    @Test fun settingsRootListsEveryCategoryAndOpensThem() {
+        var opened: SettingsDestination? = null
+        compose.setContent { KasaneTheme(dynamicColor = false) { Surface(color = MaterialTheme.colorScheme.background) {
+            SettingsRoot(null, "Dark · automatic accent", "21 songs saved · 340 MB", {}, { opened = it })
         } } }
-        compose.onNodeWithText("Dark").performClick()
+        listOf("General", "Appearance", "Playback", "Downloads & storage", "Data & privacy", "About").forEach {
+            compose.onNodeWithText(it).assertExists()
+        }
+        compose.onNodeWithText("Guest").assertExists()
+        compose.onNodeWithText("Appearance").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Settings").assertExists()
+        org.junit.Assert.assertEquals(SettingsDestination.APPEARANCE, opened)
+    }
+
+    @Test fun onboardingShowsGuestPath() {
+        var guest = false
+        val settings = cord.kasane.music.settings.AppSettings(
+            androidx.test.core.app.ApplicationProvider.getApplicationContext())
+        compose.setContent { KasaneTheme(dynamicColor = false) { Surface(color = MaterialTheme.colorScheme.background) {
+            OnboardingScreen(AccountState.Guest, settings, onSignIn = {}, onDone = { guest = true })
+        } } }
+        compose.onNodeWithText("Kasane").assertExists()
+        compose.onNodeWithText("Sign in to YouTube Music").assertExists()
+        compose.onNodeWithText("Continue as a guest").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Set up Kasane").assertExists()
+        compose.onNodeWithText("Cache songs you play").assertExists()
+        compose.onNodeWithText("Start listening").performClick()
+        compose.waitForIdle()
+        org.junit.Assert.assertTrue(guest)
+    }
+
+    @Test fun profileShowsGuestState() {
+        compose.setContent { KasaneTheme(dynamicColor = false) { Surface(color = MaterialTheme.colorScheme.background) {
+            ProfileScreen(AccountState.Guest, false, {}, {}, {}, {}, {}, {}, {}, {}, {})
+        } } }
+        compose.onNodeWithText("Listening as a guest").assertExists()
+        compose.onNodeWithText("Sign in to YouTube Music").assertExists()
+    }
+
+    @Test fun profileShowsSignedInState() {
+        compose.setContent { KasaneTheme(dynamicColor = false) { Surface(color = MaterialTheme.colorScheme.background) {
+            ProfileScreen(AccountState.SignedIn(cord.kasane.music.auth.AccountIdentity("Kasane Listener", null, "UCx")), true, {}, {}, {}, {}, {}, {}, {}, {}, {})
+        } } }
+        compose.onNodeWithText("Kasane Listener").assertExists()
+        compose.onNodeWithText("Downloaded music").assertExists()
+        compose.onNodeWithText("Kasane Connect").assertExists()
     }
 }

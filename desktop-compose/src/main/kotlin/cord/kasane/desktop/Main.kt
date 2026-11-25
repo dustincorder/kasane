@@ -2,14 +2,15 @@ package cord.kasane.desktop
 
 import cord.kasane.desktop.ui.runUi
 
-import kotlin.system.exitProcess
-
 fun main(args: Array<String>) {
-    if (args.firstOrNull() == "--verifier") exitProcess(cord.kasane.desktop.verify.runVerifierHelper())
-    if (args.firstOrNull() == "--connect-smoke") exitProcess(runConnectSmoke())
-    if (args.firstOrNull() == "--render") exitProcess(runRender(java.io.File(args.getOrElse(1) { "/tmp/kasane-render" }), args.getOrNull(2)?.toDoubleOrNull() ?: 1.0))
-    if (args.firstOrNull() == "--live") exitProcess(runLive(args.drop(1)))
-    if (args.firstOrNull() == "--play") exitProcess(runPlay(args.drop(1)))
-    if (args.firstOrNull() == "--smoke") exitProcess(runSmoke(args.drop(1).joinToString(" ").ifBlank { "Daft Punk Around the World" }))
+    if (args.firstOrNull() == "--verifier") exitDesktop(cord.kasane.desktop.verify.runVerifierHelper())
+    if (args.firstOrNull() == "--login") exitDesktop(cord.kasane.desktop.login.runLoginHelper())
+    if (args.firstOrNull() == "--connect-smoke") exitDesktop(runConnectSmoke())
+    if (args.firstOrNull() == "--render") exitDesktop(runRender(java.io.File(args.getOrElse(1) { "/tmp/kasane-render" }), args.getOrNull(2)?.toDoubleOrNull() ?: 1.0))
+    if (args.firstOrNull() == "--live") exitDesktop(runLive(args.drop(1)))
+    if (args.firstOrNull() == "--play") exitDesktop(runPlay(args.drop(1)))
+    if (args.firstOrNull() == "--idle") exitDesktop(runIdle(args.getOrElse(1) { "60" }.toIntOrNull() ?: 60))
+    if (args.firstOrNull() == "--smoke") exitDesktop(runSmoke(args.drop(1).joinToString(" ").ifBlank { "Daft Punk Around the World" }))
     runUi()
+    exitDesktop(0)
 }

@@ -2,6 +2,7 @@ package cord.kasane.music.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.*
@@ -16,6 +17,7 @@ import cord.kasane.music.MainActivity
 import cord.kasane.music.model.HistoryEntity
 import cord.kasane.music.model.Track
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.drop
 import java.io.IOException
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -33,9 +35,10 @@ class PlaybackService : MediaSessionService() {
     private var radioGeneration = 0
     private val requestedRadioPages = mutableSetOf<String>()
     private val radioFailures = mutableMapOf<String, Int>()
-    private val autoplayListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { preferences, key ->
-        if (key == "autoplay" && ::player.isInitialized) {
-            if (!preferences.getBoolean("autoplay", true) && !radioForced) {
+    private fun observeAutoplay(app: KasaneApplication) = scope.launch {
+        app.settings.autoplayFlow.drop(1).collect { enabled ->
+            if (!::player.isInitialized) return@collect
+            if (!enabled && !radioForced) {
                 radioJob?.cancel(); radioGeneration++
                 requestedRadioPages.remove(radioContinuation ?: "initial:$radioSeed")
                 radioFailures.remove(radioContinuation ?: "initial:$radioSeed")
@@ -90,10 +93,18 @@ class PlaybackService : MediaSessionService() {
     }
     private fun fillRadio() {
         val seed = radioSeed ?: return
+        // Automatic prefetch never touches a dead or forbidden network: local playback must not
+        // stall on timeouts or surface failure notices. An explicit Start radio still tries, so
+        // its failure message explains why nothing was added.
+        val app = application as KasaneApplication
+        if (!radioForced) {
+            if (app.settings.offlineOnly.value) return
+            if (runCatching { getSystemService(ConnectivityManager::class.java)?.activeNetwork }.getOrNull() == null) return
+        }
         if (radioJob?.isActive == true || player.mediaItemCount >= QueuePolicy.LIMIT ||
             !QueuePolicy.shouldPrefetchRadio(nearQueueEnd(), requestedRadioPages.isEmpty(), radioCollectionId != null,
                 player.repeatMode != Player.REPEAT_MODE_OFF,
-                getSharedPreferences("playback", MODE_PRIVATE).getBoolean("autoplay", true), radioForced)) return
+                app.settings.autoplayFlow.value, radioForced)) return
         val token = radioContinuation
         val key = token ?: "initial:$seed"
         if ((radioFailures[key] ?: 0) >= 2 || !requestedRadioPages.add(key)) return
@@ -106,7 +117,7 @@ class PlaybackService : MediaSessionService() {
                 if (generation != radioGeneration || radioSeed != seed) return@launch
                 val contexts = (0 until player.mediaItemCount).map { contextOf(player.getMediaItemAt(it)) }.toSet()
                 if (!QueuePolicy.acceptRadioPage(launchedContext, contexts)) return@launch
-                if (player.repeatMode != Player.REPEAT_MODE_OFF || (!radioForced && !getSharedPreferences("playback", MODE_PRIVATE).getBoolean("autoplay", true))) {
+                if (player.repeatMode != Player.REPEAT_MODE_OFF || (!radioForced && !app.settings.autoplayFlow.value)) {
                     requestedRadioPages.remove(key); return@launch
                 }
                 radioFailures.remove(key)
@@ -159,21 +170,9 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true).build()
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true).build()
-        getSharedPreferences("playback", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(autoplayListener)
+        observeAutoplay(app)
         player.addListener(object : Player.Listener {
-            private fun recordHistory() {
-                if (!player.isPlaying || historyRecordedForWindow) return
-                val item = player.currentMediaItem ?: return
-                historyRecordedForWindow = true
-                val track = mediaItemToTrack(item)
-                scope.launch {
-                    try {
-                        app.database.trackDao().insertTrack(track)
-                        app.database.trackDao().insertHistory(HistoryEntity(trackId = track.id, title = track.title,
-                            artist = track.artist, album = track.album, thumbnailUri = track.thumbnailUri))
-                    } catch (_: Exception) { /* A storage error must never stop playback. */ }
-                }
-            }
+            private fun recordHistory() = maybeRecordHistory(app)
             override fun onTracksChanged(tracks: Tracks) {
                 tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEach { group ->
                     for (index in 0 until group.length) if (group.isTrackSelected(index)) {
@@ -206,6 +205,47 @@ class PlaybackService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)).build()
+        // The history threshold is position-based: poll while playing until the play counts.
+        scope.launch {
+            while (true) {
+                delay(5000)
+                if (::player.isInitialized && player.isPlaying && !historyRecordedForWindow) maybeRecordHistory(app)
+            }
+        }
+    }
+
+    /** A listen counts only past [PlayThreshold] (30 s, or half of a <1 min track) — loads/skips never count. */
+    private fun maybeRecordHistory(app: KasaneApplication) {
+        if (!player.isPlaying || historyRecordedForWindow) return
+        val signedIn = app.accountRepository.session() != null
+        if (!app.settings.historyRecordingEnabled(signedIn)) return
+        val item = player.currentMediaItem ?: return
+        val positionSec = player.currentPosition.coerceAtLeast(0) / 1000.0
+        val durationSec = player.duration.coerceAtLeast(0) / 1000.0
+        if (!cord.kasane.music.playback.PlayThreshold.counts(positionSec, durationSec)) return
+        historyRecordedForWindow = true
+        val track = mediaItemToTrack(item)
+        scope.launch {
+            try {
+                app.database.trackDao().insertTrack(track)
+                app.database.trackDao().insertHistory(HistoryEntity(trackId = track.id, title = track.title,
+                    artist = track.artist, album = track.album, thumbnailUri = track.thumbnailUri,
+                    owner = if (signedIn) "account" else "guest"))
+            } catch (_: Exception) { /* A storage error must never stop playback. */ }
+            if (signedIn) reportWatch(app, track.id, positionSec, durationSec)
+        }
+    }
+
+    /** Ping YouTube's own watch endpoint so the counted play lands in the account history feed. */
+    private fun reportWatch(app: KasaneApplication, videoId: String, positionSec: Double, durationSec: Double) {
+        val template = cord.kasane.music.provider.WatchEndpoints.get(videoId)?.second ?: return
+        val url = cord.kasane.music.playback.WatchReport.url(template, positionSec, durationSec) ?: return
+        val session = app.accountRepository.session() ?: return
+        runCatching {
+            app.httpClient.newCall(okhttp3.Request.Builder().url(url)
+                .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+                .header("Cookie", session.cookie).build()).execute().close()
+        }
     }
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -213,7 +253,6 @@ class PlaybackService : MediaSessionService() {
         if (!player.playWhenReady || player.mediaItemCount == 0 || player.playbackState == Player.STATE_ENDED) stopSelf()
     }
     override fun onDestroy() {
-        getSharedPreferences("playback", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(autoplayListener)
         scope.cancel()
         mediaSession?.let { it.player.release(); it.release() }
         mediaSession = null

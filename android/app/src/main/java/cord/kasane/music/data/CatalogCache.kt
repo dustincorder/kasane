@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 interface CatalogCacheStore {
     suspend fun read(scope: String, key: String): CacheEntry?
     suspend fun write(scope: String, key: String, page: CatalogPage, now: Long)
+    suspend fun delete(scope: String, key: String)
     suspend fun clearScope(scope: String)
     suspend fun evict(olderThan: Long, keep: Int)
 }
@@ -39,6 +40,11 @@ class CatalogCache(private val store: CatalogCacheStore) {
         synchronized(memory) { memory["$scope|$key"] = CacheEntry(page, now) }
         store.write(scope, key, page, now)
         store.evict(now - MAX_AGE_MS, MAX_ENTRIES)
+    }
+
+    suspend fun delete(scope: String, key: String) {
+        synchronized(memory) { memory.remove("$scope|$key") }
+        store.delete(scope, key)
     }
 
     suspend fun clearAccount(session: AccountSession) {
@@ -97,6 +103,9 @@ class RoomCatalogCacheStore(private val dao: KasaneDatabase.CatalogCacheDao) : C
     }
 
     override suspend fun write(scope: String, key: String, page: CatalogPage, now: Long) = dao.save(scope, key, page, now)
+    override suspend fun delete(scope: String, key: String) {
+        dao.deleteShelfItems(scope, key); dao.deleteShelves(scope, key); dao.deletePage(scope, key)
+    }
     override suspend fun clearScope(scope: String) = dao.clearScope(scope)
     override suspend fun evict(olderThan: Long, keep: Int) = dao.evictAndLimit(olderThan, keep)
 }
@@ -160,6 +169,9 @@ class CachedCatalogRepository(
     }
 
     suspend fun cached(scope: String, key: String) = cache.read(scope, key)
+
+    /** Drop one cached page outright (e.g. the user's history feed when they clear history). */
+    suspend fun evict(scope: String, key: String) = cache.delete(scope, key)
 
     /** Preserve cached content, but make only the changed playlist stale. */
     suspend fun playlistChanged(scope: String, playlistId: String) {

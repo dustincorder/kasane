@@ -24,7 +24,7 @@ import cord.kasane.music.ui.theme.KasaneTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DownloadsScreen(app: KasaneApplication, onBack: () -> Unit, onPlay: (Track) -> Unit) {
+fun DownloadsScreen(app: KasaneApplication, onBack: () -> Unit, onPlay: (tracks: List<Track>, index: Int) -> Unit) {
     val records by app.offline.pinned.collectAsState(initial = emptyList())
     val progress by app.offline.progress.collectAsState()
     val usage by app.offline.usage.collectAsState()
@@ -46,12 +46,14 @@ fun DownloadsContent(
     usage: StorageUsage,
     offlineOnly: Boolean,
     onBack: () -> Unit,
-    onPlay: (Track) -> Unit,
+    onPlay: (tracks: List<Track>, index: Int) -> Unit,
     onCancelAll: () -> Unit,
     onRetry: (String) -> Unit,
     onRemove: (String) -> Unit,
 ) {
     val active = records.count { it.audioState == AudioState.QUEUED || it.audioState == AudioState.DOWNLOADING }
+    // Only complete saves are playable; the queue keeps this screen's order.
+    val savedTracks = records.filter { it.audioState == AudioState.SAVED }.mapNotNull { tracks[it.videoId] }
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Saved music") },
@@ -71,7 +73,11 @@ fun DownloadsContent(
             }
         } else LazyColumn(Modifier.fillMaxSize()) {
             items(records, key = { it.videoId }) { record ->
-                DownloadRow(record, tracks[record.videoId], progress[record.videoId], onPlay, onRetry, onRemove)
+                DownloadRow(record, tracks[record.videoId], progress[record.videoId],
+                    onPlay = {
+                        val index = savedTracks.indexOfFirst { it.id == record.videoId }
+                        if (index >= 0) onPlay(savedTracks, index)
+                    }, onRetry, onRemove)
             }
         }
     }
@@ -82,13 +88,13 @@ fun DownloadRow(
     record: AudioFileRecord,
     track: Track?,
     progress: DownloadProgress?,
-    onPlay: (Track) -> Unit,
+    onPlay: () -> Unit,
     onRetry: (String) -> Unit,
     onRemove: (String) -> Unit,
 ) {
     val state = record.audioState
     Row(
-        Modifier.fillMaxWidth().then(if (state == AudioState.SAVED && track != null) Modifier.clickable { onPlay(track) } else Modifier)
+        Modifier.fillMaxWidth().then(if (state == AudioState.SAVED && track != null) Modifier.clickable { onPlay() } else Modifier)
             .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -136,7 +142,7 @@ fun DownloadsPreview() {
                 mapOf("aaaaaaaaaaa" to Track("aaaaaaaaaaa", "Midnight City Lights", "Aether"), "bbbbbbbbbbb" to Track("bbbbbbbbbbb", "Subway Melancholy", "Dustin Corder"),
                     "ccccccccccc" to Track("ccccccccccc", "Synthetic Dawn", "Kuro"), "ddddddddddd" to Track("ddddddddddd", "Locked Format", "Unknown")),
                 mapOf("bbbbbbbbbbb" to DownloadProgress(1_800_000, 4_200_000)), StorageUsage(4_200_000, 90_000_000, 1L shl 30, 1),
-                false, {}, {}, {}, {}, {})
+                false, {}, { _, _ -> }, {}, {}, {})
         }
     }
 }

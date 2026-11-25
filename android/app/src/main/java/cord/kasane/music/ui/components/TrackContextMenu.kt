@@ -47,6 +47,12 @@ class MenuEntry(val label: String, val enabled: Boolean = true, val icon: androi
 /** The id of the track that is playing now; its menu omits "Play", which would do nothing. */
 val LocalCurrentTrackId = staticCompositionLocalOf<String?> { null }
 
+/** Transient app notices (saves, exports, background errors) — rendered as a themed snackbar, never a system Toast. */
+val LocalAppNotice = staticCompositionLocalOf<(String) -> Unit> { {} }
+
+/** Opens the synced-lyrics sheet for any track; null where no lyrics surface exists. */
+val LocalTrackLyrics = staticCompositionLocalOf<((Track) -> Unit)?> { null }
+
 /**
  * Single source of truth for a track's actions. The long-press menu, the trailing overflow button and the
  * TalkBack actions list all render these same entries, so they can never drift apart.
@@ -95,6 +101,7 @@ fun rememberTrackMenuEntries(
             icon = if (localFavorite) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder, group = lib, action = onLocalFavorite))
         links?.album?.let { album -> add(MenuEntry("Go to album", icon = Icons.Outlined.Album, group = go) { navigation?.open?.invoke(album) }) }
         links?.artist?.let { artist -> add(MenuEntry("Go to artist", icon = Icons.Outlined.Person, group = go) { navigation?.open?.invoke(artist) }) }
+        LocalTrackLyrics.current?.let { open -> add(MenuEntry("Lyrics", icon = Icons.Outlined.Lyrics, group = go) { open(track) }) }
         if (youtube) add(MenuEntry("Share", icon = Icons.Outlined.Share, group = go) {
             val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                 type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, "https://music.youtube.com/watch?v=${track.id}")

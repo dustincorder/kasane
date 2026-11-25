@@ -15,7 +15,7 @@ import java.io.IOException
  * profile as Android's HlsPlayerResolver; no cookies, no attestation.
  */
 class IosHlsResolver(private val client: OkHttpClient, private val endpoint: String = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false") {
-    class Manifest(val url: String) {
+    class Manifest(val url: String, val playbackStatsUrl: String? = null, val watchtimeUrl: String? = null) {
         val userAgent: String get() = USER_AGENT
         override fun toString() = "Manifest(url=[redacted])"
     }
@@ -45,7 +45,8 @@ class IosHlsResolver(private val client: OkHttpClient, private val endpoint: Str
         val host = uri?.host.orEmpty()
         if (uri?.scheme != "https" || uri.userInfo != null || !(host == "googlevideo.com" || host.endsWith(".googlevideo.com")))
             throw StreamUnavailableException("NO_DIRECT_STREAM")
-        Manifest(url)
+        val (stats, watchtime) = StreamResponse.playbackTracking(root)
+        Manifest(url, stats, watchtime)
     }
 
     companion object {

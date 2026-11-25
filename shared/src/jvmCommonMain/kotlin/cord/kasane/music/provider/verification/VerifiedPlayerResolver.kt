@@ -1,6 +1,7 @@
 package cord.kasane.music.provider.verification
 
 import cord.kasane.music.provider.ResolvedAudioStream
+import cord.kasane.music.provider.StreamResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -20,6 +21,22 @@ interface VerificationRuntime {
 
     /** User-Agent of the engine that answers the BotGuard challenge; sent with its Create/GenerateIT requests. */
     val userAgent: String
+}
+
+/**
+ * Where the verification engine stands; a cold start (browser boot, player-script download)
+ * takes tens of seconds, so UI distinguishes "preparing" from "broken". Implementations
+ * publish it as a StateFlow; callers may wait for READY before enabling actions.
+ */
+enum class VerificationReadiness {
+    /** No engine running — nothing requested yet or it idled out. */
+    IDLE,
+    /** Helper/browser is booting or replaying saved runtime state. */
+    STARTING,
+    /** Answering calls. */
+    READY,
+    /** The engine could not start (missing WebKitGTK, display, ...); retries may still succeed. */
+    UNAVAILABLE,
 }
 
 /** Outcome of a verified resolve; platforms map it onto their own stream types. */
@@ -101,7 +118,9 @@ class VerifiedPlayerResolver(
             ?: throw VerificationException("BotGuard returned no proof")
         val url = applyVerification(format, prepared, token)
         val expires = url.queryParameter("expire")?.toLongOrNull()?.times(1000) ?: (now() + 5 * 60 * 60 * 1000)
-        return VerifiedResult.Verified(ResolvedAudioStream(url.toString(), AUDIO_ITAG, format.mimeType, expires, format.contentLength), PROFILE)
+        val (stats, watchtime) = StreamResponse.playbackTracking(root)
+        return VerifiedResult.Verified(ResolvedAudioStream(url.toString(), AUDIO_ITAG, format.mimeType, expires, format.contentLength,
+            playbackStatsUrl = stats, watchtimeUrl = watchtime), PROFILE)
     }
 
     private suspend fun ensurePlayer(): Long {

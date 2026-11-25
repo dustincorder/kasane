@@ -8,7 +8,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-class SessionExpiredException : java.io.IOException("Your YouTube Music session expired. Sign in again.")
 
 class AccountRepository(
     private val store: SessionStore,
@@ -19,6 +18,9 @@ class AccountRepository(
     private var identity: AccountIdentity? = null
     private val mutableState = MutableStateFlow<AccountState>(AccountState.Guest)
     val state = mutableState.asStateFlow()
+    /** Sign-in progress for the UI: the wait is explained instead of a dead button (shared SignInPhase). */
+    private val mutablePhase = MutableStateFlow<cord.kasane.music.auth.SignInPhase?>(null)
+    val signInPhase = mutablePhase.asStateFlow()
     @Volatile private var currentSession: AccountSession? = null
     fun session(): AccountSession? = currentSession
 
@@ -29,8 +31,16 @@ class AccountRepository(
         if (stored != null) checkSession(stored)
     }
 
-    fun beginSignIn() { mutableState.value = AccountState.SigningIn }
+    fun beginSignIn() {
+        mutablePhase.value = cord.kasane.music.auth.SignInPhase.STARTING
+        mutableState.value = AccountState.SigningIn
+    }
+    /** The sign-in window reached the user; only then does the button text change meaning. */
+    fun signInWindowOpen() {
+        if (mutableState.value == AccountState.SigningIn) mutablePhase.value = cord.kasane.music.auth.SignInPhase.WINDOW_OPEN
+    }
     fun failSignIn(message: String) {
+        mutablePhase.value = null
         mutableState.value = AccountState.Unavailable(message)
     }
 
@@ -39,6 +49,8 @@ class AccountRepository(
 
     private suspend fun checkSession(session: AccountSession) {
         val ticket = generation.incrementAndGet()
+        // A background restore also validates — only an active sign-in flow reports the phase.
+        if (mutablePhase.value != null) mutablePhase.value = cord.kasane.music.auth.SignInPhase.VALIDATING
         mutableState.value = AccountState.Checking
         try {
             val verified = validate(session)
@@ -47,6 +59,7 @@ class AccountRepository(
             if (ticket != generation.get()) { withContext(Dispatchers.IO) { store.clear() }; return }
             currentSession = session
             identity = verified
+            mutablePhase.value = null
             mutableState.value = AccountState.SignedIn(verified)
         } catch (e: CancellationException) {
             if (ticket != generation.get()) return
@@ -58,12 +71,15 @@ class AccountRepository(
                 withContext(Dispatchers.IO) { store.clear() }
                 currentSession = null
                 identity = null
+                mutablePhase.value = null
                 mutableState.value = AccountState.Expired
             } else {
-                mutableState.value = AccountState.Unavailable("The selected YouTube channel could not be verified. Your previous session is still available.")
+                mutablePhase.value = null
+            mutableState.value = AccountState.Unavailable("The selected YouTube channel could not be verified. Your previous session is still available.")
             }
         } catch (e: Exception) {
             if (ticket != generation.get()) return
+            mutablePhase.value = null
             mutableState.value = AccountState.Unavailable(
                 e.message?.takeIf { it.isNotBlank() } ?: "Could not verify the YouTube Music session. Check your connection and try again."
             )
@@ -79,6 +95,7 @@ class AccountRepository(
 
     fun cancelSignIn() {
         generation.incrementAndGet()
+        mutablePhase.value = null
         mutableState.value = identity?.let(AccountState::SignedIn) ?: AccountState.Guest
     }
 

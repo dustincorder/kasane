@@ -129,6 +129,10 @@ sealed class Frame {
         val queue: List<TrackMeta>? = null,
         val error: String? = null,
         val capabilities: List<String> = emptyList(),
+        /** solo | performer | listener — §Active device. */
+        val role: String = "solo",
+        /** Device id this player accepts as the group performer, or null. */
+        val activeId: String? = null,
     ) : Frame()
 
     @Serializable(with = CommandSerializer::class)

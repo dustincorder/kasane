@@ -49,12 +49,14 @@ The controller sends `{"type":"subscribe"}`. The player then sends a full `state
  "track":TrackMeta|null,"positionMs":0,"durationMs":0,
  "volume":0.0-1.0|null,"shuffle":false,"repeat":"off|all|one",
  "queueIndex":-1,"queue":[TrackMeta]|absent,"error":string|null,
- "capabilities":["seek","volume","queue","handoff"]}
+ "capabilities":["seek","volume","queue","handoff","takeover"],
+ "role":"solo|performer|listener","activeId":"<deviceId>"|null}
 ```
 
 - `rev` increases strictly with every frame. A controller discards any frame whose `rev` is not greater than the last one it received on that connection.
 - `queue` is present only when `queueRev` changed since the previous frame on this connection, and always in the first frame. If a controller sees a new `queueRev` without `queue`, it sends `{"type":"sync"}`, and the player replies with a full frame.
 - The controller extrapolates position while `playback=="playing"` from its own receive time. Clocks are never compared across devices.
+- `role` is this device's current group role; `activeId` is the device it accepts as the group performer (§Active device). Both were added after v1: peers that omit them are treated as `solo`/`null`, and their playback is still arbitrated by the shared rules.
 
 TrackMeta (metadata only, never stream URLs):
 `{"id":"<videoId>|local:…","title":"…","artist":"display string","artists":[{"name":"…","id":"UC…"|null}],"album":{"title":"…","id":"MPRE…"|null}|null,"durationMs":0,"artworkUrl":"https://…"|null,"source":"youtube|local"}`
@@ -76,6 +78,8 @@ The controller sends `{"type":"command","id":"<unique string>","seq":<u64>,"acti
 | `playQueueIndex` / `removeQueueIndex` | `index`, `queueRev` |
 | `moveQueue` | `from`, `to`, `queueRev` |
 | `playTrack` / `addToQueue` / `playNext` | `track` (TrackMeta) |
+| `takeover` | `queue` (TrackMeta[]), `index`, `positionMs`, `playing`, `shuffle`, `repeat`, optional `transferId` |
+| `yield` | `activeId` (the new performer; defaults to the sender's device id) |
 
 Error codes: `unauthorized`, `replayed`, `stale_queue`, `unsupported`, `unsupported_media`, `invalid_args`, `failed`.
 
@@ -86,10 +90,27 @@ Error codes: `unauthorized`, `replayed`, `stale_queue`, `unsupported`, `unsuppor
 4. The source pauses its own playback only after `ok:true`. If there is no result within 30 s, the source keeps playing and reports the failure.
 5. **Pull** ("play here" on the controller) uses the same semantics: the controller starts local playback from the snapshot it holds, and only after that succeeds sends `pause` to the remote player.
 
+## Active device (roles)
+
+A Connect group has **at most one performer** — the device whose speakers play. Others are listeners that control it. Double playback is a protocol violation, not a UI bug.
+
+- **Roles:** `performer` (the accepted playback source), `listener` (controls the performer), `solo` (no group performer). A device reports its role and the `activeId` it accepts in every `state` frame.
+- **Resolution** — deterministic, no cross-device clocks:
+  1. An explicit claim wins while the claimed device is playing: a local play intent, a processed `takeover`, or an adopted peer claim (`state.activeId` naming a device that reports playing).
+  2. Otherwise every device reporting `playing`/`buffering` is a candidate and the **lexicographically smallest device id** keeps playing; the rest must yield. Both sides compute the same loser from the same inputs.
+  3. A claim pending its first `playing` state (takeover in flight) is honoured briefly (≈30 s), then dropped; a claimed device that reports a non-playing state loses the claim immediately.
+- **Push ("play on Desktop"):** the controller sends `takeover` to the target with a snapshot (same payload shape as `handoff`). The target starts playback first and acks; only then does the source pause and demote itself to listener.
+- **Pull ("play here"):** the controller sends `yield` to the current performer naming itself in `activeId`; the performer pauses, demotes to listener and acks; the new device then plays and claims performer.
+- **Local play while remote performs:** the device must `yield` the remote performer BEFORE starting local playback.
+- **In-flight `takeover`** counts as `playing` for the claimed device during the grace window so a second takeover cannot slip in between.
+- A peer that only speaks v1 sends no `role`/`activeId` and answers `takeover`/`yield` with `ack{ok:false,error.code:"unsupported"}`; arbiters fall back to rule 2. (Rust `kasane-connect` is frozen and stays v1 — this section is a Kotlin-only extension over unchanged protocol 1 framing.)
+
 ## Discovery
 - **mDNS service** `_kasane._tcp.local.`: the instance name is the device name, and the port is the server port.
 - **TXT records:** `id=<deviceId>`, `platform=android|linux`, `proto=1`, `fp=<first 16 hex chars of fingerprint>`.
   - They are hints for listing and matching only. Trust is decided by the full TLS fingerprint.
+- **Announcements:** at least 2 unsolicited announcements on start (RFC 6762 §8.3), re-announced **every 60 s** while discoverable and once more on any address/interface change. Presence is symmetric: a device that browses MUST also keep announcing, or peers that join later never learn it exists.
+- **Queries:** responders MUST mask the qtype's high bit (`0x8000`, the unicast-response "QU" flag, RFC 6762 §5.4) before matching question types — Android NSD always sends QU questions, so a responder comparing raw qtypes never answers them. Replies are sent multicast regardless of the flag.
 - **Online status:** a device counts as online if it was resolved within the last 120 s or is currently connected. Devices ignore their own `id`.
 - **Manual entry:** `host[:port]` is persisted as an extra endpoint for that device after its first successful `hello`.
 - **Reconnect:** a controller connected to a trusted device reconnects with backoff of 1, 2, 4 … 30 s. A fresh mDNS resolve of that device triggers an immediate reconnect attempt.

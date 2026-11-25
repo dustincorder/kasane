@@ -39,10 +39,6 @@ data class AudioFileRecord(
     }
 }
 
-enum class AudioState(val key: String) {
-    CACHED("cached"), QUEUED("queued"), DOWNLOADING("downloading"), SAVED("saved"), FAILED("failed");
-    companion object { fun fromKey(key: String) = entries.firstOrNull { it.key == key } ?: FAILED }
-}
 
 @Dao
 interface AudioFileDao {

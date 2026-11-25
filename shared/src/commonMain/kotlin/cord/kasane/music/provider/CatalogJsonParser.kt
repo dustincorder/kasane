@@ -27,14 +27,15 @@ object CatalogJsonParser {
     internal class Byline(val artist: String?, val album: String?)
 
     private val TYPE_LABELS = setOf("Song", "Video", "Single", "EP", "Album", "Playlist", "Artist")
+    private val BYLINE_SEPARATORS = setOf("•", "·")
     private val NOT_AN_ARTIST = Regex("(?i)\\b(plays?|views?|listeners?|subscribers?|songs?|tracks?)\\b|^\\d+(:\\d+)+$")
 
-    /** Splits a byline's runs at its " • " separators into groups: [artists], [album], [year/duration]... */
+    /** Splits a byline's runs at its "•"/"·" separators into groups: [artists], [album], [year/duration]... */
     internal fun bylineParts(source: JsonObject?): List<List<JsonObject>> {
         val groups = mutableListOf<MutableList<JsonObject>>(mutableListOf())
         source?.optJsonArray("runs")?.forEach { run ->
             val obj = run as? JsonObject ?: return@forEach
-            if (obj.optString("text").trim() == "•") groups += mutableListOf<JsonObject>() else groups.last() += obj
+            if (obj.optString("text").trim() in BYLINE_SEPARATORS) groups += mutableListOf<JsonObject>() else groups.last() += obj
         }
         return groups.filter { it.isNotEmpty() }
     }
@@ -42,12 +43,23 @@ object CatalogJsonParser {
     private fun linksTo(part: List<JsonObject>, prefix: String) = part.any {
         it.optJsonObject("navigationEndpoint")?.optJsonObject("browseEndpoint")?.optString("browseId").orEmpty().startsWith(prefix)
     }
+    /** A leading "Song"/"Video"/… group in a byline kept as free text is the row's type, not an artist. */
+    private fun stripTypeLabel(subtitle: String): String {
+        val cut = BYLINE_SEPARATORS.mapNotNull { subtitle.indexOf(it).takeIf { i -> i >= 0 } }.minOrNull()
+        return when {
+            subtitle.trim() in TYPE_LABELS -> ""
+            cut != null && subtitle.substring(0, cut).trim() in TYPE_LABELS -> subtitle.substring(cut + 1).trim()
+            else -> subtitle
+        }
+    }
     /** Artist and album named by a song row, from the structure YouTube sends rather than by guessing at free text. */
     private fun bylineFromParts(parts: List<List<JsonObject>>, extraAlbum: List<JsonObject>? = null): Byline {
-        val useful = parts.dropWhile { part -> part.size == 1 && partText(part) in TYPE_LABELS }
+        // The row type ("Song"/"Video"/…) opens the byline as its own group — one run or several.
+        // A part that links to an artist channel is kept even when its name happens to be a label word.
+        val useful = parts.dropWhile { part -> partText(part) in TYPE_LABELS && !linksTo(part, "UC") }
         val artistPart = useful.firstOrNull()?.takeIf { part -> linksTo(part, "UC") || (partText(part).isNotBlank() && !NOT_AN_ARTIST.containsMatchIn(partText(part)) && !linksTo(part, "MPRE")) }
         val albumPart = useful.drop(if (artistPart != null) 1 else 0).firstOrNull { linksTo(it, "MPRE") } ?: extraAlbum?.takeIf { linksTo(it, "MPRE") }
-        return Byline(artistPart?.let(::partText), albumPart?.let(::partText))
+        return Byline(artistPart?.let { stripTypeLabel(partText(it)) }, albumPart?.let(::partText))
     }
     internal fun rowByline(columns: kotlinx.serialization.json.JsonArray?): Byline {
         fun col(i: Int) = columns?.optJsonObject(i)?.optJsonObject("musicResponsiveListItemFlexColumnRenderer")?.optJsonObject("text")
@@ -110,7 +122,7 @@ object CatalogJsonParser {
         val duration = text(fixed).split(':').mapNotNull { it.toLongOrNull() }
             .fold(0L) { total, n -> total * 60 + n }.toDouble()
         val byline = if (row != null && type == CatalogKind.SONG) rowByline(columns) else null
-        return CatalogItem(id, type, title, if (row != null && type == CatalogKind.SONG) byline?.artist.orEmpty() else text(subtitleObj), ThumbnailJsonParser.bestUrl(body), duration, album = byline?.album)
+        return CatalogItem(id, type, title, if (row != null && type == CatalogKind.SONG) byline?.artist.orEmpty() else stripTypeLabel(text(subtitleObj)), ThumbnailJsonParser.bestUrl(body), duration, album = byline?.album)
     }
     private fun rows(value: JsonElement?, requested: CatalogKind? = null): List<CatalogItem> {
         val result = mutableListOf<CatalogItem>()
@@ -147,7 +159,7 @@ object CatalogJsonParser {
             if (id.isBlank()) null else {
                 // longBylineText is "Artist • Album • Year": split it instead of storing the whole line as the artist.
                 val by = bylineFromParts(bylineParts(it.optJsonObject("longBylineText")))
-                Track(id, text(it.optJsonObject("title")), by.artist ?: text(it.optJsonObject("shortBylineText")), by.album,
+                Track(id, text(it.optJsonObject("title")), by.artist ?: stripTypeLabel(text(it.optJsonObject("shortBylineText"))), by.album,
                     thumbnailUri = ThumbnailJsonParser.bestUrl(it.optJsonObject("thumbnail")))
             }
         }.distinctBy { it.id }

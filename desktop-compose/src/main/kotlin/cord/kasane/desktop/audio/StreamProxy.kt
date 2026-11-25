@@ -47,6 +47,14 @@ class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPla
         }
     }
 
+    /**
+     * Optional write-through cache sink: every byte mpv pulls is also offered to the offline
+     * store, so a fully streamed song replays without the network — Android's CacheDataSource semantic.
+     */
+    @Volatile
+    var streamSink: ((videoId: String, itag: Int, mimeType: String, contentLength: Long,
+        position: Long, bytes: ByteArray, offset: Int, count: Int) -> Unit)? = null
+
     /** Register [stream] and return the loopback URL mpv should open. */
     fun register(videoId: String, stream: ResolvedAudioStream, refresh: (suspend () -> ResolvedAudioStream)? = null): String {
         val token = ByteArray(16).also(random::nextBytes).joinToString("") { "%02x".format(it) }
@@ -112,6 +120,8 @@ class StreamProxy(private val http: OkHttpClient, private val resolver: GuestPla
                     val n = body.read(buffer)
                     if (n < 0) break
                     out.write(buffer, 0, n)
+                    streamSink?.let { sink -> runCatching { sink(entry.videoId, entry.stream.itag,
+                        entry.stream.mimeType, entry.total, position, buffer, 0, n) } }
                     position += n
                     budget.onBytesRead(n)
                 }

@@ -1,6 +1,5 @@
 package cord.kasane.music.ui.components
 
-import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,7 +12,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -34,8 +32,8 @@ private val EmptyPickerState: StateFlow<PlaylistPickerState> = MutableStateFlow(
 fun PlaylistPickerHost() {
     val picker = LocalPlaylistPicker.current
     val state by key(picker) { (picker?.state ?: EmptyPickerState).collectAsState() }
-    val context = LocalContext.current
-    LaunchedEffect(picker) { picker?.messages?.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
+    val notice = LocalAppNotice.current
+    LaunchedEffect(picker) { picker?.messages?.collect { notice(it) } }
     if (state.visible && picker != null) {
         ModalBottomSheet(onDismissRequest = picker::dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface) {

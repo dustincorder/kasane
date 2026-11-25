@@ -1,3 +1,5 @@
+> **Устарело.** Документ не обновлялся вместе с кодом и местами неверен. Актуальное состояние: `docs/ARCHITECTURE.md`, `docs/FEATURE_MATRIX.md` (аудит 2026-11-23).
+
 # Kasane Project Status
 
 - **Status**: First Working Vertical Slice Complete

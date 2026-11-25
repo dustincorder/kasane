@@ -22,5 +22,9 @@ data class HistoryEntity(
     val artist: String,
     val album: String? = null,
     val thumbnailUri: String? = null,
-    val playedAt: Long = System.currentTimeMillis()
+    val playedAt: Long = System.currentTimeMillis(),
+    /** "track" for played songs; "mix" records a radio started from [trackId] so it can be relaunched. */
+    val kind: String = "track",
+    /** "account" or "guest" — guest entries never surface while signed in and vice versa. */
+    val owner: String = "account",
 )

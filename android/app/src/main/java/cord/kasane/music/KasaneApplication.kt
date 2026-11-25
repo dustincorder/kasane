@@ -37,6 +37,9 @@ class KasaneApplication : Application() {
     val remote = kotlinx.coroutines.flow.MutableStateFlow<cord.kasane.music.connect.RemoteController?>(null)
 
     lateinit var ytProvider: YouTubeMusicProvider
+
+    /** Shared client with the offline gate; also used for watch-report pings. */
+    lateinit var httpClient: okhttp3.OkHttpClient
         private set
 
     lateinit var accountRepository: cord.kasane.music.auth.AccountRepository
@@ -51,6 +54,12 @@ class KasaneApplication : Application() {
     lateinit var cachedCatalog: CachedCatalogRepository
         private set
 
+    lateinit var lyrics: cord.kasane.music.lyrics.LyricsRepository
+        private set
+
+    lateinit var metadata: cord.kasane.music.metadata.MetadataRepository
+        private set
+
     override fun onCreate() {
         super.onCreate()
         settings = cord.kasane.music.settings.AppSettings(this)
@@ -61,9 +70,9 @@ class KasaneApplication : Application() {
             applicationContext,
             KasaneDatabase::class.java,
             DATABASE_NAME
-        ).addMigrations(KasaneDatabase.MIGRATION_1_2, KasaneDatabase.MIGRATION_2_3, KasaneDatabase.MIGRATION_3_4, KasaneDatabase.MIGRATION_4_5, KasaneDatabase.MIGRATION_5_6, KasaneDatabase.MIGRATION_6_7).build()
+        ).addMigrations(KasaneDatabase.MIGRATION_1_2, KasaneDatabase.MIGRATION_2_3, KasaneDatabase.MIGRATION_3_4, KasaneDatabase.MIGRATION_4_5, KasaneDatabase.MIGRATION_5_6, KasaneDatabase.MIGRATION_6_7, KasaneDatabase.MIGRATION_7_8, KasaneDatabase.MIGRATION_8_9).build()
 
-        val httpClient = okhttp3.OkHttpClient.Builder()
+        httpClient = okhttp3.OkHttpClient.Builder()
             .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
             .addInterceptor(cord.kasane.music.offline.OfflineGateInterceptor { settings.offlineOnly.value })
@@ -77,10 +86,17 @@ class KasaneApplication : Application() {
         accountLibraryProvider = ytProvider.catalog
         catalogCache = CatalogCache(RoomCatalogCacheStore(database.catalogCacheDao()))
         cachedCatalog = CachedCatalogRepository(catalogCache, ytProvider.catalog)
+        lyrics = cord.kasane.music.lyrics.LyricsRepository(database, httpClient, ytProvider.catalog,
+            { accountRepository.session() })
+        metadata = cord.kasane.music.metadata.MetadataRepository(database, httpClient,
+            { settings.enrichMetadata.value })
         accountRepository = cord.kasane.music.auth.AccountRepository(
             cord.kasane.music.auth.KeystoreSessionStore(this), ytProvider.catalog::identity)
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
-            accountRepository.restore()
+            // An explicit guest must not resurrect a stored account session (shared SessionPolicy).
+            if (cord.kasane.music.auth.SessionPolicy.restoresStoredSession(settings.sessionMode())) {
+                accountRepository.restore()
+            }
         }
 
         offline = cord.kasane.music.offline.OfflineManager(
@@ -89,16 +105,28 @@ class KasaneApplication : Application() {
             trackDao = database.trackDao(),
             stores = cord.kasane.music.offline.AudioStores(this, settings),
             settings = settings,
-            resolve = ytProvider.hlsResolver::resolve,
+            resolve = ytProvider.hlsResolver::resolveForSave,
             network = androidx.media3.datasource.DefaultHttpDataSource.Factory().setConnectTimeoutMs(15000).setReadTimeoutMs(15000),
             http = httpClient,
             scope = applicationScope,
+            onTrackSaved = { id ->
+                database.trackDao().getTrackById(id)?.let { track ->
+                    metadata.enrichIfMissing(track)
+                    runCatching { lyrics.lyricsFor(track) } // persist lyrics offline alongside the audio
+                    // Official release cover (CAA) replaces the YTM thumbnail for offline display.
+                    metadata.metadataFor(track)?.coverArtUrl?.let { url ->
+                        runCatching { offline.saveArtworkFrom(id, url) }
+                    }
+                }
+            },
         )
 
         playbackManager = PlaybackManager(
             context = applicationContext,
             trackDao = database.trackDao(),
-            ytProvider = ytProvider
+            ytProvider = ytProvider,
+            canRecordHistory = { settings.historyRecordingEnabled(accountRepository.session() != null) },
+            historyOwner = { if (accountRepository.session() != null) "account" else "guest" },
         )
 
         applicationScope.launch {

@@ -34,31 +34,17 @@ import kotlin.concurrent.thread
  * HTTP range reads and caching; Kasane owns the queue and only hands it one
  * resolved URL at a time. Nothing here sees account credentials.
  */
-class MpvEngine(private val audioOutput: String? = null) : AutoCloseable {
-    data class Status(
-        val positionSec: Double = 0.0,
-        val durationSec: Double = 0.0,
-        val paused: Boolean = true,
-        val buffering: Boolean = false,
-        val idle: Boolean = true,
-        val volume: Double = 100.0,
-    )
-
-    sealed interface Event {
-        data object Ended : Event
-        data class Failed(val reason: String) : Event
-    }
-
+class MpvEngine(private val audioOutput: String? = null) : AudioEngine {
     private val dir: Path = Files.createTempDirectory("kasane-mpv")
     private val socket: Path = dir.resolve("ipc.sock")
     private val process: Process
     private val channel: SocketChannel
     private val writer: java.io.Writer
     private val json = Json { ignoreUnknownKeys = true }
-    private val _status = MutableStateFlow(Status())
-    val status: StateFlow<Status> = _status.asStateFlow()
-    private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 16)
-    val events: SharedFlow<Event> = _events.asSharedFlow()
+    private val _status = MutableStateFlow(AudioEngine.Status())
+    override val status: StateFlow<AudioEngine.Status> = _status.asStateFlow()
+    private val _events = MutableSharedFlow<AudioEngine.Event>(extraBufferCapacity = 16)
+    override val events: SharedFlow<AudioEngine.Event> = _events.asSharedFlow()
     @Volatile private var closed = false
 
     init {
@@ -93,6 +79,7 @@ class MpvEngine(private val audioOutput: String? = null) : AutoCloseable {
             Thread.sleep(50)
         }
         process.destroy()
+        if (!process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS)) process.destroyForcibly()
         throw IOException("mpv did not open its control socket.")
     }
 
@@ -115,7 +102,7 @@ class MpvEngine(private val audioOutput: String? = null) : AutoCloseable {
         } catch (_: IOException) {
             // Socket closed on shutdown or mpv exit.
         }
-        if (!closed) _events.tryEmit(Event.Failed("The audio engine stopped."))
+        if (!closed) _events.tryEmit(AudioEngine.Event.Failed("The audio engine stopped."))
     }
 
     private fun handle(msg: JsonObject) {
@@ -132,8 +119,8 @@ class MpvEngine(private val audioOutput: String? = null) : AutoCloseable {
                 }
             }
             "end-file" -> when (msg["reason"]?.jsonPrimitive?.contentOrNull) {
-                "eof" -> _events.tryEmit(Event.Ended)
-                "error" -> _events.tryEmit(Event.Failed(msg["file_error"]?.jsonPrimitive?.contentOrNull ?: "playback error"))
+                "eof" -> _events.tryEmit(AudioEngine.Event.Ended)
+                "error" -> _events.tryEmit(AudioEngine.Event.Failed(msg["file_error"]?.jsonPrimitive?.contentOrNull ?: "playback error"))
             }
         }
     }
@@ -149,18 +136,17 @@ class MpvEngine(private val audioOutput: String? = null) : AutoCloseable {
     private fun command(vararg parts: Any) =
         send(JsonArray(parts.map { if (it is Number) JsonPrimitive(it) else if (it is Boolean) JsonPrimitive(it) else JsonPrimitive(it.toString()) }))
 
-    /** Play [url] from [startSec]; [userAgent] must match the client the URL was issued to. */
-    fun load(url: String, userAgent: String?, startSec: Double = 0.0, play: Boolean = true) {
+    override fun load(url: String, userAgent: String?, startSec: Double, play: Boolean) {
         command("set_property", "user-agent", userAgent ?: "")
         command("set_property", "pause", !play)
         _status.update { it.copy(positionSec = startSec, durationSec = 0.0, buffering = true) }
         command("loadfile", url, "replace", -1, "start=${"%.3f".format(java.util.Locale.ROOT, startSec)}")
     }
 
-    fun setPaused(paused: Boolean) = command("set_property", "pause", paused)
-    fun seek(sec: Double) = command("seek", sec, "absolute")
-    fun setVolume(percent: Double) = command("set_property", "volume", percent.coerceIn(0.0, 100.0))
-    fun stop() = command("stop")
+    override fun setPaused(paused: Boolean) = command("set_property", "pause", paused)
+    override fun seek(sec: Double) = command("seek", sec, "absolute")
+    override fun setVolume(percent: Double) = command("set_property", "volume", percent.coerceIn(0.0, 100.0))
+    override fun stop() = command("stop")
 
     override fun close() {
         if (closed) return

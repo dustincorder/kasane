@@ -10,24 +10,24 @@ import androidx.compose.ui.unit.dp
 import cord.kasane.music.ui.theme.*
 import cord.kasane.ui.theme.*
 
-/** Selected = tonal primary container; unselected = outlined. Uses the active color scheme (incl. Material You). */
+/** Selected = tonal primary container; unselected = outlined. Delegates to shared (:ui) implementation. */
 @Composable
-fun KasaneChoiceChip(label: String, selected: Boolean, onClick: () -> Unit,
-    modifier: Modifier = Modifier, enabled: Boolean = true,
-    interactionSource: androidx.compose.foundation.interaction.MutableInteractionSource? = null) {
-    FilterChip(selected = selected, onClick = onClick, enabled = enabled, modifier = modifier, interactionSource = interactionSource,
-        label = { Text(label, style = MaterialTheme.typography.labelLarge) },
-        shape = MaterialTheme.shapes.small,
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            disabledLabelColor = MaterialTheme.colorScheme.outline,
-            disabledSelectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        border = FilterChipDefaults.filterChipBorder(enabled, selected,
-            borderColor = MaterialTheme.colorScheme.outlineVariant,
-            selectedBorderColor = androidx.compose.ui.graphics.Color.Transparent))
+fun KasaneChoiceChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    interactionSource: androidx.compose.foundation.interaction.MutableInteractionSource? = null,
+) {
+    cord.kasane.ui.components.KasaneChoiceChip(
+        label = label,
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        interactionSource = interactionSource,
+    )
 }
 
 @androidx.compose.ui.tooling.preview.Preview(showBackground = true, widthDp = 390)

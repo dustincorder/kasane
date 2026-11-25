@@ -4,6 +4,7 @@ version = "0.1.1-alpha"
 description = "Kasane music player for Linux"
 authors = ["Kasane contributors"]
 edition = "2021"
+default-run = "kasane"
 
 [lib]
 name = "kasane_lib"

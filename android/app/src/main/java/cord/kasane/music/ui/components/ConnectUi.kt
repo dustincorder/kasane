@@ -1,6 +1,8 @@
 package cord.kasane.music.ui.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.TopAppBar
@@ -90,7 +92,8 @@ fun ConnectSheet(
     val currentDevice = current?.let { id -> online.firstOrNull { it.id == id } }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 16.dp)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp).padding(bottom = 16.dp)) {
             Text("Connect", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(12.dp))
             val frame = current?.let(states::get)
@@ -148,17 +151,23 @@ private fun CurrentDeviceCard(
             }
             val volume = if (local) localVolume else dragged ?: remoteVolume
             if (volume != null) {
+                Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.AutoMirrored.Outlined.VolumeDown, null, Modifier.size(20.dp))
-                    Slider(value = volume, onValueChange = {
-                        if (local) {
-                            localVolume = it
-                            audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, (it * max).roundToInt(), android.media.AudioManager.FLAG_SHOW_UI)
-                        } else dragged = it
-                    }, onValueChangeFinished = { if (!local) dragged?.let(onRemoteVolume) },
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-                    Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, Modifier.size(20.dp))
-                    Text("${(volume * 100).roundToInt()} %", style = MaterialTheme.typography.labelLarge,
+                    Icon(Icons.AutoMirrored.Outlined.VolumeDown, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    cord.kasane.ui.components.KasaneSlider(
+                        value = volume,
+                        compact = true,
+                        onValueChange = {
+                            if (local) {
+                                localVolume = it
+                                audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, (it * max).roundToInt(), android.media.AudioManager.FLAG_SHOW_UI)
+                            } else dragged = it
+                        },
+                        onValueChangeFinished = { if (!local) dragged?.let(onRemoteVolume) },
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    )
+                    Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${(volume * 100).roundToInt()}%", style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier.padding(start = 8.dp).width(44.dp))
                 }
             }

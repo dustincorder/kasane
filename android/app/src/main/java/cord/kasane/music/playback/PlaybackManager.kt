@@ -30,10 +30,13 @@ internal fun shouldPauseOnToggle(playWhenReady: Boolean, state: Int, hasError: B
 
 /** A projection of MediaController: no second queue, resolver job, or playback engine. */
 class PlaybackManager(context: Context, private val trackDao: TrackDao,
-    @Suppress("UNUSED_PARAMETER") ytProvider: MusicProvider = YouTubeMusicProvider()) {
+    @Suppress("UNUSED_PARAMETER") ytProvider: MusicProvider = YouTubeMusicProvider(),
+    /** History is opt-in for guests and can be disabled for the account. */
+    private val canRecordHistory: () -> Boolean = { true },
+    private val historyOwner: () -> String = { "account" }) : cord.kasane.music.connect.LocalPlayback {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val mutableState = MutableStateFlow(PlaybackUiState())
-    val uiState = mutableState.asStateFlow()
+    override val uiState = mutableState.asStateFlow()
     private var dismissedError: androidx.media3.common.PlaybackException? = null
     private var dismissedNotice: cord.kasane.music.provider.PlaybackNotices.Notice? = null
     private var controller: MediaController? = null
@@ -57,11 +60,18 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
             }
         }, MoreExecutors.directExecutor())
         scope.launch {
-            while (isActive) { controller?.let(::publish); delay(400) }
+            while (isActive) { controller?.let { publish(it, refreshStructure = false) }; delay(400) }
         }
     }
-    private fun publish(player: Player) {
-        val queue = (0 until player.mediaItemCount).map { PlaybackService.mediaItemToTrack(player.getMediaItemAt(it)) }
+    private var cachedQueue: List<Track> = emptyList()
+    private var cachedUpcoming: List<Int> = emptyList()
+    private fun publish(player: Player, refreshStructure: Boolean = true) {
+        // Timeline-dependent lists are rebuilt on player events and commands, not on every poll tick.
+        if (refreshStructure) {
+            cachedQueue = (0 until player.mediaItemCount).map { PlaybackService.mediaItemToTrack(player.getMediaItemAt(it)) }
+            cachedUpcoming = upcoming(player)
+        }
+        val queue = cachedQueue
         val notice = cord.kasane.music.provider.PlaybackNotices.shared.current.value
             ?.takeIf { it.videoId == player.currentMediaItem?.mediaId && it != dismissedNotice }
         mutableState.value = PlaybackUiState(
@@ -82,7 +92,7 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
                 else "Could not play this track. Check your connection or try another track."
             },
             shuffleEnabled = player.shuffleModeEnabled, repeatMode = player.repeatMode,
-            upcomingOrder = upcoming(player),
+            upcomingOrder = cachedUpcoming,
             canSkipNext = player.hasNextMediaItem(), canSkipPrevious = player.hasPreviousMediaItem() || player.currentPosition > 3000)
     }
     private fun upcoming(player: Player): List<Int> {
@@ -120,14 +130,41 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
             player.seekToDefaultPosition(index)
         player.prepare(); player.play()
     }
-    fun startRadio(track: Track) = startContext(track, "forced")
+    fun startRadio(track: Track) {
+        if (!track.isLocal && canRecordHistory()) scope.launch {
+            runCatching {
+                trackDao.insertHistory(cord.kasane.music.model.HistoryEntity(kind = "mix", trackId = track.id,
+                    title = "Mix — ${track.title}", artist = track.artist, thumbnailUri = track.thumbnailUri,
+                    owner = historyOwner()))
+            }
+        }
+        command { player ->
+            // Radio for the track that is already playing keeps it running: only the future tail is
+            // replaced — the seed item stays at its position instead of restarting (QueuePolicy.anchoredRadio).
+            val index = player.currentMediaItemIndex
+            val anchored = if (player.currentMediaItem?.mediaId == track.id && index >= 0)
+                QueuePolicy.anchoredRadio(
+                    (0 until player.mediaItemCount).map { PlaybackService.mediaItemToTrack(player.getMediaItemAt(it)) },
+                    index, track.id)
+            else null
+            if (anchored != null) {
+                val context = java.util.UUID.randomUUID().toString()
+                val kept = (0 until player.mediaItemCount).take(anchored.startIndex + 1)
+                    .map { player.getMediaItemAt(it) }.toMutableList()
+                kept[index] = PlaybackService.trackToMediaItem(track, radioMode = "forced", playContext = context)
+                player.setMediaItems(kept, index, player.currentPosition.coerceAtLeast(0))
+                player.prepare(); player.play()
+            } else startContextNow(player, track, "forced")
+        }
+    }
     /**
      * A track chosen from search, home or a list outside the queue starts a new playback context: the queue becomes
      * just that track, it is the anchor of a fresh radio, and nothing from the previous queue or ordering is kept.
      * Choosing the track that is already playing only resumes it; pause, resume and seek never rebuild the queue.
      */
-    private fun startContext(track: Track, radioMode: String) = command { player ->
-        if (!QueuePolicy.startsNewContext(player.currentMediaItem?.mediaId, track.id, radioMode == "forced")) { prepareAndPlay(player); return@command }
+    private fun startContext(track: Track, radioMode: String) = command { player -> startContextNow(player, track, radioMode) }
+    private fun startContextNow(player: Player, track: Track, radioMode: String) {
+        if (!QueuePolicy.startsNewContext(player.currentMediaItem?.mediaId, track.id, radioMode == "forced")) { prepareAndPlay(player); return }
         val start = QueuePolicy.newContext(track)
         val context = java.util.UUID.randomUUID().toString()
         player.setMediaItems(start.items.map { PlaybackService.trackToMediaItem(it, radioMode = radioMode, playContext = context) }, start.startIndex, 0)
@@ -140,6 +177,18 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
         command { player ->
             player.setMediaItems(start.items.map { PlaybackService.trackToMediaItem(it, radioMode = "collection", collectionContext = collectionContext) }, start.startIndex, 0)
             player.shuffleModeEnabled = start.shuffle
+            prepareAndPlay(player)
+        }
+    }
+    /** A list played from a chosen position (e.g. a tapped row in Saved music): keeps list order, shuffle off. */
+    fun playTracksAt(tracks: List<Track>, index: Int) {
+        val prepared = QueuePolicy.prepare(tracks)
+        if (prepared.isEmpty()) return
+        val collectionContext = java.util.UUID.randomUUID().toString()
+        command { player ->
+            player.setMediaItems(prepared.map { PlaybackService.trackToMediaItem(it, radioMode = "collection", collectionContext = collectionContext) },
+                index.coerceIn(0, prepared.lastIndex), 0)
+            player.shuffleModeEnabled = false
             prepareAndPlay(player)
         }
     }
@@ -173,6 +222,20 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
             if (existing != player.currentMediaItemIndex) player.moveMediaItem(existing, target.coerceAtMost(player.mediaItemCount - 1))
         } else if (player.mediaItemCount < QueuePolicy.LIMIT) player.addMediaItem(target, PlaybackService.trackToMediaItem(track))
     }
+    /** A whole collection after the current item, in list order; tracks already in the queue are not duplicated. */
+    fun playAllNext(tracks: List<Track>) = command { player ->
+        val present = (0 until player.mediaItemCount).mapTo(HashSet()) { player.getMediaItemAt(it).mediaId }
+        val fresh = tracks.filter { it.id !in present }
+        if (fresh.isNotEmpty()) player.addMediaItems((player.currentMediaItemIndex + 1).coerceAtMost(player.mediaItemCount),
+            fresh.take((QueuePolicy.LIMIT - player.mediaItemCount).coerceAtLeast(0)).map { PlaybackService.trackToMediaItem(it) })
+    }
+    /** A whole collection appended to the queue; tracks already in it are not duplicated. */
+    fun addAllToQueue(tracks: List<Track>) = command { player ->
+        val present = (0 until player.mediaItemCount).mapTo(HashSet()) { player.getMediaItemAt(it).mediaId }
+        tracks.filter { it.id !in present }
+            .take((QueuePolicy.LIMIT - player.mediaItemCount).coerceAtLeast(0))
+            .forEach { player.addMediaItem(PlaybackService.trackToMediaItem(it)) }
+    }
     private fun prepareAndPlay(player: Player) {
         dismissedError = null
         player.prepare()
@@ -184,7 +247,7 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
      * `positionMs`. Resolves to true once the new item is ready; on failure
      * (or timeout) the previous queue is restored so nothing is lost.
      */
-    suspend fun handoffQueue(tracks: List<Track>, index: Int, positionMs: Long,
+    override suspend fun handoffQueue(tracks: List<Track>, index: Int, positionMs: Long,
         playing: Boolean, shuffle: Boolean, repeatMode: Int): Boolean =
         kotlinx.coroutines.withTimeoutOrNull(15_000) {
             kotlinx.coroutines.suspendCancellableCoroutine { cont ->
@@ -258,7 +321,7 @@ class PlaybackManager(context: Context, private val trackDao: TrackDao,
         if (recover) prepareAndPlay(player)
     }
     fun seekTo(positionMs: Long) = command { it.seekTo(positionMs.coerceIn(0, it.duration.coerceAtLeast(0))) }
-    fun pause() = command { it.pause() }
+    override fun pause() = command { it.pause() }
     fun resume() = command { if (it.mediaItemCount > 0) it.play() }
     fun setShuffle(enabled: Boolean) = command { it.shuffleModeEnabled = enabled }
     fun setRepeat(mode: Int) = command { it.repeatMode = mode }

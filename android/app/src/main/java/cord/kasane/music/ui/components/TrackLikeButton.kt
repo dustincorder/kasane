@@ -29,10 +29,11 @@ fun TrackLikeButton(track: Track, localFavorite: Boolean, onLocalToggle: () -> U
     LaunchedEffect(cloud, track.id) { cloud?.refresh(track.id, force = refreshOnEnter) }
     val liked = if (cloud == null) localFavorite else state == CloudLikeState.LIKED
     val unknown = cloud != null && state in setOf(CloudLikeState.UNKNOWN, CloudLikeState.LOADING)
-    val label = if (cloud == null) "Local favorite" else if (unknown) "YouTube Music like status unknown; like this track"
+    // Likes exist only as YouTube Music ratings — without a signed-in online session the action is unavailable.
+    val label = if (cloud == null) "Likes need a signed-in YouTube Music session" else if (unknown) "YouTube Music like status unknown; like this track"
         else if (liked) "Remove YouTube Music like" else "Like on YouTube Music"
-    IconButton(modifier = Modifier.semantics { contentDescription = label; stateDescription = if (cloud == null) { if (liked) "Saved" else "Not saved" } else state.name },
-        enabled = track.id !in pending, onClick = { if (cloud != null) cloud.toggle(track.id) else onLocalToggle() }) {
+    IconButton(modifier = Modifier.semantics { contentDescription = label; stateDescription = if (cloud == null) "Unavailable" else state.name },
+        enabled = cloud != null && track.id !in pending, onClick = { if (cloud != null) cloud.toggle(track.id) else onLocalToggle() }) {
         if (cloud != null && state == CloudLikeState.LOADING) CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp)
         else Icon(
             if (unknown) Icons.Default.QuestionMark else if (cloud != null && state == CloudLikeState.DISLIKED) Icons.Default.ThumbDown

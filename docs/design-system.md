@@ -1,75 +1,93 @@
-# Android design system (current)
+# Kasane — Design System (normative)
 
-Material 3, dark charcoal, one cold-blue accent. Source of truth: `android/app/.../ui/theme/Theme.kt`.
+Material 3, dark charcoal surfaces, one accent. Applies to both Kotlin clients:
+Android `:app` and Compose Desktop `:desktop`. Source of truth in code:
+`android/app/.../ui/theme/Theme.kt` and `shared-ui` theme modules.
+Principles behind these tokens: `docs/UX_GUIDELINES.md` §8.
+
+## Color tokens
 
 | Role | Value | Use |
 |---|---|---|
 | Background / surface | `#0F1012` | App base |
-| Surface container low/default/high | `#151619` / `#181A1E` / `#1B1D21` | Sheets, navigation bar, mini-player |
+| Surface container low/default/high | `#151619` / `#181A1E` / `#1B1D21` | Sheets, nav bar/rail, mini-player/player bar |
 | Primary (`KasaneBlue`) | `#8AB6F9` | Active track, progress, play button, selected states |
-| Primary container | `#1C2E47` | Selected chips and navigation indicator |
+| Primary container | `#1C2E47` | Selected chips, navigation indicator |
 | On-surface / variant | `#D9DCE2` / `#A6ACB6` | Text, metadata |
-| Outline / variant | `#3A3E45` / `#26292E` | Dividers and borders |
+| Outline / variant | `#3A3E45` / `#26292E` | Dividers, borders |
+| Error | Material 3 `error` role | Error text, destructive markers |
 
-Rules: use `MaterialTheme.colorScheme` roles (never raw constants) so optional Material You accents work; shapes 4/8/12/16/24 dp, content 8 dp, player/sheets larger; sans-serif only; overflow buttons on artwork keep a 48 dp touch target with a 26 dp scrim chip and 16 dp glyph; no purple gradients, glows or oversized cards. Dynamic color only recolours accent roles; surfaces stay charcoal for stable contrast.
+Rules:
+- Always use `MaterialTheme.colorScheme` roles — never raw constants — so optional
+  dynamic accents work. Dynamic color recolours accent roles only; surfaces stay
+  charcoal for stable contrast.
+- One accent: `#8AB6F9` (or the dynamic equivalent). No secondary accent hues,
+  no per-screen brand colors.
+- Contrast ≥ WCAG AA for every text/background pair (blue-on-charcoal passes).
 
-The sections below describe the legacy Rose palette still used by the Linux desktop until it is redesigned.
+## Typography
 
-# Kasane — Design System
+Sans-serif only (system Sans on Android, Inter/system on desktop). Monospace is
+forbidden in user-facing text — it is a debug-font smell.
 
-Дизайн-система музыкального плеера **Kasane (カサネ)**.
+| Style | Use |
+|---|---|
+| `headlineLarge` | Detail-page title (album/playlist/artist) |
+| `titleLarge` | Screen headers on desktop, section titles on Home |
+| `titleMedium` | Top-bar titles, dialog/sheet titles |
+| `titleSmall` | Track names in rows, list headlines |
+| `bodyMedium` | Artists, descriptions, supporting text |
+| `bodySmall` / `labelMedium` | Captions, durations, shelf metadata, chips |
 
----
+No custom font sizes per screen. Ellipsize (`TextOverflow.Ellipsis`) instead of
+shrinking type.
 
-## 1. Цветовая палитра (Kasane Brand Identity)
+## Shape, spacing, elevation
 
-Фирменная палитра Kasane основана на официальном логотипе (спираль) и сочетает глубокие тёмные тона с насыщенными красно-розовыми акцентами:
+- Shape scale: **4 / 8 / 12 / 16 / 24 dp**. Track artwork 6–8 dp, cards/sheets 12–16 dp,
+  dialogs 24–28 dp. When unsure — the smaller radius.
+- Spacing grid: 4 dp steps; standard gutters 16 dp (Android) / 24 dp (desktop);
+  list row padding 12–16 dp; section gap 8–12 dp + divider.
+- Elevation: tonal only (surface-container-*). No drop shadows except the floating
+  mini-player; no glows.
+- Touch targets ≥ 48 dp (Android); desktop hit areas ≥ 32 dp with hover feedback.
 
-| Название токена | Hex | Применение |
+## Shared components
+
+| Component | Rule |
+|---|---|
+| `TrackRow` | 56–64 dp row: artwork, title, artist, duration; like + overflow at trailing. Current track = accent title + playing indicator. |
+| `ShelfRow` | Horizontal carousel of artwork cards; title row + optional "More". Same on both platforms. |
+| Detail header | Moderate artwork (112–168 dp Android, ~220 dp desktop) beside title/byline/facts; action row: **Play** (primary), Shuffle, overflow. No giant hero circles. |
+| Mini-player / PlayerBar | Persistent strip above nav (Android) / bottom bar with volume + queue (desktop); thin progress line on top edge; tap → Now Playing. |
+| Queue sheet/panel | Row shows drag handle only; actions via long-press/menu; swipe-to-remove (Android). "Up next" as plain list, no cards. |
+| Menus & pickers | Modal bottom sheets on Android; context menus + dialogs on desktop. Never popups anchored to top-edge on Android. |
+| Empty / error | Centered single message + one action button (Retry, Sign in, etc.). No illustrations unless they carry meaning. |
+
+## Forbidden decorations
+
+Purple/neon gradients, glows, glassmorphism, ambient background art, oversized
+rounded cards, monochrome monospace labels, animated equalizers that convey no
+state. If a visual element does not encode information or affordance, remove it.
+
+## Platform adaptation
+
+| | Android | Desktop |
 |---|---|---|
-| **Kasane Rose** (`accent-highlight`) | `#EF5C7D` | Фокусированные иконки, индикаторы прогресса, активные табы, выделенный текст |
-| **Kasane Crimson** (`accent-active`) | `#D52F58` | Первичные кнопки действия (Play/Pause FAB), бейджи, акцентные обводки |
-| **Kasane Wine** | `#790F32` | Градиенты, тени, второстепенные акценты, состояния Pressed |
-| **Kasane Wine Subtle** (`accent-subtle`) | `#2B121B` | Фоновые плашки активных элементов, контейнеры чипов, подложка мини-плеера |
-| **Background Dark** | `#0C0D10` | Основной фон приложения |
-| **Surface Dark** | `#14151B` | Карточки треков, выпадающие панели, нижняя панель навигации |
-| **Text Primary** | `#FFFFFF` | Названия треков, основные заголовки |
-| **Text Secondary** | `#9E9E9E` | Имена исполнителей, длительность, второстепенные метки |
-
-### Контрастность и доступность (WCAG)
-- Контраст `#EF5C7D` на фоне `#0C0D10` составляет **6.01:1**, что полностью удовлетворяет стандарту **WCAG AA** для обычного текста и графических элементов интерфейса.
+| Global nav | Bottom navigation bar (Home · Search · Library) | NavigationRail + Settings entry |
+| Account access | Avatar in Home top bar | Avatar atop NavigationRail |
+| Secondary actions | Long-press → bottom sheet | Right-click context menu, hover reveal |
+| Window adaptation | Single column; 2-pane at ≥600 dp | 2-pane detail (artwork left, tracks right) at ≥1200 dp; min window 720×520 dp |
+| Player | Bottom-sheet Now Playing + mini-player | Persistent PlayerBar + Now Playing overlay + side queue panel |
+| Input | Swipe, pull-to-refresh, 48 dp targets | Shortcuts (Space, Ctrl+←/→, Ctrl+F, Esc), Ctrl± scale, scroll |
 
 ---
 
-## 2. Типографика
+## Appendix — legacy Rose palette (frozen Tauri client only)
 
-- Основное семейство шрифтов: **Sans-Serif** (Inter / Roboto / System Sans-Serif).
-- **Правило**: Запрещено случайное использование `Monospace` для названий треков, исполнителей и временных меток. Моноширинный шрифт допустим исключительно для технической отладки.
+The Rust/Svelte client is frozen (decision D1) and keeps its old palette — do not
+port it to Kotlin targets, do not redesign under the frozen policy:
 
-| Стиль | Размер / Вес | Назначение |
-|---|---|---|
-| `titleLarge` | 22sp / SemiBold | Названия альбомов, заголовки разделов Home |
-| `titleMedium` | 18sp / Medium | Заголовки экранов и модальных панелей |
-| `bodyLarge` | 16sp / Normal | Названия треков в списках |
-| `bodyMedium` | 14sp / Normal | Имена исполнителей, описания |
-| `labelMedium` | 12sp / Medium (Sans-Serif) | Временные метки (0:00 / 3:15), чипы категорий |
-| `labelSmall` | 11sp / Normal (Sans-Serif) | Вторичные метаданные, битрейт, формат |
-
----
-
-## 3. Компоненты UI
-
-### 3.1. Строка трека (`TrackRow`)
-- Высота: 56dp.
-- Обложка: скругление 6dp (или круг для исполнителей).
-- Активное состояние: название окрашивается в `KasaneRose` (`#EF5C7D`), рядом отображается анимированный индикатор воспроизведения.
-
-### 3.2. Мини-плеер (`MiniPlayer`)
-- Расположение: плавающий блок над нижней навигацией.
-- Форма: закругленный прямоугольник (12dp), с тонкой акцентной линией прогресса `KasaneRose` в верхней кромке.
-- Контролы: Play/Pause, кнопка закрытия или перехода к следующему треку.
-
-### 3.3. Экран текущего трека (`NowPlayingSheet`)
-- Разворачивается снизу (BottomSheet).
-- Крупная обложка альбома с мягкой тенью цвета `KasaneWine`.
-- Скруббер с ползунком `KasaneRose`.
+`Kasane Rose #EF5C7D` · `Kasane Crimson #D52F58` · `Kasane Wine #790F32` ·
+`Wine Subtle #2B121B` · `Background #0C0D10` · `Surface #14151B` ·
+`Text Primary #FFFFFF` · `Text Secondary #9E9E9E`.

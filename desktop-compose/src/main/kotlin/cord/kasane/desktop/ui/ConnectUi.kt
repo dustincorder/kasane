@@ -1,10 +1,12 @@
 package cord.kasane.desktop.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -67,7 +69,12 @@ fun DeviceButton(app: DesktopApp, onAddDevice: () -> Unit) {
             Icon(Icons.Outlined.Devices, if (name != null) "Playing on $name" else "Connect to a device",
                 tint = if (name != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = MaterialTheme.shapes.medium,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
             ConnectPanel(app, remote, onAddDevice = { open = false; onAddDevice() }, onPicked = { open = false })
         }
     }
@@ -98,12 +105,18 @@ private fun ConnectPanel(app: DesktopApp, remote: DesktopRemote, onAddDevice: ()
                 }
                 var dragged by remember(target) { mutableStateOf<Float?>(null) }
                 val volume = dragged ?: if (current != null) states[current.id]?.volume ?: 1f else local.volume
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.AutoMirrored.Outlined.VolumeDown, null, Modifier.size(18.dp))
-                    Slider(volume, { dragged = it; if (current == null) app.player.setVolume(it) },
-                        onValueChangeFinished = { if (current != null) dragged?.let(remote::setVolume); dragged = null }, modifier = Modifier.weight(1f))
-                    Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, Modifier.size(18.dp))
-                    Text("${(volume * 100).toInt()} %", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp).width(44.dp))
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.AutoMirrored.Outlined.VolumeDown, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    cord.kasane.ui.components.KasaneSlider(
+                        value = volume,
+                        compact = true,
+                        onValueChange = { dragged = it; if (current == null) app.player.setVolume(it) },
+                        onValueChangeFinished = { if (current != null) dragged?.let(remote::setVolume); dragged = null },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${(volume * 100).toInt()}%", style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(42.dp))
                 }
             }
         }
@@ -162,9 +175,9 @@ fun ConnectSettings(app: DesktopApp) {
             override fun forget(deviceId: String) { app.scope.launchCatching { connect.manager.unpair(deviceId) } }
         }
     }
-    Column(Modifier.widthIn(max = 640.dp)) {
+    Column(Modifier.widthIn(max = 720.dp).fillMaxSize()) {
         // The list scrolls with the settings page, so it gets a fixed viewport instead of an unbounded height.
-        ConnectDevicesContent(devices, prefs.connectEnabled, { app.setConnectEnabled(it) }, actions, Modifier.height(480.dp))
+        ConnectDevicesContent(devices, prefs.connectEnabled, { app.setConnectEnabled(it) }, actions, Modifier.weight(1f))
         error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
     }
 }

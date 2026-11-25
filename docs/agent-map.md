@@ -1,3 +1,5 @@
+> **Устарело.** Документ не обновлялся вместе с кодом и местами неверен. Актуальное состояние: `docs/ARCHITECTURE.md`, `docs/FEATURE_MATRIX.md` (аудит 2026-11-23).
+
 # Kasane — Agent Map
 
 Карта кодовой базы Kasane (カサネ) для AI-агентов (Codex, Antigravity CLI) и разработчиков.

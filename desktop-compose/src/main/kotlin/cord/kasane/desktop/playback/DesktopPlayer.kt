@@ -1,12 +1,10 @@
 package cord.kasane.desktop.playback
 
-import cord.kasane.desktop.audio.MpvEngine
-import cord.kasane.desktop.audio.StreamProxy
+import cord.kasane.desktop.audio.AudioEngine
 import cord.kasane.desktop.library.LocalLibrary
 import cord.kasane.music.model.Track
 import cord.kasane.music.playback.QueuePolicy
-import cord.kasane.music.provider.GuestPlayerResolver
-import cord.kasane.music.provider.SharedOnlineCatalog
+import cord.kasane.music.provider.RadioPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -16,8 +14,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.IOException
-import cord.kasane.music.provider.verification.VerifiedResult
 import java.util.UUID
+
+/** Radio paging for radio contexts; `SharedOnlineCatalog::radioPage` in the app, a fake in tests. */
+fun interface RadioSource {
+    suspend fun radioPage(videoId: String, continuation: String?): RadioPage
+}
 
 enum class RepeatMode { OFF, ALL, ONE }
 
@@ -46,13 +48,14 @@ data class PlayerState(
  */
 class DesktopPlayer(
     private val scope: CoroutineScope,
-    private val engine: MpvEngine,
-    private val resolver: GuestPlayerResolver,
-    private val proxy: StreamProxy,
-    private val hls: cord.kasane.music.provider.IosHlsResolver,
-    private val verifiedResolver: cord.kasane.music.provider.verification.VerifiedPlayerResolver? = null,
-    private val catalog: SharedOnlineCatalog,
+    private val engine: AudioEngine,
+    private val streams: StreamSource,
+    private val radio: RadioSource,
     private val library: LocalLibrary,
+    /** Fired when a track actually begins loading, for the write-through offline cache. */
+    private val onPlayed: (Track) -> Unit = {},
+    /** Fired once per track when the listen crosses the shared count threshold (history + watch report). */
+    private val onCountedPlay: (track: Track, stream: PlaybackStream?, positionSec: Double, durationSec: Double) -> Unit = { _, _, _, _ -> },
 ) {
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state.asStateFlow()
@@ -65,12 +68,14 @@ class DesktopPlayer(
     private var loadJob: Job? = null
     private var unshuffled: List<Track>? = null
     private var refreshedFor: String? = null
+    /** The stream that fed the engine for the current track; its tracking URLs report the counted play. */
+    private var lastStream: PlaybackStream? = null
+    /** Track ids already counted toward history this run — a repeat does not recount. */
+    private val countedPlays = mutableSetOf<String>()
     /** Which path served the current track (verified, ios-hls, guest); for diagnostics. */
-    @Volatile var lastSource: String = ""
-        private set
+    val lastSource: String get() = streams.lastSource
     /** Why the verified path was skipped for the current track, if it was (no URLs or credentials in it). */
-    @Volatile var lastSourceNote: String = ""
-        private set
+    val lastSourceNote: String get() = streams.lastSourceNote
 
     init {
         scope.launch {
@@ -81,13 +86,21 @@ class DesktopPlayer(
                     volume = (s.volume / 100.0).toFloat())
                 }
                 if (!s.idle && !s.buffering) _state.update { it.copy(isLoading = false) }
+                // A listen counts once the position crosses the shared threshold — never on load or a skip.
+                val track = _state.value.current
+                if (track != null && !s.idle && track.id !in countedPlays &&
+                    cord.kasane.music.playback.PlayThreshold.counts(s.positionSec, track.durationSeconds)) {
+                    countedPlays += track.id
+                    library.recordPlayed(track)
+                    onCountedPlay(track, lastStream, s.positionSec, s.durationSec.takeIf { it > 0 } ?: track.durationSeconds)
+                }
             }
         }
         scope.launch {
             engine.events.collect { event ->
                 when (event) {
-                    MpvEngine.Event.Ended -> onEnded()
-                    is MpvEngine.Event.Failed -> onFailed(event.reason)
+                    AudioEngine.Event.Ended -> onEnded()
+                    is AudioEngine.Event.Failed -> onFailed(event.reason)
                 }
             }
         }
@@ -101,13 +114,21 @@ class DesktopPlayer(
     }
 
     fun startRadio(track: Track) {
-        val start = QueuePolicy.newContext(track)
+        val s = _state.value
         unshuffled = null
-        setQueue(start.items, start.startIndex, shuffle = false)
+        if (QueuePolicy.anchoredRadio(s.queue, s.index, track.id) != null) {
+            // Radio on the playing track: it keeps playing at its position, the feed replaces the tail.
+            _state.update { it.copy(queue = it.queue.take(it.index + 1), shuffle = false, error = null) }
+        } else {
+            val start = QueuePolicy.newContext(track)
+            setQueue(start.items, start.startIndex, shuffle = false)
+        }
         val context = UUID.randomUUID().toString()
         radioContext = context
         radioSeed = track
         radioContinuation = null
+        // A mix entry in history, relaunchable later like on Android.
+        library.recordPlayed(track, kind = "mix")
         loadRadio(context, track.id, null)
     }
 
@@ -129,7 +150,7 @@ class DesktopPlayer(
     private fun loadRadio(context: String, videoId: String, continuation: String?) {
         radioJob?.cancel()
         radioJob = scope.launch {
-            val page = try { catalog.radioPage(videoId, continuation) } catch (e: CancellationException) { throw e } catch (_: Exception) { return@launch }
+            val page = try { radio.radioPage(videoId, continuation) } catch (e: CancellationException) { throw e } catch (_: Exception) { return@launch }
             if (!QueuePolicy.acceptRadioPage(context, setOf(radioContext))) return@launch
             radioContinuation = page.continuation
             _state.update { s ->
@@ -155,32 +176,15 @@ class DesktopPlayer(
         _state.update { it.copy(isLoading = true, error = null, positionSec = startSec, durationSec = track.durationSeconds) }
         loadJob = scope.launch {
             try {
-                // 1. Verified WEB_REMIX (BotGuard in system WebKitGTK, the same verifier as Android): full length.
-                // 2. iOS HLS when YouTube offers it. 3. Guest direct stream, which YouTube may cut after its
-                // first part (detected in onEnded, never skipped silently).
-                val verified = verifiedResolver?.let { v -> runCatching { v.resolve(track.id) }
-                    .onFailure { lastSourceNote = "verification error: ${it.message}" }.getOrNull() }
-                if (verified is VerifiedResult.Unavailable) lastSourceNote = "verification unavailable: ${verified.code} ${verified.reason}"
+                val stream = streams.resolve(track.id, forceRefresh)
                 if (_state.value.current?.id != track.id) return@launch
-                if (verified is VerifiedResult.Verified) {
-                    lastSource = "verified"
-                    engine.load(proxy.register(track.id, verified.audio) {
-                        (verifiedResolver?.resolve(track.id) as? VerifiedResult.Verified)?.audio ?: throw IOException("verification expired")
-                    }, null, startSec, play)
-                    library.recordPlayed(track)
-                    maybeExtendRadio()
-                    return@launch
+                lastStream = stream
+                engine.load(stream.url, stream.userAgent, startSec, play)
+                if (streams.lastSource != "verified" && streams.lastSource != "offline") {
+                    val why = streams.lastSourceNote.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+                    notify("Verified playback unavailable$why — playing the ${streams.lastSource} stream instead.")
                 }
-                val manifest = runCatching { hls.resolve(track.id) }.getOrNull()
-                if (_state.value.current?.id != track.id) return@launch
-                if (manifest != null) { lastSource = "ios-hls"; engine.load(manifest.url, manifest.userAgent, startSec, play) }
-                else {
-                    lastSource = "guest"
-                    val stream = resolver.resolve(track.id, forceRefresh = forceRefresh)
-                    if (_state.value.current?.id != track.id) return@launch
-                    engine.load(proxy.register(track.id, stream), null, startSec, play)
-                }
-                library.recordPlayed(track)
+                onPlayed(track)
                 maybeExtendRadio()
             } catch (e: CancellationException) { throw e
             } catch (e: IOException) {
@@ -192,9 +196,9 @@ class DesktopPlayer(
     private fun onEnded() {
         val s = _state.value
         val id = s.current?.id
-        if (id != null && proxy.consumeCutOff(id)) {
-            _state.update { it.copy(isPlaying = false, isLoading = false, error = "YouTube stopped this track after its first part. " +
-                "Full-length playback on this desktop build needs verified, signed-in playback, which is not available here yet.") }
+        if (id != null && streams.consumeCutOff(id)) {
+            val why = lastSourceNote.takeIf { it.isNotBlank() }?.let { " Verified playback was unavailable ($it)." }.orEmpty()
+            _state.update { it.copy(isPlaying = false, isLoading = false, error = "YouTube stopped this guest stream after its first part.$why") }
             return
         }
         when {
@@ -272,8 +276,23 @@ class DesktopPlayer(
 
     fun removeAt(index: Int) {
         val s = _state.value
-        if (index !in s.queue.indices || index == s.index) return
-        _state.update { it.copy(queue = s.queue.filterIndexed { i, _ -> i != index }, index = if (index < s.index) s.index - 1 else s.index) }
+        if (index !in s.queue.indices) return
+        if (index != s.index) {
+            _state.update { it.copy(queue = s.queue.filterIndexed { i, _ -> i != index }, index = QueuePolicy.indexAfterRemove(s.index, index)) }
+            return
+        }
+        // Removing the track that is playing: the item after it takes its place, like Media3 on Android.
+        val queue = s.queue.filterIndexed { i, _ -> i != index }
+        if (queue.isEmpty()) {
+            engine.stop()
+            unshuffled = null
+            _state.update { it.copy(queue = emptyList(), index = -1, isPlaying = false, isLoading = false, positionSec = 0.0, durationSec = 0.0) }
+            return
+        }
+        val nextIndex = index.coerceAtMost(queue.lastIndex)
+        _state.update { it.copy(queue = queue, index = nextIndex) }
+        refreshedFor = null
+        loadCurrent(0.0, play = s.isPlaying || s.isLoading)
     }
 
     fun move(from: Int, to: Int) {

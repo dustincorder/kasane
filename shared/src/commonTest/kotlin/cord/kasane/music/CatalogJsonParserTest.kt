@@ -50,6 +50,26 @@ class CatalogJsonParserTest {
         assertEquals(cord.kasane.music.provider.CloudLikeState.UNKNOWN,
             cord.kasane.music.provider.CloudLikeJsonParser.parse(root, "missing"))
     }
+    @Test fun rowTypeLabelsNeverBecomeTheArtist() {
+        // A song surfaced in a video search keeps its whole subtitle as the byline; "Song" is the row's type, not an artist.
+        val videoRow = node("""{"musicResponsiveListItemRenderer":{"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"А чё чё","navigationEndpoint":{"watchEndpoint":{"videoId":"fixture0002"}}}]}}},{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Song"},{"text":" • "},{"text":"Бьянка"},{"text":" • "},{"text":"Album"}]}}}]}}""")
+        val item = CatalogJsonParser.item(videoRow, CatalogKind.VIDEO)
+        assertEquals("Бьянка • Album", item?.subtitle)
+        // The same label at the start of a radio row's fallback byline is dropped too.
+        val radio = CatalogJsonParser.radio(node("""{"contents":[{"playlistPanelVideoRenderer":{"videoId":"fixture0003","title":{"simpleText":"T"},"longBylineText":{"runs":[{"text":"Song • Бьянка"}]},"shortBylineText":{"runs":[{"text":"Song • Бьянка"}]}}}]}"""))
+        assertEquals("Бьянка", radio.tracks.single().artist)
+    }
+    @Test fun typeLabelsWithOtherSeparatorsAndRunsNeverBecomeTheArtist() {
+        // A "·"-separated label group is still the row's type, not the artist.
+        val dotted = CatalogJsonParser.radio(node("""{"contents":[{"playlistPanelVideoRenderer":{"videoId":"fixture0004","title":{"simpleText":"T"},"longBylineText":{"runs":[{"text":"Song"},{"text":"·"},{"text":"Бьянка"}]},"shortBylineText":{"runs":[{"text":"Song · Бьянка"}]}}}]}"""))
+        assertEquals("Бьянка", dotted.tracks.single().artist)
+        // A label group spread over several runs is dropped as a whole.
+        val multiRun = node("""{"musicResponsiveListItemRenderer":{"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"T2","navigationEndpoint":{"watchEndpoint":{"videoId":"fixture0005"}}}]}}},{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Song"},{"text":" "},{"text":" • "},{"text":"Бьянка"}]}}}]}}""")
+        assertEquals("Бьянка", CatalogJsonParser.item(multiRun, CatalogKind.SONG)?.subtitle)
+        // A free-text byline that starts with the label and a "·" separator strips the label only.
+        val twoRow = node("""{"musicTwoRowItemRenderer":{"title":{"simpleText":"T3"},"subtitle":{"runs":[{"text":"Song · Бьянка · 2024"}]},"navigationEndpoint":{"watchEndpoint":{"videoId":"fixture0006"}}}}""")
+        assertEquals("Бьянка · 2024", CatalogJsonParser.item(twoRow)?.subtitle)
+    }
     @Test fun malformedFieldsAndJsonNullDoNotInventMetadata() {
         val root = node("""{"musicTwoRowItemRenderer":{"title":null,"navigationEndpoint":42},"unrelated":{"url":"https://images.invalid/wrong.jpg"}}""")
         assertNull(CatalogJsonParser.item(root))

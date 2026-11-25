@@ -64,8 +64,8 @@ Kotlin, and a JNI bridge would cost more than the ~300 lines of mpv + proxy.
 | Queue view / reorder / remove | drag-and-drop sheet | panel with arrows, remove | drag reorder in shared UI |
 | Liked songs, history | Room | JSON file | move persistence behind a shared repository (SQLDelight or Room KMP) |
 | Account sign-in, cloud likes, account playlists | yes | **no** | needs a desktop login WebView and a Secret Service store; the catalog side is already shared |
-| Age-restricted / verified (WEB_REMIX) playback | yes | **no** (guest ANDROID_VR only) | follows sign-in; `VerifiedPlayerResolver` needs a desktop JS runtime |
-| iOS HLS fallback | yes | **no** | move `HlsPlayerResolver` to shared (remove `BuildConfig` dependency) |
+| Verified (WEB_REMIX, BotGuard) playback | yes | yes | shared `VerifiedPlayerResolver` + `C/verify/` WebKitGTK helper (`VerifierProcess` re-primes a restarted helper); sign-in still needed for account library |
+| iOS HLS fallback | yes | wired (shared `IosHlsResolver`) | resolves, but the iOS client no longer returns `hlsManifestUrl` anonymously (live probe) |
 | Offline downloads | yes | no | shared offline policy + desktop storage |
 | Lyrics, AutoMix/crossfade | partial | no | `mix/` is shared; needs an engine with two outputs |
 | Material You dynamic colour | wallpaper colours | seed accent + light/dark from KDE/GNOME | same `material-kolor` tonal palettes |

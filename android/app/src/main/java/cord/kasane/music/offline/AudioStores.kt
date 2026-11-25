@@ -64,4 +64,7 @@ class AudioStores(context: Context, private val settings: AppSettings) {
     /** Writer for explicit saves: writes to [saved], reads already-streamed bytes from temp before using the network. */
     fun saveFactory(network: DataSource.Factory): CacheDataSource.Factory =
         CacheDataSource.Factory().setCache(saved).setUpstreamDataSourceFactory(tempLayer(network, writable = false))
+
+    /** Read-only view of [temp]: already-streamed bytes serve locally, misses reach for the network, nothing is written back. */
+    fun tempReadFactory(network: DataSource.Factory): DataSource.Factory = tempLayer(network, writable = false)
 }

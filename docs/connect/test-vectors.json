@@ -12,6 +12,9 @@
     "{\"type\":\"command\",\"id\":\"c-1\",\"seq\":1,\"action\":\"seek\",\"positionMs\":61000}",
     "{\"type\":\"command\",\"id\":\"c-2\",\"seq\":2,\"action\":\"moveQueue\",\"from\":3,\"to\":1,\"queueRev\":7}",
     "{\"type\":\"state\",\"rev\":4,\"queueRev\":2,\"playback\":\"playing\",\"track\":{\"id\":\"a0nze6VvaXY\",\"title\":\"Аполлинария\",\"artist\":\"Электрослабость\",\"artists\":[{\"name\":\"Электрослабость\",\"id\":\"UCLPaSURRnbBu4iN1BfClbnA\"}],\"album\":{\"title\":\"Имена, животные и бабка без квартиры\",\"id\":\"MPREb_IMj1ifT1q91\"},\"durationMs\":201000,\"artworkUrl\":null,\"source\":\"youtube\"},\"positionMs\":15000,\"durationMs\":201000,\"volume\":0.5,\"shuffle\":false,\"repeat\":\"off\",\"queueIndex\":0,\"queue\":[],\"error\":null,\"capabilities\":[\"seek\",\"volume\",\"queue\",\"handoff\"],\"futureField\":true}",
-    "{\"type\":\"handoff\",\"transferId\":\"t-1\",\"queue\":[],\"index\":0,\"positionMs\":42000,\"playing\":true,\"shuffle\":false,\"repeat\":\"all\"}"
+    "{\"type\":\"state\",\"rev\":5,\"queueRev\":2,\"playback\":\"paused\",\"positionMs\":42000,\"durationMs\":201000,\"volume\":0.5,\"shuffle\":false,\"repeat\":\"off\",\"queueIndex\":0,\"error\":null,\"capabilities\":[\"seek\",\"volume\",\"queue\",\"handoff\",\"takeover\"],\"role\":\"listener\",\"activeId\":\"d0f1b2c3-4444-5555-6666-777788889999\"}",
+    "{\"type\":\"handoff\",\"transferId\":\"t-1\",\"queue\":[],\"index\":0,\"positionMs\":42000,\"playing\":true,\"shuffle\":false,\"repeat\":\"all\"}",
+    "{\"type\":\"command\",\"id\":\"t-2\",\"seq\":4,\"action\":\"takeover\",\"transferId\":\"t-2\",\"queue\":[{\"id\":\"a0nze6VvaXY\",\"title\":\"Аполлинария\",\"artist\":\"Электрослабость\",\"artists\":[{\"name\":\"Электрослабость\",\"id\":\"UCLPaSURRnbBu4iN1BfClbnA\"}],\"album\":null,\"durationMs\":201000,\"artworkUrl\":null,\"source\":\"youtube\"}],\"index\":0,\"positionMs\":42000,\"playing\":true,\"shuffle\":false,\"repeat\":\"off\"}",
+    "{\"type\":\"command\",\"id\":\"y-1\",\"seq\":5,\"action\":\"yield\",\"activeId\":\"d0f1b2c3-4444-5555-6666-777788889999\"}"
   ]
 }

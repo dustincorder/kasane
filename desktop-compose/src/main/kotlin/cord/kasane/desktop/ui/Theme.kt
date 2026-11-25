@@ -1,5 +1,7 @@
 package cord.kasane.desktop.ui
 
+import androidx.compose.foundation.DefaultContextMenuRepresentation
+import androidx.compose.foundation.LocalContextMenuRepresentation
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -34,7 +36,19 @@ fun KasaneTheme(mode: ThemeMode, seed: Color, artwork: ArtworkLoader, content: @
     val desktopDark = remember { desktopPrefersDark() }
     val dark = when (mode) { ThemeMode.SYSTEM -> desktopDark ?: systemDark; ThemeMode.LIGHT -> false; ThemeMode.DARK -> true }
     val scheme = remember(dark, seed) { seedColorScheme(seed, dark) }
-    CompositionLocalProvider(LocalArtworkLoader provides artwork) { KasaneMaterialTheme(scheme, content) }
+    val contextMenu = remember(scheme) {
+        DefaultContextMenuRepresentation(
+            backgroundColor = scheme.surfaceContainerHigh,
+            textColor = scheme.onSurface,
+            itemHoverColor = scheme.secondaryContainer.copy(alpha = 0.55f),
+        )
+    }
+    CompositionLocalProvider(
+        LocalArtworkLoader provides artwork,
+        LocalContextMenuRepresentation provides contextMenu,
+    ) {
+        KasaneMaterialTheme(scheme, content)
+    }
 }
 
 /**

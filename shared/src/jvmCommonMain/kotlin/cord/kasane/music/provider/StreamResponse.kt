@@ -46,7 +46,19 @@ object StreamResponse {
         val signedExpiry = URI(url).rawQuery?.split('&')?.firstOrNull { it.startsWith("expire=") }
             ?.substringAfter('=')?.toLongOrNull()?.takeIf { it > 0 && it < Long.MAX_VALUE / 1000 }?.times(1000)
         val ttl = data.optLong("expiresInSeconds", 300).coerceIn(0, 86400) * 1000
+        val (stats, watchtime) = playbackTracking(root)
         return ResolvedAudioStream(url, selected.optInt("itag"), selected.optString("mimeType"),
-            minOf(signedExpiry ?: Long.MAX_VALUE, nowMs + ttl), selected.optLong("contentLength", -1))
+            minOf(signedExpiry ?: Long.MAX_VALUE, nowMs + ttl), selected.optLong("contentLength", -1),
+            playbackStatsUrl = stats, watchtimeUrl = watchtime)
+    }
+
+    /**
+     * The watch-reporting endpoints of a player response; a counted play pings them so the
+     * signed-in YouTube Music history feed picks the track up. Absent on some client profiles.
+     */
+    fun playbackTracking(root: JSONObject): Pair<String?, String?> {
+        val tracking = root.optJSONObject("playbackTracking") ?: return null to null
+        fun url(key: String) = tracking.optString(key).takeIf { it.startsWith("https://") }
+        return url("videostatsPlaybackUrl") to url("watchtimeUrl")
     }
 }

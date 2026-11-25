@@ -49,6 +49,16 @@ object QueuePolicy {
     }
 
     /**
+     * "Start radio" on the track that is already playing anchors the new context at that item:
+     * it keeps playing at its position — only the upcoming tail is replaced by the radio feed.
+     * Null when the seed is not the current item (a fresh context starts instead).
+     */
+    fun anchoredRadio(queue: List<Track>, index: Int, seedId: String): ContextStart? {
+        val anchor = queue.getOrNull(index) ?: return null
+        return if (anchor.id == seedId) ContextStart(queue.take(index + 1), index, shuffle = false) else null
+    }
+
+    /**
      * A radio page may only be appended while the context that asked for it is still in the queue. Without this,
      * a slow response for the previous track lands in the queue of the track the user just started.
      */

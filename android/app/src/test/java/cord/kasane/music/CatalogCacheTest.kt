@@ -27,6 +27,7 @@ class CatalogCacheTest {
             rows[scope to key] = CacheEntry(page, now)
         }
         override suspend fun clearScope(scope: String) { rows.keys.removeAll { it.first == scope } }
+        override suspend fun delete(scope: String, key: String) { rows.remove(scope to key) }
         override suspend fun evict(olderThan: Long, keep: Int) {
             rows.entries.removeAll { it.value.updatedAt < olderThan }
             val keepKeys = rows.entries.sortedByDescending { it.value.updatedAt }.take(keep).map { it.key }.toSet()
