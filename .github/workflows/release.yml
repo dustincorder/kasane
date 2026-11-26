@@ -129,38 +129,59 @@ jobs:
 
       - id: sign
         working-directory: .
+        env:
+          KASANE_NIGHTLY_KEYSTORE_BASE64: ${{ secrets.KASANE_NIGHTLY_KEYSTORE_BASE64 }}
+          KASANE_NIGHTLY_KEYSTORE_PASSWORD: ${{ secrets.KASANE_NIGHTLY_KEYSTORE_PASSWORD }}
+          KASANE_NIGHTLY_KEY_ALIAS: ${{ secrets.KASANE_NIGHTLY_KEY_ALIAS }}
+          KASANE_NIGHTLY_KEY_PASSWORD: ${{ secrets.KASANE_NIGHTLY_KEY_PASSWORD }}
         run: |
           set -eu
           mkdir -p "$HOME/.glazegram"
-          if [ -n "$KASANE_KEYSTORE_BASE64" ]; then
-            echo "$KASANE_KEYSTORE_BASE64" | base64 -d > "$HOME/.glazegram/release.keystore"
-            chmod 600 "$HOME/.glazegram/release.keystore"
+          write_env() { # $1=keystore path $2=alias $3=storepass $4=keypass
             {
-              echo "RELEASE_KEYSTORE=$HOME/.glazegram/release.keystore"
-              echo "RELEASE_KEY_ALIAS=$KASANE_KEY_ALIAS"
-              echo "RELEASE_STORE_PASSWORD=$KASANE_KEYSTORE_PASSWORD"
-              echo "RELEASE_KEY_PASSWORD=$KASANE_KEY_PASSWORD"
+              echo "RELEASE_KEYSTORE=$1"
+              echo "RELEASE_KEY_ALIAS=$2"
+              echo "RELEASE_STORE_PASSWORD=$3"
+              echo "RELEASE_KEY_PASSWORD=$4"
             } > "$HOME/.glazegram/secrets.env"
             chmod 600 "$HOME/.glazegram/secrets.env"
-            echo "signed=release" >> "$GITHUB_OUTPUT"
-          elif [ "${{ needs.prepare.outputs.channel }}" = "stable" ]; then
-            echo "::error::stable release requires signing secrets (KASANE_KEYSTORE_*) - refusing to publish an unsigned stable update"
-            exit 1
+          }
+          decode_key() { # $1=base64 $2=dest
+            echo "$1" | base64 -d > "$2"
+            chmod 600 "$2"
+          }
+          NIGHTLY_KEY="$HOME/.glazegram/nightly.keystore"
+          RELEASE_KEY="$HOME/.glazegram/release.keystore"
+          if [ "${{ needs.prepare.outputs.channel }}" = "stable" ]; then
+            if [ -n "$KASANE_KEYSTORE_BASE64" ]; then
+              decode_key "$KASANE_KEYSTORE_BASE64" "$RELEASE_KEY"
+              write_env "$RELEASE_KEY" "$KASANE_KEY_ALIAS" "$KASANE_KEYSTORE_PASSWORD" "$KASANE_KEY_PASSWORD"
+              echo "signed=release" >> "$GITHUB_OUTPUT"
+            else
+              echo "::error::stable release requires signing secrets (KASANE_KEYSTORE_*) - refusing to publish an unsigned stable update"
+              exit 1
+            fi
           else
-            # Ephemeral CI-only key so the nightly APK is installable; it is NOT
-            # the release key and is marked in the asset name and release notes.
-            keytool -genkeypair -v -keystore "$HOME/.glazegram/ci.keystore" \
-              -alias ci -keyalg RSA -keysize 2048 -validity 30 \
-              -storepass ci-nightly -keypass ci-nightly \
-              -dname "CN=Kasane CI, O=Kasane, C=XX" >/dev/null 2>&1
-            {
-              echo "RELEASE_KEYSTORE=$HOME/.glazegram/ci.keystore"
-              echo "RELEASE_KEY_ALIAS=ci"
-              echo "RELEASE_STORE_PASSWORD=ci-nightly"
-              echo "RELEASE_KEY_PASSWORD=ci-nightly"
-            } > "$HOME/.glazegram/secrets.env"
-            chmod 600 "$HOME/.glazegram/secrets.env"
-            echo "signed=ci" >> "$GITHUB_OUTPUT"
+            # Nightly signing precedence: dedicated nightly key > release key >
+            # ephemeral CI key. A *persistent* signature is what makes nightly
+            # builds upgrade each other in-place; an ephemeral key changes every
+            # run, so OTA/manual updates between nightlies would fail.
+            if [ -n "$KASANE_NIGHTLY_KEYSTORE_BASE64" ]; then
+              decode_key "$KASANE_NIGHTLY_KEYSTORE_BASE64" "$NIGHTLY_KEY"
+              write_env "$NIGHTLY_KEY" "$KASANE_NIGHTLY_KEY_ALIAS" "$KASANE_NIGHTLY_KEYSTORE_PASSWORD" "$KASANE_NIGHTLY_KEY_PASSWORD"
+              echo "signed=nightly" >> "$GITHUB_OUTPUT"
+            elif [ -n "$KASANE_KEYSTORE_BASE64" ]; then
+              decode_key "$KASANE_KEYSTORE_BASE64" "$RELEASE_KEY"
+              write_env "$RELEASE_KEY" "$KASANE_KEY_ALIAS" "$KASANE_KEYSTORE_PASSWORD" "$KASANE_KEY_PASSWORD"
+              echo "signed=release" >> "$GITHUB_OUTPUT"
+            else
+              keytool -genkeypair -v -keystore "$HOME/.glazegram/ci.keystore" \
+                -alias ci -keyalg RSA -keysize 2048 -validity 30 \
+                -storepass ci-nightly -keypass ci-nightly \
+                -dname "CN=Kasane CI, O=Kasane, C=XX" >/dev/null 2>&1
+              write_env "$HOME/.glazegram/ci.keystore" ci ci-nightly ci-nightly
+              echo "signed=ci" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - run: |
@@ -339,11 +360,19 @@ jobs:
             echo
             echo "Automated build of commit \`${{ github.sha }}\`."
             echo
-            if [ "${{ needs.android.outputs.signed }}" = "ci" ]; then
-              echo "> **Note:** the Android APK in this build is signed with an ephemeral CI key,"
-              echo "> **not** the release key — do not install over a release-signed build."
-              echo
-            fi
+            case "${{ needs.android.outputs.signed }}" in
+              ci)
+                echo "> **Note:** the Android APK is signed with an **ephemeral CI key** that"
+                echo "> changes every run — it cannot update previous CI-signed or release-signed"
+                echo "> installs in place; uninstall first. Add \`KASANE_NIGHTLY_KEYSTORE_*\` secrets"
+                echo "> for a persistent nightly signature."
+                echo
+                ;;
+              nightly)
+                echo "> Android APK is signed with the dedicated nightly key."
+                echo
+                ;;
+            esac
             echo "See \`docs/MANUAL_ACCEPTANCE.md\` for the acceptance checklist."
           } > notes.md
 
