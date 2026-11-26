@@ -67,6 +67,10 @@ compose.desktop {
         javaHome = packagingJdk.absolutePath
         nativeDistributions {
             targetFormats(TargetFormat.AppImage)
+            // dbus-java's SASL auth reads the UID via com.sun.security.auth.module.UnixSystem
+            // (module jdk.security.auth) — jlink strips it without an explicit include and
+            // the packaged MPRIS endpoint dies with NoClassDefFoundError.
+            modules("jdk.security.auth")
             packageName = kasanePackage
             packageVersion = kasaneVersion
             linux {

@@ -36,16 +36,18 @@ done
 }
 
 # Launcher / desktop-entry naming: stable keeps the short "kasane" names,
-# nightly gets fully separated names so both can coexist.
+# nightly gets fully separated names so both can coexist. Desktop-file IDs must
+# match BuildInfo's MPRIS DesktopEntry (`cord.kasane.desktop` / `.nightly`).
 if [ "$PACKAGE" = "kasane-compose" ]; then
     RUN_NAME="kasane"
     APP_NAME="Kasane"
-    DESKTOP_FILE="kasane.desktop"
+    DESKTOP_FILE="cord.kasane.desktop.desktop"
     WMCLASS="kasane-compose"
 else
-    RUN_NAME="$PACKAGE"
+    # Can't be "$PACKAGE": the staged AppDir already takes that directory name.
+    RUN_NAME="$PACKAGE-run"
     APP_NAME="Kasane Nightly"
-    DESKTOP_FILE="$PACKAGE.desktop"
+    DESKTOP_FILE="cord.kasane.desktop.nightly.desktop"
     WMCLASS="$PACKAGE"
 fi
 
