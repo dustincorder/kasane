@@ -14,8 +14,8 @@ android {
         applicationId = "cord.kasane.music"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.0-alpha"
+        versionCode = 5
+        versionName = "0.2.1-alpha"
         testInstrumentationRunner = if (providers.gradleProperty("kasaneCacheProbe").orNull == "true")
             "cord.kasane.music.CatalogCacheInstrumentation"
         else if (providers.gradleProperty("kasanePlaylistProbe").orNull == "true")
