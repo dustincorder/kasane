@@ -50,13 +50,38 @@ Headless-режимы Compose desktop (сеть, mpv без звука): `./grad
 `--connect-smoke`, `--render DIR`. Инструментальные тесты Android — только
 `./gradlew kasaneApi35DebugAndroidTest` на управляемом эмуляторе.
 
+MPRIS2-проверка: `dbus-run-session -- ./gradlew :desktop:run --args="--mpris [сек] [videoId]"` держит
+`org.mpris.MediaPlayer2.kasane` на сессионной шине (`-PkasaneChannel=nightly` → `…kasane.nightly`);
+управление через `busctl --user call … org.mpris.MediaPlayer2.Player PlayPause`. Библиотека —
+`dbus-java` 5.1.1 (core + native-unixsocket; Unix-сокеты через уже имеющийся JNA), MIT-style
+лицензии, ~600 КБ.
+
 ## Запуск и сборка приложений (вручную, не из автоматических проверок)
 
 ```sh
 cd android && ./gradlew :app:assembleDebug        # app/build/outputs/apk/debug/app-debug.apk (id …music.dev)
 cd android && ./gradlew :desktop:run              # Compose desktop
 cd android && ./gradlew :desktop:createDistributable
+cd android && ./gradlew :desktop:createDistributable -PkasaneChannel=nightly   # nightly-вариант
 ```
+
+### Канал сборки desktop (`-PkasaneChannel=`)
+
+`stable` (по умолчанию) и `nightly` — полностью параллельные установки: канал запекается в
+`kasane-build.properties` (задача `generateBuildInfo`), `BuildInfo` раскладывает все persisted-
+имена по каналу: XDG-каталог `cord.kasane.compose[.nightly]`, схема Secret Service
+`cord.kasane.compose[.nightly].session`, имя приложения «Kasane [Nightly]», пакет/AppDir
+`kasane-compose|kasane-nightly`. Nightly-иконка — слот `assets/logo-nightly.png` (даёт
+@designer); пока файла нет — используется stable-иконка.
+
+OTA (`S/ota/`): `UpdateChecker` ходит в GitHub Releases `dustincorder/kasane`; stable берёт
+только `prerelease=false`, nightly — только `prerelease=true`. Автопроверка раз в сутки
+(`lastUpdateCheckMs` в настройках), ручная — из Settings → About. Выбор ассета — матчеры
+`BuildInfo.assetMatchers` (stable исключает имя с `nightly`); SHA256 — из asset `digest` или
+`<name>.sha256`/`SHA256SUMS`. Применение — `install.sh` из распакованного tar.gz по явному
+действию пользователя, без самозамены. Релизный пайплайн обязан: nightly-тарбалл класть как
+pre-release со своим `install.sh` (каталог `~/.local/opt/kasane-nightly`, desktop-запись
+`cord.kasane.desktop.nightly.desktop`) и публиковать checksum (`digest` идёт автоматически).
 
 Tauri/Rust-клиент заморожен (решение D1): сборка только для справки и Connect-interop, не
 релизный путь — `npx tauri dev`, `npx tauri build --no-bundle` → `target/release/kasane`.

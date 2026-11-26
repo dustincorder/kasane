@@ -37,6 +37,23 @@ fun runSmoke(query: String): Int = DesktopApp(audioOutput = "null", root = kotli
     }
 }
 
+/** `--mpris [seconds] [videoId]`: register the MPRIS2 name on the session bus, hold it. */
+fun runMpris(seconds: Int, videoId: String?): Int =
+    DesktopApp(audioOutput = "null", root = kotlin.io.path.createTempDirectory("kasane-mpris").toFile(), autoStartConnect = false).use { app ->
+        check(app.mpris.start()) { "mpris: could not register on the session bus" }
+        println("mpris: ${if (BuildInfo.isNightly) "kasane.nightly" else "kasane"} registered")
+        if (videoId != null) runBlocking {
+            app.player.playTrack(cord.kasane.music.model.Track(videoId, "MPRIS check", "Kasane", durationSeconds = 200.0))
+            runCatching {
+                withTimeout(25_000) {
+                    app.player.state.first { it.isPlaying && it.positionSec > 0.5 || it.error != null }
+                }
+            }.getOrNull()?.let { println("mpris: playback=${it.isPlaying} error=${it.error}") }
+        }
+        Thread.sleep(seconds * 1000L)
+        0
+    }
+
 /** `--idle [seconds]`: build the full desktop stack (no window, no sound), then sleep. */
 fun runIdle(seconds: Int): Int {
     val t0 = System.nanoTime()

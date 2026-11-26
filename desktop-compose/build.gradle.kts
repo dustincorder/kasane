@@ -22,6 +22,11 @@ dependencies {
     implementation("org.json:json:20240303")
     implementation("com.materialkolor:material-kolor:2.1.1")
     implementation("org.jmdns:jmdns:3.5.9")
+    // MPRIS2 (media keys/headset controls) over the session D-Bus; native-unixsocket uses JNA,
+    // already a dependency for the WebKitGTK verifier.
+    implementation("com.github.hypfvieh:dbus-java-core:5.1.1")
+    implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.1.1")
+    runtimeOnly("org.slf4j:slf4j-jdk14:2.0.16")
     // System WebKitGTK for playback verification, called directly (no bundled browser).
     implementation("net.java.dev.jna:jna:5.14.0")
     testImplementation(kotlin("test"))

@@ -10,6 +10,7 @@ fun main(args: Array<String>) {
     if (args.firstOrNull() == "--live") exitDesktop(runLive(args.drop(1)))
     if (args.firstOrNull() == "--play") exitDesktop(runPlay(args.drop(1)))
     if (args.firstOrNull() == "--idle") exitDesktop(runIdle(args.getOrElse(1) { "60" }.toIntOrNull() ?: 60))
+    if (args.firstOrNull() == "--mpris") exitDesktop(runMpris(args.getOrElse(1) { "60" }.toIntOrNull() ?: 60, args.getOrNull(2)))
     if (args.firstOrNull() == "--smoke") exitDesktop(runSmoke(args.drop(1).joinToString(" ").ifBlank { "Daft Punk Around the World" }))
     runUi()
     exitDesktop(0)

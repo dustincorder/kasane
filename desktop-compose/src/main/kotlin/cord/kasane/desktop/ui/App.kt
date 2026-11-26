@@ -121,10 +121,15 @@ class Nav {
 fun runUi() = application {
     val app = remember { DesktopApp() }
     val nav = remember { Nav() }
+    androidx.compose.runtime.LaunchedEffect(Unit) { app.updates.checkOnStart() }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        app.mpris.onQuit = { app.close(); exitApplication() }
+        app.mpris.start()
+    }
     val systemScale = remember { SystemScale.detect() }
     val initial = remember { initialWindowSize(systemScale * app.settings.prefs.value.uiScale) }
     val window = rememberWindowState(size = initial)
-    Window(onCloseRequest = { app.close(); exitApplication() }, state = window, title = "Kasane",
+    Window(onCloseRequest = { app.close(); exitApplication() }, state = window, title = cord.kasane.desktop.BuildInfo.appName,
         icon = painterResource("kasane.png"), onKeyEvent = { e ->
             if (e.type != KeyEventType.KeyDown) return@Window false
             when {
@@ -151,6 +156,7 @@ fun runUi() = application {
                 androidx.compose.runtime.LaunchedEffect(density.density) {
                     this@Window.window.minimumSize = java.awt.Dimension((MIN_WIDTH_DP * density.density).toInt(), (MIN_HEIGHT_DP * density.density).toInt())
                 }
+                androidx.compose.runtime.LaunchedEffect(Unit) { app.mpris.onRaise = { this@Window.window.toFront() } }
                 KasaneWindow(app, nav)
             }
         }
@@ -435,6 +441,7 @@ internal fun KasaneWindow(app: DesktopApp, nav: Nav) {
             ) {
                 NowPlaying(state, controls, actions, onClose = { nav.nowPlaying = false },
                     deviceButton = { DeviceButton(app, openSettings) },
+                    deviceLabel = remoteName?.let { "Playing on $it" },
                     onShowLyrics = { nav.nowPlaying = false; nav.queueOpen = false; nav.lyricsTrack = null; nav.lyricsOpen = true })
             }
             PlaylistPickerDialog(playlistPicker)

@@ -18,9 +18,11 @@ import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-/** Where this prototype keeps its own data; separate from the Tauri client's `cord.kasane.desktop`. */
+/** Where this client keeps its own data; separate from the Tauri client's `cord.kasane.desktop`.
+ *  The nightly variant gets its own XDG dir via `BuildInfo.dataDirName` — parallel installs
+ *  never share settings, library or sessions. */
 val dataDir: File = File(System.getenv("XDG_DATA_HOME")?.takeIf { it.isNotBlank() }
-    ?: (System.getProperty("user.home") + "/.local/share"), "cord.kasane.compose")
+    ?: (System.getProperty("user.home") + "/.local/share"), BuildInfo.dataDirName)
 
 /** Process-wide services, mirroring what KasaneApplication wires up on Android. */
 class DesktopApp(
@@ -40,7 +42,7 @@ class DesktopApp(
         nowSeconds = { System.currentTimeMillis() / 1000 }, sha1Hex = JvmCatalogCrypto::sha1Hex)
     /** Secret Service when reachable, else a memory-only session the UI marks as such. */
     private val sessionStore = runCatching {
-        cord.kasane.desktop.auth.SecretServiceStore().takeIf { it.probe() != cord.kasane.desktop.auth.SecretServiceStore.Availability.UNAVAILABLE }
+        cord.kasane.desktop.auth.SecretServiceStore(BuildInfo.secretSchema).takeIf { it.probe() != cord.kasane.desktop.auth.SecretServiceStore.Availability.UNAVAILABLE }
     }.getOrNull()
     val settings = DesktopSettings(File(root, "settings.json"))
     val account = cord.kasane.desktop.auth.DesktopAccount(scope, sessionStore,
@@ -80,6 +82,8 @@ class DesktopApp(
             runCatching { lyrics.lyricsFor(track) }
             meta?.coverArtUrl?.let { offline.saveArtworkFrom(track.id, it) }
         })
+    /** GitHub Releases update checker (channel from the build variant) + download/install. */
+    val updates = cord.kasane.desktop.update.DesktopUpdates(scope, http, settings, File(root, "updates"))
     val streams: cord.kasane.desktop.playback.StreamSource = cord.kasane.desktop.playback.OfflineStreamSource(selector, offline)
     val player = DesktopPlayer(scope, engine, streams, cord.kasane.desktop.playback.RadioSource(catalog::radioPage), library,
         onPlayed = offline::played,
@@ -93,12 +97,14 @@ class DesktopApp(
                     http.newCall(okhttp3.Request.Builder().url(url).get().build()).execute().close() } }
             }
         })
+    /** MPRIS2 endpoint (media keys, KDE applet); started by the UI process, inert elsewhere. */
+    val mpris = cord.kasane.desktop.mpris.MprisServer(player, scope)
     /** Same Connect core as Android; null when it could not start (reported in Settings). */
     val connect: cord.kasane.desktop.connect.DesktopConnect?
     val connectError: String?
 
     init {
-        val created = runCatching { cord.kasane.desktop.connect.DesktopConnect(player, scope, File(root, "connect"), "0.1.0-compose") }
+        val created = runCatching { cord.kasane.desktop.connect.DesktopConnect(player, scope, File(root, "connect"), "${BuildInfo.version}-compose") }
         connect = created.getOrNull()
         connectError = created.exceptionOrNull()?.message
         if (autoStartConnect && settings.prefs.value.connectEnabled) connect?.start()
@@ -132,6 +138,7 @@ class DesktopApp(
 
     override fun close() {
         connect?.stop()
+        mpris.close()
         verifier.close()
         likes.close()
         engine.close()

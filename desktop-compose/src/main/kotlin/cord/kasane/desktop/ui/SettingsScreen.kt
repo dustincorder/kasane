@@ -264,11 +264,13 @@ fun SettingsScreen(
             SectionRule()
 
             SettingsSection("About") {
+                val updateState by app.updates.state.collectAsState()
                 ListItem(
-                    headlineContent = { Text("Kasane", style = MaterialTheme.typography.titleSmall) },
+                    headlineContent = { Text(cord.kasane.desktop.BuildInfo.appName, style = MaterialTheme.typography.titleSmall) },
                     supportingContent = {
                         Text(
-                            "0.1.0 · Desktop",
+                            "${cord.kasane.desktop.BuildInfo.version} · Desktop" +
+                                if (cord.kasane.desktop.BuildInfo.isNightly) " · Nightly" else "",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -278,6 +280,7 @@ fun SettingsScreen(
                     },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
+                UpdateRow(app, updateState)
             }
         }
     }
@@ -345,4 +348,56 @@ private fun ScaleControl(app: DesktopApp, scale: Float) {
             ) { Text("Reset") }
         }
     }
+}
+
+/** Manual update check + download/install entry (auto-check runs daily from app start). */
+@Composable
+private fun UpdateRow(app: DesktopApp, state: cord.kasane.desktop.update.DesktopUpdates.State) {
+    val supporting = when (state) {
+        is cord.kasane.desktop.update.DesktopUpdates.State.UpToDate ->
+            "Latest version: ${state.latest}"
+        is cord.kasane.desktop.update.DesktopUpdates.State.Available ->
+            "Update available: ${state.release.tag}" + (state.asset?.let { " · ${it.name}" } ?: "")
+        is cord.kasane.desktop.update.DesktopUpdates.State.Downloading ->
+            if (state.totalBytes > 0) "Downloading… ${state.doneBytes * 100 / state.totalBytes}%" else "Downloading…"
+        is cord.kasane.desktop.update.DesktopUpdates.State.Installed ->
+            "Installed ${state.release.tag} — restart ${cord.kasane.desktop.BuildInfo.appName} to run it."
+        is cord.kasane.desktop.update.DesktopUpdates.State.Failed -> state.message
+        is cord.kasane.desktop.update.DesktopUpdates.State.Checking -> "Checking for updates…"
+        is cord.kasane.desktop.update.DesktopUpdates.State.Idle -> "Check for updates"
+    }
+    ListItem(
+        headlineContent = { Text("Updates", style = MaterialTheme.typography.titleSmall) },
+        supportingContent = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(supporting, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (state is cord.kasane.desktop.update.DesktopUpdates.State.Downloading && state.totalBytes > 0)
+                    LinearProgressIndicator(
+                        progress = { state.doneBytes.toFloat() / state.totalBytes },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    )
+                if (state is cord.kasane.desktop.update.DesktopUpdates.State.Available && state.release.changelog.isNotBlank())
+                    Text(state.release.changelog.trim().take(600),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        trailingContent = {
+            when (state) {
+                is cord.kasane.desktop.update.DesktopUpdates.State.Available ->
+                    state.asset?.let { asset ->
+                        FilledTonalButton(onClick = { app.updates.downloadAndInstall(state.release, asset) }) {
+                            Text("Install")
+                        }
+                    } ?: FilledTonalButton(onClick = {
+                        java.awt.Desktop.getDesktop().browse(java.net.URI(state.release.htmlUrl))
+                    }) { Text("Open") }
+                is cord.kasane.desktop.update.DesktopUpdates.State.Checking,
+                is cord.kasane.desktop.update.DesktopUpdates.State.Downloading -> Unit
+                else -> TextButton(onClick = { app.updates.checkNow() }) { Text("Check") }
+            }
+        },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
 }
