@@ -1,0 +1,373 @@
+name: release
+
+# Only manual runs and version tags — never on branch pushes or PRs.
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Which clients to build"
+        type: choice
+        options: [all, android, linux, windows]
+        default: all
+      channel:
+        description: "Release channel"
+        type: choice
+        options: [nightly, stable]
+        default: nightly
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  # Resolve channel / version / tag / prerelease flag for the whole run.
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.calc.outputs.channel }}
+      version: ${{ steps.calc.outputs.version }}
+      tag: ${{ steps.calc.outputs.tag }}
+      prerelease: ${{ steps.calc.outputs.prerelease }}
+      title: ${{ steps.calc.outputs.title }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: calc
+        run: |
+          set -eu
+          VERSION=$(grep -oE 'versionName = "[^"]+"' android/app/build.gradle.kts | head -1 | cut -d'"' -f2)
+          DVER=$(grep -oE 'kasaneVersion = "[^"]+"' desktop-compose/build.gradle.kts | head -1 | cut -d'"' -f2)
+          if [ "$VERSION" != "$DVER" ]; then
+            echo "version drift: android=$VERSION desktop=$DVER" >&2; exit 1
+          fi
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+            case "$TAG" in
+              *-nightly) CHANNEL=nightly ;;
+              *)         CHANNEL=stable ;;
+            esac
+          else
+            CHANNEL="${{ inputs.channel }}"
+            if [ "$CHANNEL" = nightly ]; then
+              TAG="nightly-${GITHUB_RUN_NUMBER}"
+            else
+              TAG="v${VERSION}-rc.${GITHUB_RUN_NUMBER}"
+            fi
+          fi
+          # Prerelease: every tag with a suffix and every manual run.
+          # Only clean vX.Y.Z tags produce a normal release.
+          PRERELEASE=true
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*)
+              case "$TAG" in *-*) ;; *) [ "${{ github.event_name }}" = "push" ] && PRERELEASE=false ;; esac ;;
+          esac
+          echo "channel=$CHANNEL"    >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"    >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"            >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "title=Kasane $VERSION ($CHANNEL)" >> "$GITHUB_OUTPUT"
+
+  # Unit tests gate everything publishable.
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci && npm run build:verifier
+        working-directory: .
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          dependency-graph: disabled
+      - run: ./gradlew :shared:jvmTest :desktop:test :app:testDebugUnitTest
+
+  android:
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'android'
+    defaults:
+      run:
+        working-directory: android
+    env:
+      KASANE_KEYSTORE_BASE64: ${{ secrets.KASANE_KEYSTORE_BASE64 }}
+      KASANE_KEYSTORE_PASSWORD: ${{ secrets.KASANE_KEYSTORE_PASSWORD }}
+      KASANE_KEY_ALIAS: ${{ secrets.KASANE_KEY_ALIAS }}
+      KASANE_KEY_PASSWORD: ${{ secrets.KASANE_KEY_PASSWORD }}
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci && npm run build:verifier
+        working-directory: .
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          dependency-graph: disabled
+
+      - id: sign
+        working-directory: .
+        run: |
+          set -eu
+          mkdir -p "$HOME/.glazegram"
+          if [ -n "$KASANE_KEYSTORE_BASE64" ]; then
+            echo "$KASANE_KEYSTORE_BASE64" | base64 -d > "$HOME/.glazegram/release.keystore"
+            chmod 600 "$HOME/.glazegram/release.keystore"
+            {
+              echo "RELEASE_KEYSTORE=$HOME/.glazegram/release.keystore"
+              echo "RELEASE_KEY_ALIAS=$KASANE_KEY_ALIAS"
+              echo "RELEASE_STORE_PASSWORD=$KASANE_KEYSTORE_PASSWORD"
+              echo "RELEASE_KEY_PASSWORD=$KASANE_KEY_PASSWORD"
+            } > "$HOME/.glazegram/secrets.env"
+            chmod 600 "$HOME/.glazegram/secrets.env"
+            echo "signed=release" >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.prepare.outputs.channel }}" = "stable" ]; then
+            echo "::error::stable release requires signing secrets (KASANE_KEYSTORE_*) - refusing to publish an unsigned stable update"
+            exit 1
+          else
+            # Ephemeral CI-only key so the nightly APK is installable; it is NOT
+            # the release key and is marked in the asset name and release notes.
+            keytool -genkeypair -v -keystore "$HOME/.glazegram/ci.keystore" \
+              -alias ci -keyalg RSA -keysize 2048 -validity 30 \
+              -storepass ci-nightly -keypass ci-nightly \
+              -dname "CN=Kasane CI, O=Kasane, C=XX" >/dev/null 2>&1
+            {
+              echo "RELEASE_KEYSTORE=$HOME/.glazegram/ci.keystore"
+              echo "RELEASE_KEY_ALIAS=ci"
+              echo "RELEASE_STORE_PASSWORD=ci-nightly"
+              echo "RELEASE_KEY_PASSWORD=ci-nightly"
+            } > "$HOME/.glazegram/secrets.env"
+            chmod 600 "$HOME/.glazegram/secrets.env"
+            echo "signed=ci" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: |
+          if [ "${{ needs.prepare.outputs.channel }}" = nightly ]; then
+            ./gradlew :app:assembleNightlyRelease
+          else
+            ./gradlew :app:assembleRelease
+          fi
+
+      - name: Collect APK
+        working-directory: .
+        run: |
+          set -eu
+          V="${{ needs.prepare.outputs.version }}"
+          CH="${{ needs.prepare.outputs.channel }}"
+          if [ "$CH" = nightly ]; then
+            SRC="android/app/build/outputs/apk/nightlyRelease/app-nightlyRelease.apk"
+          else
+            SRC="android/app/build/outputs/apk/release/app-release.apk"
+          fi
+          [ -f "$SRC" ] || { echo "expected APK at $SRC" >&2; exit 1; }
+          SUFFIX=""; [ "$CH" = nightly ] && SUFFIX="-nightly"
+          [ "${{ steps.sign.outputs.signed }}" = ci ] && SUFFIX="$SUFFIX-ci"
+          mkdir -p dist
+          cp "$SRC" "dist/kasane-android-${V}${SUFFIX}.apk"
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/
+          retention-days: 7
+
+  linux:
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'linux'
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci && npm run build:verifier
+        working-directory: .
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          dependency-graph: disabled
+
+      - run: |
+          if [ "${{ needs.prepare.outputs.channel }}" = nightly ]; then
+            ./gradlew -PkasaneChannel=nightly :desktop:createDistributable
+          else
+            ./gradlew :desktop:createDistributable
+          fi
+
+      - name: Stage and pack tar.gz
+        working-directory: .
+        run: |
+          set -eu
+          V="${{ needs.prepare.outputs.version }}"
+          if [ "${{ needs.prepare.outputs.channel }}" = nightly ]; then
+            PKG=kasane-nightly
+          else
+            PKG=kasane-compose
+          fi
+          bash packaging/linux/stage-desktop.sh \
+            --appdir "android/desktop-compose/build/compose/binaries/main/app/$PKG" \
+            --package "$PKG" --version "$V" --out dist-stage
+          NAME="kasane-desktop-linux-x86_64-${V}"
+          [ "$PKG" = kasane-nightly ] && NAME="${NAME}-nightly"
+          mkdir -p dist
+          tar -czf "dist/${NAME}.tar.gz" -C dist-stage "kasane-desktop-${V}"
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/
+          retention-days: 7
+
+  windows:
+    needs: [prepare, verify]
+    runs-on: windows-latest
+    if: github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows'
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci; npm run build:verifier
+        working-directory: .
+        shell: bash
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          dependency-graph: disabled
+
+      - run: |
+          if [ "${{ needs.prepare.outputs.channel }}" = nightly ]; then
+            ./gradlew -PkasaneChannel=nightly :desktop:createDistributable
+          else
+            ./gradlew :desktop:createDistributable
+          fi
+        shell: bash
+
+      - name: Pack portable ZIP
+        working-directory: .
+        shell: pwsh
+        run: |
+          $pkg = if ("${{ needs.prepare.outputs.channel }}" -eq "nightly") { "kasane-nightly" } else { "kasane-compose" }
+          $v = "${{ needs.prepare.outputs.version }}"
+          $appDir = "android/desktop-compose/build/compose/binaries/main/app/$pkg"
+          if (!(Test-Path $appDir)) { throw "expected AppDir at $appDir" }
+          $suffix = if ($pkg -eq "kasane-nightly") { "-nightly" } else { "" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          # Portable ZIP: AppDir with bundled JRE; launch via bin\<pkg>.exe.
+          # Installer (msi/exe) would need packageMsi/packageExe + WiX on the runner.
+          Compress-Archive -Path $appDir -DestinationPath "dist/kasane-desktop-windows-x86_64-$v$suffix.zip"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/
+          retention-days: 7
+
+  publish:
+    needs: [prepare, verify, android, linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Skipped platform jobs (platform != all) are OK; failures are not.
+    if: >-
+      always() && !cancelled() &&
+      needs.verify.result == 'success' &&
+      !contains(needs.*.result, 'failure')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: SHA256SUMS
+        run: |
+          set -eu
+          cd dist
+          sha256sum kasane-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Notes
+        run: |
+          {
+            echo "# Kasane ${{ needs.prepare.outputs.version }} — ${{ needs.prepare.outputs.channel }}"
+            echo
+            echo "Automated build of commit \`${{ github.sha }}\`."
+            echo
+            if [ "${{ needs.android.outputs.signed }}" = "ci" ]; then
+              echo "> **Note:** the Android APK in this build is signed with an ephemeral CI key,"
+              echo "> **not** the release key — do not install over a release-signed build."
+              echo
+            fi
+            echo "See \`docs/MANUAL_ACCEPTANCE.md\` for the acceptance checklist."
+          } > notes.md
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          TAG="${{ needs.prepare.outputs.tag }}"
+          PRE=""; [ "${{ needs.prepare.outputs.prerelease }}" = "true" ] && PRE="--prerelease"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists - uploading new assets only (no clobber)"
+          else
+            gh release create "$TAG" --target "${{ github.sha }}" \
+              --title "${{ needs.prepare.outputs.title }}" \
+              --notes-file notes.md $PRE
+          fi
+          # Upload assets that do not exist yet; never overwrite.
+          for f in dist/*; do
+            base="$(basename "$f")"
+            if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx "$base"; then
+              echo "asset $base already on release - skipping"
+            else
+              gh release upload "$TAG" "$f"
+            fi
+          done
+          gh release view "$TAG" --json url,assets --jq '{url:.url,assets:[.assets[].name]}'
