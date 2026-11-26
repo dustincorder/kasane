@@ -18,7 +18,7 @@
 | Порядок работ, зависимости, решения владельца | `docs/ROADMAP.md` |
 | Отчёт аудита 2026-11-23 | `docs/HANDOFF.md` |
 | Протокол Connect (норматив) | `docs/connect/protocol.md`, `test-vectors.json` |
-| Узкие темы | `docs/playback-verification.md`, `sabr-playback.md`, `hls-playback.md`, `offline-library.md`, `design-system.md`, `incidents/` |
+| Узкие темы | `docs/playback-verification.md`, `sabr-playback.md`, `hls-playback.md`, `offline-library.md`, `design-system.md`, `windows-support.md`, `incidents/` |
 
 Остальные файлы в `docs/` (`STATUS.md`, `agent-map.md`, `DECISIONS.md`, `testing.md`, `android-testing.md`,
 `architecture/*`, `codex-handoff.md`, `roadmap-android.md`, `android-*.md`, `ACCEPTANCE.md`) — исторические.
