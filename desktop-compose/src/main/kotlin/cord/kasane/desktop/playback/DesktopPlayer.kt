@@ -188,6 +188,10 @@ class DesktopPlayer(
                 maybeExtendRadio()
             } catch (e: CancellationException) { throw e
             } catch (e: IOException) {
+                // The state already names the new track; without a stop, mpv keeps streaming the
+                // previous one to its end (and under repeat-one the stale end-of-file then reloads
+                // the new track — "the old song plays out, the pick starts only after").
+                runCatching { engine.stop() }
                 _state.update { it.copy(isLoading = false, isPlaying = false, error = e.message ?: "This track could not be played.") }
             }
         }

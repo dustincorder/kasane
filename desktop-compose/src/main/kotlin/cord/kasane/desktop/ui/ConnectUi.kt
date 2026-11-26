@@ -104,6 +104,8 @@ private fun ConnectPanel(app: DesktopApp, remote: DesktopRemote, onAddDevice: ()
                     Icon(deviceIcon(current?.platform ?: "linux"), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
                 }
                 var dragged by remember(target) { mutableStateOf<Float?>(null) }
+                // Remote volume applies live during the drag — coalesced so the wire is not flooded.
+                val sendRemoteVolume = rememberCoalesced<Float>(80) { remote.setVolume(it) }
                 val volume = dragged ?: if (current != null) states[current.id]?.volume ?: 1f else local.volume
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -111,7 +113,7 @@ private fun ConnectPanel(app: DesktopApp, remote: DesktopRemote, onAddDevice: ()
                     cord.kasane.ui.components.KasaneSlider(
                         value = volume,
                         compact = true,
-                        onValueChange = { dragged = it; if (current == null) app.player.setVolume(it) },
+                        onValueChange = { dragged = it; if (current == null) app.player.setVolume(it) else sendRemoteVolume(it) },
                         onValueChangeFinished = { if (current != null) dragged?.let(remote::setVolume); dragged = null },
                         modifier = Modifier.weight(1f),
                     )

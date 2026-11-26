@@ -116,12 +116,29 @@ class PlaybackArbiterTest {
     }
 
     @Test
-    fun claimIsDroppedWhenPerformerReportsIdle() {
+    fun aPausedPerformerKeepsTheSourceRole() {
         val a = arbiter()
         a.updateRemote("remote-a", "playing", "remote-a")
-        a.updateRemote("remote-a", "paused", null)
-        assertNull(a.activeDeviceId())
-        assertEquals(PlaybackRole.SOLO, a.localRole())
+        // The user pauses on the remote: it stays the accepted performer until an explicit switch.
+        a.updateRemote("remote-a", "paused", "remote-a")
+        assertEquals("remote-a", a.activeDeviceId())
+        assertEquals(PlaybackRole.LISTENER, a.localRole())
+        // Playing locally is still an explicit claim — it yields the paused source, not silently wins.
+        val actions = a.onLocalPlayIntent(nowMs = 1000)
+        assertIs<ArbiterAction.YieldRemote>(actions[0])
+        assertEquals("remote-a", (actions[0] as ArbiterAction.YieldRemote).deviceId)
+    }
+
+    @Test
+    fun claimIsDroppedWhenPerformerStops() {
+        val a = arbiter()
+        a.updateRemote("remote-a", "playing", "remote-a")
+        for (stop in listOf("idle", "ended", "error")) {
+            a.updateRemote("remote-a", "playing", "remote-a")
+            a.updateRemote("remote-a", stop, null)
+            assertNull(a.activeDeviceId(), "claim must be released on $stop")
+            assertEquals(PlaybackRole.SOLO, a.localRole())
+        }
     }
 
     @Test

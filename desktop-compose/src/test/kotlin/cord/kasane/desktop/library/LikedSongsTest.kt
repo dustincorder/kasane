@@ -37,17 +37,39 @@ class LikedSongsTest {
         val liked = LikedSongs(scope, likes, loadPage = { cont -> pages += cont; nextPage ?: page() }, enabled = { enabled })
     }
 
-    @Test fun refreshLoadsTheFirstPageAndLoadMoreAppends() = runTest(UnconfinedTestDispatcher()) {
+    @Test fun refreshSyncsEveryPageUntilTheContinuationEnds() = runTest(UnconfinedTestDispatcher()) {
         val r = Rig(backgroundScope)
-        r.nextPage = page("a", "b", continuation = "c1")
-        r.liked.refresh()
-        assertEquals(listOf("a", "b"), r.liked.tracks.value.map { it.id })
-        assertTrue(r.liked.hasMore.value)
-        r.nextPage = page("c", "a") // a server repeat must not duplicate
-        r.liked.loadMore()
-        assertEquals(listOf("a", "b", "c"), r.liked.tracks.value.map { it.id })
-        assertTrue(!r.liked.hasMore.value) // same continuation returned -> the feed ended
+        var calls = 0
+        val liked = LikedSongs(backgroundScope, r.likes,
+            loadPage = { cont -> r.pages += cont; calls++
+                if (cont == null) page("a", "b", continuation = "c1") else page("c", "a") // repeat must not duplicate
+            }, enabled = { true })
+        liked.refresh()
+        assertEquals(listOf("a", "b", "c"), liked.tracks.value.map { it.id })
+        assertTrue(!liked.hasMore.value) // the drain kept going until no new token came back
         assertEquals(listOf(null, "c1"), r.pages)
+        assertEquals(2, calls)
+    }
+
+    @Test fun loadMoreStillFetchesOnePageAtATime() = runTest(UnconfinedTestDispatcher()) {
+        val r = Rig(backgroundScope)
+        val liked = LikedSongs(backgroundScope, r.likes,
+            loadPage = { cont -> r.pages += cont
+                if (cont == null) page("a", continuation = "c1") else page("b")
+            }, enabled = { true })
+        liked.loadMore() // nothing loaded yet -> no-op
+        assertTrue(r.pages.isEmpty())
+    }
+
+    @Test fun aFullSyncStopsAfterThePageCap() = runTest(UnconfinedTestDispatcher()) {
+        val r = Rig(backgroundScope)
+        var calls = 0
+        val liked = LikedSongs(backgroundScope, r.likes,
+            loadPage = { cont -> calls++; page("t$calls", continuation = "next-$calls") },
+            enabled = { true })
+        liked.refresh()
+        assertEquals(50, calls) // a server that never ends the feed gets bounded, not looped forever
+        assertTrue(liked.hasMore.value)
     }
 
     @Test fun anUnlikedRowLeavesTheListAndANewLikePreprends() = runTest(UnconfinedTestDispatcher()) {

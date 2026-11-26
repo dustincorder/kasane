@@ -34,7 +34,7 @@ class LrcLibProvider(private val baseUrl: String = "https://lrclib.net") : Lyric
             append("$baseUrl/api/get?track_name=").append(enc(query.title))
             append("&artist_name=").append(enc(query.artist))
             if (includeAlbum) query.album?.let { append("&album_name=").append(enc(it)) }
-            query.durationMs?.let { append("&duration=").append(it / 1000) }
+            query.durationMs?.takeIf { it > 0 }?.let { append("&duration=").append(it / 1000) }
         }
         val body = http.get(url) ?: return null
         val entry = json.parseToJsonElement(body) as? JsonObject ?: return null

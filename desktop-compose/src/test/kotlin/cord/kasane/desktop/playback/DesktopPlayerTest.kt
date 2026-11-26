@@ -350,6 +350,38 @@ class DesktopPlayerTest {
         r.done()
     }
 
+    @Test fun selectingAnotherTrackUnderRepeatOneLoadsItRightAway() = runTest {
+        val r = rig()
+        r.player.playCollection(tracks("t", 2))
+        r.player.cycleRepeat(); r.player.cycleRepeat() // ONE
+        r.player.playIndex(1)
+        assertEquals("fake://t2", r.engine.loads.last().url)
+        r.done()
+    }
+
+    /**
+     * The reported defect: with repeat-one on, picking another track left mpv streaming the old
+     * one to its end when the new track's stream failed to resolve — the state had already moved,
+     * so the stale `end-file` then reloaded the *new* track ("starts after the old one ends").
+     * A failed switch must stop the engine instead of playing the previous track behind the UI.
+     */
+    @Test fun aFailedSwitchStopsTheOldTrackInsteadOfPlayingItToTheEnd() = runTest {
+        val r = rig()
+        r.player.playCollection(tracks("t", 2))
+        r.player.cycleRepeat(); r.player.cycleRepeat() // ONE
+        r.streams.failure = java.io.IOException("offline")
+        r.player.playIndex(1)
+        val s = r.player.state.value
+        assertEquals("t2", s.current?.id)
+        assertNotEquals(null, s.error)
+        assertTrue(r.engine.stopped)
+        // Nothing plays, so no stale end-of-file arrives; the user retries explicitly.
+        r.streams.failure = null
+        r.player.toggle()
+        assertEquals("fake://t2", r.engine.loads.last().url)
+        r.done()
+    }
+
     @Test fun toggleAfterAnErrorRetriesTheLoad() = runTest {
         val r = rig()
         r.streams.failure = java.io.IOException("offline")

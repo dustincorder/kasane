@@ -86,7 +86,7 @@ fun ConnectSheet(
     onDismiss: () -> Unit,
 ) {
     val devices by remote.manager.devices.collectAsState()
-    val states by remote.manager.remoteStates.collectAsState()
+    val states by remote.displayFrames.collectAsState()
     val current by remote.target.collectAsState()
     val online = devices.filter { it.trusted && it.online && it.id != null && it.id in states }
     val currentDevice = current?.let { id -> online.firstOrNull { it.id == id } }
@@ -138,6 +138,15 @@ private fun CurrentDeviceCard(
     val max = remember { audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
     var localVolume by remember { mutableFloatStateOf(audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) / max.toFloat()) }
     var dragged by remember(remoteVolume) { mutableStateOf<Float?>(null) }
+    // Slider-rate volume writes, local and remote alike: coalesced so a drag applies
+    // continuously without flooding AudioManager or the wire (trailing value lands).
+    val sliderScope = androidx.compose.runtime.rememberCoroutineScope()
+    val localVolumeOut = remember {
+        cord.kasane.music.connect.ThrottledSender<Float>(sliderScope, 80) { v ->
+            audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+                (v * max).roundToInt().coerceIn(0, max), android.media.AudioManager.FLAG_SHOW_UI)
+        }
+    }
     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
@@ -160,10 +169,15 @@ private fun CurrentDeviceCard(
                         onValueChange = {
                             if (local) {
                                 localVolume = it
-                                audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, (it * max).roundToInt(), android.media.AudioManager.FLAG_SHOW_UI)
-                            } else dragged = it
+                                localVolumeOut.submit(it)
+                            } else {
+                                dragged = it
+                                onRemoteVolume(it) // throttled in RemoteController.setVolume
+                            }
                         },
-                        onValueChangeFinished = { if (!local) dragged?.let(onRemoteVolume) },
+                        onValueChangeFinished = {
+                            if (local) localVolumeOut.submit(localVolume) else dragged?.let(onRemoteVolume)
+                        },
                         modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                     )
                     Icon(Icons.AutoMirrored.Outlined.VolumeUp, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)

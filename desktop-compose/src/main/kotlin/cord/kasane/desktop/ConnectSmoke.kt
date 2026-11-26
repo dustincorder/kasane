@@ -60,11 +60,18 @@ fun runConnectSmoke(): Int {
             delay(1_000)
             val aAfter = a.player.state.value
             println("transfer to B: B plays ${moved.current?.title} from ${"%.1f".format(moved.positionSec)}s (A was at ${"%.1f".format(before)}s); A playing=${aAfter.isPlaying}; B current=${cb.remote.target.value ?: "this computer"}")
+            // Pause on the new performer: the source role must persist through pause (§Active device rule 3).
+            ca.manager.connect("127.0.0.1:${cb.manager.port}") // by address: no mDNS in the smoke sandbox
+            b.player.pause()
+            withTimeout(15_000) { ca.manager.remoteStates.first { it[cb.identity.deviceId]?.playback == "paused" } }
+            delay(300) // let A's arbiter evaluate the paused report
+            val heldWhilePaused = ca.manager.activeDevice.value == cb.identity.deviceId
+            println("B paused: A still accepts B as performer=$heldWhilePaused (active=${ca.manager.activeDevice.value ?: "none"}, role=${ca.manager.localRole.value})")
             val unpaired = runCatching { withTimeout(15_000) { cc.manager.sendCommand(ca.identity.deviceId.let { "127.0.0.1:${ca.manager.port}" }, "pause") } }
             println("unpaired C -> A pause: ${unpaired.exceptionOrNull()?.let { it::class.simpleName + ": " + it.message } ?: "ACCEPTED (bad)"}; A still paused=${!a.player.state.value.isPlaying}")
             val rust = System.getenv("KASANE_RUST_CLI")?.let { cli -> rustInterop(cli, a, ca) }
             val ok = rust != false && codes.size == 2 && distinctCodes.size == 1 && seen.track?.id == track.id && moved.isPlaying &&
-                kotlin.math.abs(moved.positionSec - before) < 15 && !aAfter.isPlaying && unpaired.isFailure
+                kotlin.math.abs(moved.positionSec - before) < 15 && !aAfter.isPlaying && heldWhilePaused && unpaired.isFailure
             if (ok) 0 else 1
         }
     } finally {

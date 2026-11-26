@@ -51,13 +51,17 @@ class PlaybackArbiter(val localId: String) {
 
     companion object {
         fun plays(state: String): Boolean = state == "playing" || state == "buffering"
+
+        /** A claimed performer holds the source role while its session is alive:
+         *  `paused` is still the accepted source — `idle`/`ended`/`error` mean it stopped. */
+        private fun holdsSource(state: String): Boolean = plays(state) || state == "paused"
     }
 
     fun updateRemote(id: String, playback: String, activeId: String?, nowMs: Long = 0) {
         if (id == localId) return
         remotes[id] = RemotePlayback(playback, activeId)
-        // Adopt a peer's explicit claim only when it points at a device we know is playing.
-        if (activeId != null && activeId != claimedActiveId && isPlayingNow(activeId)) {
+        // Adopt a peer's explicit claim only when it points at a device holding the source role.
+        if (activeId != null && activeId != claimedActiveId && isHeldNow(activeId)) {
             claimedActiveId = activeId; claimedAtMs = nowMs
         }
     }
@@ -75,13 +79,20 @@ class PlaybackArbiter(val localId: String) {
     fun activeDeviceId(nowMs: Long = 0): String? {
         val claim = claimedActiveId
         if (claim != null) {
-            if (isPlayingNow(claim)) return claim
             val reported = claim == localId || remotes.containsKey(claim)
-            if (reported || nowMs - claimedAtMs > claimGraceMs) {
+            if (!reported) {
+                if (nowMs - claimedAtMs <= claimGraceMs) {
+                    // Takeover in flight: the new performer has not pushed its first state yet.
+                    return claim
+                }
                 claimedActiveId = null
-            } else {
-                // Takeover in flight: the new performer has not pushed its first state yet.
+            } else if (isHeldNow(claim)) {
+                // Playing, buffering or paused: the source persists through pause, track and
+                // queue changes until a takeover/yield moves it or the device goes away.
                 return claim
+            } else {
+                // The claimed device itself reported idle/ended/error — it stopped, release it.
+                claimedActiveId = null
             }
         }
         val playing = buildList {
@@ -124,6 +135,6 @@ class PlaybackArbiter(val localId: String) {
         return actions
     }
 
-    private fun isPlayingNow(id: String): Boolean =
-        if (id == localId) plays(localPlayback) else remotes[id]?.playback?.let(::plays) == true
+    private fun isHeldNow(id: String): Boolean =
+        if (id == localId) holdsSource(localPlayback) else remotes[id]?.playback?.let(::holdsSource) == true
 }

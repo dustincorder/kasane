@@ -107,6 +107,61 @@ class YtmLyricsParserTest {
         assertNull(YtmLyricsParser.lyricsBrowseId(buildJsonObject { }))
     }
 
+    /** Real `next` payloads leave tabRenderer.pageType null — the lyrics marker sits in the
+     *  endpoint's browse context (and lyrics browseIds carry the MPLY prefix). */
+    private fun realWorldTabs() = buildJsonObject {
+        putJsonObject("contents") {
+            putJsonObject("singleColumnMusicWatchNextResultsRenderer") {
+                putJsonObject("tabbedRenderer") {
+                    putJsonObject("watchNextTabbedResultsRenderer") {
+                        putJsonArray("tabs") {
+                            add(buildJsonObject {
+                                putJsonObject("tabRenderer") {
+                                    put("title", "Up next")
+                                    putJsonObject("endpoint") { putJsonObject("watchEndpoint") { } }
+                                }
+                            })
+                            add(buildJsonObject {
+                                putJsonObject("tabRenderer") {
+                                    put("title", "Lyrics")
+                                    putJsonObject("endpoint") {
+                                        putJsonObject("browseEndpoint") {
+                                            put("browseId", "MPLYt_vsx0QCCgQjT-3")
+                                            putJsonObject("browseEndpointContextSupportedConfigs") {
+                                                putJsonObject("browseEndpointContextMusicConfig") {
+                                                    put("pageType", "MUSIC_PAGE_TYPE_TRACK_LYRICS")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            })
+                            add(buildJsonObject {
+                                putJsonObject("tabRenderer") {
+                                    put("title", "Related")
+                                    putJsonObject("endpoint") {
+                                        putJsonObject("browseEndpoint") {
+                                            put("browseId", "MPTRt_vsx0QCCgQjT-3")
+                                            putJsonObject("browseEndpointContextSupportedConfigs") {
+                                                putJsonObject("browseEndpointContextMusicConfig") {
+                                                    put("pageType", "MUSIC_PAGE_TYPE_TRACK_RELATED")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            })
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test fun lyricsBrowseIdReadsTheEndpointContextLikeRealPayloads() {
+        assertEquals("MPLYt_vsx0QCCgQjT-3", YtmLyricsParser.lyricsBrowseId(realWorldTabs()))
+    }
+
     private fun descriptionPage(text: String, footer: String? = null) = buildJsonObject {
         putJsonObject("contents") {
             putJsonObject("sectionListRenderer") {

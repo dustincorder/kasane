@@ -323,6 +323,8 @@ fun PlayerBar(
                         deviceButton()
                         if (!compact) {
                             var volumeDrag by remember { mutableStateOf<Float?>(null) }
+                            // Live during the drag; coalesced so a remote target is not flooded.
+                            val sendVolume = rememberCoalesced<Float>(80) { controls.setVolume(it) }
                             val currentVol = volumeDrag ?: state.volume
                             IconButton(
                                 onClick = {
@@ -349,8 +351,8 @@ fun PlayerBar(
                             KasaneSlider(
                                 value = currentVol,
                                 compact = true,
-                                onValueChange = { volumeDrag = it; controls.setVolume(it) },
-                                onValueChangeFinished = { volumeDrag = null },
+                                onValueChange = { volumeDrag = it; sendVolume(it) },
+                                onValueChangeFinished = { volumeDrag?.let(controls::setVolume); volumeDrag = null },
                                 modifier = Modifier.width(96.dp),
                             )
                             Spacer(Modifier.width(4.dp))
@@ -546,6 +548,7 @@ fun NowPlaying(
     actions: Actions,
     onClose: () -> Unit,
     deviceButton: @Composable () -> Unit,
+    deviceLabel: String? = null,
     onShowLyrics: () -> Unit = {},
 ) {
     val track = state.current
@@ -588,6 +591,22 @@ fun NowPlaying(
                             )
                         }
                         deviceButton()
+                    }
+                    if (deviceLabel != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.padding(top = 4.dp),
+                        ) {
+                            Text(
+                                deviceLabel,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            )
+                        }
                     }
                     if (track == null) return@Column
                     val art = minOf(

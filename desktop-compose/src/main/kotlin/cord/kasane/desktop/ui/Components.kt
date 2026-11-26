@@ -58,6 +58,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +79,8 @@ import cord.kasane.music.model.Track
 import cord.kasane.music.provider.CloudLikeState
 import cord.kasane.music.provider.TrackLinks
 import cord.kasane.ui.components.MenuEntry
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 
 /** What a track or catalog entry can do; one implementation routes it to the player or navigation. */
 interface Actions {
@@ -182,6 +185,24 @@ fun trackMenuItems(
             add(MenuEntry("Share link", icon = Icons.Outlined.Share, group = MENU_GROUP_NAVIGATE) { actions.share(track) })
         }
     }
+}
+
+/**
+ * Coalesces rapid calls (slider drags) to at most one per [intervalMs]; the latest value
+ * always lands. Used where each call crosses the wire or a heavy backend.
+ */
+@Composable
+fun <T> rememberCoalesced(intervalMs: Long = 80L, block: (T) -> Unit): (T) -> Unit {
+    val latestBlock = rememberUpdatedState(block)
+    val pending = remember { kotlinx.coroutines.flow.MutableStateFlow<T?>(null) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val v = pending.filterNotNull().first()
+            if (pending.compareAndSet(v, null)) latestBlock.value(v)
+            kotlinx.coroutines.delay(intervalMs)
+        }
+    }
+    return remember { { v: T -> pending.value = v } }
 }
 
 /** Unified Material 3 dropdown menu with icons and group dividers for both right-click and overflow triggers. */

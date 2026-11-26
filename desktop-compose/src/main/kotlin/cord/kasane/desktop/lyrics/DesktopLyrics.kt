@@ -122,10 +122,19 @@ data class YtmLyrics(val text: String, val source: String?)
 
 object YtmLyricsParser {
     fun lyricsBrowseId(next: JsonObject): String? {
-        fun tabBrowseId(node: JsonObject): String? =
-            node["tabRenderer"]?.jsonObject?.takeIf {
-                it["pageType"]?.jsonPrimitive?.content == "MUSIC_PAGE_TYPE_TRACK_LYRICS"
-            }?.get("endpoint")?.jsonObject?.get("browseEndpoint")?.jsonObject?.get("browseId")?.jsonPrimitive?.content
+        fun tabBrowseId(node: JsonObject): String? {
+            val tab = node["tabRenderer"]?.jsonObject ?: return null
+            val endpoint = tab["endpoint"]?.jsonObject?.get("browseEndpoint")?.jsonObject ?: return null
+            val browseId = endpoint["browseId"]?.jsonPrimitive?.content ?: return null
+            // Real `next` payloads leave tabRenderer.pageType null — the lyrics marker lives in
+            // the endpoint's browse context config. Lyrics browseIds also all share the MPLY prefix.
+            val contextType = endpoint["browseEndpointContextSupportedConfigs"]?.jsonObject
+                ?.get("browseEndpointContextMusicConfig")?.jsonObject
+                ?.get("pageType")?.jsonPrimitive?.content
+            val marked = tab["pageType"]?.jsonPrimitive?.content == "MUSIC_PAGE_TYPE_TRACK_LYRICS" ||
+                contextType == "MUSIC_PAGE_TYPE_TRACK_LYRICS" || browseId.startsWith("MPLY")
+            return browseId.takeIf { marked }
+        }
         val root = next["contents"]?.jsonObject
             ?.get("singleColumnMusicWatchNextResultsRenderer")?.jsonObject
             ?.get("tabbedRenderer")?.jsonObject
@@ -178,7 +187,8 @@ class DesktopLyrics(
         providers = listOf(AmlTtmlProvider(), LrcLibProvider(), DesktopYtmLyricsProvider(catalog, session)),
         store = store)
 
-    private fun Track.query() = LyricsQuery(id, title, artist, album, durationMs = (durationSeconds * 1000).toLong())
+    private fun Track.query() = LyricsQuery(id, title, artist, album,
+        durationMs = durationSeconds.takeIf { it > 0 }?.let { (it * 1000).toLong() })
 
     suspend fun lyricsFor(track: Track, refresh: Boolean = false): LyricsDocument? =
         resolver.resolve(track.query(), http, refresh)

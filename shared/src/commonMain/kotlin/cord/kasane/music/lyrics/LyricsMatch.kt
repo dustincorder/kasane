@@ -45,7 +45,8 @@ object LyricsMatch {
         return artistsOverlap(queryArtist, candidateArtist)
     }
 
-    /** Absolute duration difference in ms; unknown durations never disqualify. */
+    /** Absolute duration difference in ms; unknown durations (null or non-positive) never disqualify. */
     fun durationClose(candidateMs: Long?, queryMs: Long?, toleranceMs: Long = 5_000): Boolean =
-        candidateMs == null || queryMs == null || kotlin.math.abs(candidateMs - queryMs) <= toleranceMs
+        candidateMs == null || queryMs == null || queryMs <= 0 ||
+            kotlin.math.abs(candidateMs - queryMs) <= toleranceMs
 }

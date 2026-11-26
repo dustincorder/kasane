@@ -70,6 +70,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+/** The track-menu gate must match `remoteActive`: a target only routes remotely while a
+ *  state frame for it is actually shown — a stale/adopted target alone must not eat taps. */
+private fun remoteShows(remote: cord.kasane.music.connect.RemoteController): Boolean =
+    remote.target.value?.let { remote.displayFrames.value[it] != null } == true
+
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 fun KasaneApp(app: KasaneApplication) {
@@ -106,10 +111,10 @@ fun KasaneApp(app: KasaneApplication) {
     CompositionLocalProvider(cord.kasane.music.ui.components.LocalCloudLikes provides cloudVisible,
         cord.kasane.music.ui.components.LocalPlaylistPicker provides playlists,
         cord.kasane.music.ui.components.LocalTrackActions provides cord.kasane.music.ui.components.TrackActions(
-            play = { t -> app.remote.value?.takeIf { it.target.value != null && !t.isLocal }?.playTrack(t) ?: app.playbackManager.playTrack(t) },
-            next = { t -> app.remote.value?.takeIf { it.target.value != null && !t.isLocal }?.playNext(t) ?: app.playbackManager.playNextInQueue(t) },
-            queue = { t -> app.remote.value?.takeIf { it.target.value != null && !t.isLocal }?.addToQueue(t) ?: app.playbackManager.addToQueue(t) },
-            radio = { t -> app.remote.value?.takeIf { it.target.value != null && !t.isLocal }?.playTrack(t) ?: app.playbackManager.startRadio(t) })) { KasaneContent(app) }
+            play = { t -> app.remote.value?.takeIf { remoteShows(it) && !t.isLocal }?.playTrack(t) ?: app.playbackManager.playTrack(t) },
+            next = { t -> app.remote.value?.takeIf { remoteShows(it) && !t.isLocal }?.playNext(t) ?: app.playbackManager.playNextInQueue(t) },
+            queue = { t -> app.remote.value?.takeIf { remoteShows(it) && !t.isLocal }?.addToQueue(t) ?: app.playbackManager.addToQueue(t) },
+            radio = { t -> app.remote.value?.takeIf { remoteShows(it) && !t.isLocal }?.playTrack(t) ?: app.playbackManager.startRadio(t) })) { KasaneContent(app) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
@@ -122,7 +127,7 @@ private fun KasaneContent(app: KasaneApplication) {
         val playbackState by app.playbackManager.uiState.collectAsState()
         val remote by app.remote.collectAsState()
         val remoteTarget by remote?.target?.collectAsState() ?: remember { mutableStateOf(null as String?) }
-        val remoteStates by remote?.manager?.remoteStates?.collectAsState()
+        val remoteStates by remote?.displayFrames?.collectAsState()
             ?: remember { mutableStateOf(emptyMap<String, cord.kasane.music.connect.Frame.State>()) }
         val remoteDevices by remote?.manager?.devices?.collectAsState()
             ?: remember { mutableStateOf(emptyList<cord.kasane.music.connect.ConnectDeviceView>()) }
@@ -289,13 +294,16 @@ private fun KasaneContent(app: KasaneApplication) {
             likedTracks = app.cachedCatalog.cached(catalogScope, "playlist:VLLM")?.page?.tracks.orEmpty()
             try {
                 val all = mutableListOf<Track>()
+                val seenIds = HashSet<String>()
+                val seenTokens = HashSet<String>()
                 var continuation: String? = null
                 var pages = 0
                 do {
                     val page = app.accountLibraryProvider.playlist("VLLM", continuation)
-                    all += page.tracks.filter { t -> all.none { it.id == t.id } }
-                    continuation = page.continuation
-                } while (continuation != null && ++pages < 15)
+                    page.tracks.forEach { t -> if (seenIds.add(t.id)) all += t }
+                    // YouTube continuations can cycle on the last page — a repeated token is the end.
+                    continuation = page.continuation?.takeIf { seenTokens.add(it) }
+                } while (continuation != null && ++pages < 100)
                 likedTracks = all
                 cloud?.seedLiked(all.map { it.id })
             } catch (e: CancellationException) { throw e } catch (_: Exception) { /* cached copy stays */ }
@@ -520,7 +528,7 @@ private fun KasaneContent(app: KasaneApplication) {
                                 }
                             }
                         },
-                        modifier = Modifier.padding(16.dp).padding(bottom = if (playbackState.currentTrack != null) 72.dp else 0.dp)
+                        modifier = Modifier.padding(16.dp).padding(bottom = if (displayedState.currentTrack != null) 72.dp else 0.dp)
                     ) {
                         Text(playbackState.errorMessage!!)
                     }
@@ -533,7 +541,7 @@ private fun KasaneContent(app: KasaneApplication) {
                                 Text("Dismiss", color = MaterialTheme.colorScheme.inversePrimary)
                             }
                         },
-                        modifier = Modifier.padding(16.dp).padding(bottom = if (playbackState.currentTrack != null) 72.dp else 0.dp)
+                        modifier = Modifier.padding(16.dp).padding(bottom = if (displayedState.currentTrack != null) 72.dp else 0.dp)
                     ) {
                         Text(playbackState.noticeMessage!!)
                     }
@@ -546,7 +554,7 @@ private fun KasaneContent(app: KasaneApplication) {
                                 Text("Dismiss", color = MaterialTheme.colorScheme.inversePrimary)
                             }
                         },
-                        modifier = Modifier.padding(16.dp).padding(bottom = if (playbackState.currentTrack != null) 72.dp else 0.dp)
+                        modifier = Modifier.padding(16.dp).padding(bottom = if (displayedState.currentTrack != null) 72.dp else 0.dp)
                     ) {
                         Text(message)
                     }
@@ -604,7 +612,7 @@ private fun KasaneContent(app: KasaneApplication) {
                     TextButton(onClick = { app.settings.setOfflineOnly(false) }) { Text("Turn off") }
                 }
             }
-            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(bottom = if (playbackState.currentTrack != null) 76.dp else 0.dp)) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(bottom = if (displayedState.currentTrack != null) 76.dp else 0.dp)) {
                 if (showConnectSettings) {
                     val connectOn by app.settings.connectEnabled.collectAsState()
                     cord.kasane.music.ui.components.ConnectDevicesScreen(remote, connectOn, app.settings::setConnectEnabled,

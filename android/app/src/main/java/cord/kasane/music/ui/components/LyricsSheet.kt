@@ -53,6 +53,8 @@ fun LyricsSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        // Lyrics are a reading surface — open expanded, never collapsed halfway.
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f)) {

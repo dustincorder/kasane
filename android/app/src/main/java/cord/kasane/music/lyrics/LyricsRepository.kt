@@ -37,8 +37,12 @@ class LyricsRepository(
         withContext(Dispatchers.IO) {
             val builder = Request.Builder().url(url).header("User-Agent", "Kasane/1.0")
             headers.forEach { (k, v) -> builder.header(k, v) }
-            runCatching { client.newCall(builder.build()).execute().use {
-                if (it.isSuccessful) it.body?.string() else null } }.getOrNull()
+            // Per LyricsHttpTransport's contract: null means "the provider has nothing
+            // at this URL" (non-2xx); a real failure (offline, timeout, TLS) throws so
+            // the resolver reports Unavailable — not a silent Absent on every track.
+            client.newCall(builder.build()).execute().use {
+                if (it.isSuccessful) it.body?.string() else null
+            }
         }
     }
     private val store = RoomLyricsStore(database.lyricsDao())
@@ -48,15 +52,18 @@ class LyricsRepository(
 
     private fun Track.query() = LyricsQuery(id, title, artist, album, durationMs = (durationSeconds * 1000).toLong())
 
+    // Provider CPU work (the AMLL index is a ~1.7 MB JSONL parsed and ranked per query,
+    // plus LRC/TTML parsing) must never run on the caller's dispatcher — the UI calls
+    // these from composition scopes, i.e. the main thread.
     suspend fun lyricsFor(track: Track, refresh: Boolean = false): LyricsDocument? =
-        resolver.resolve(track.query(), http, refresh)
+        withContext(Dispatchers.Default) { resolver.resolve(track.query(), http, refresh) }
 
     /** Detailed outcome: Found / Absent (providers empty) / Unavailable (providers failed). */
     suspend fun lyricsResolutionFor(track: Track, refresh: Boolean = false): LyricsResolution =
-        resolver.resolveState(track.query(), http, refresh)
+        withContext(Dispatchers.Default) { resolver.resolveState(track.query(), http, refresh) }
 
     suspend fun candidatesFor(track: Track): List<Pair<LyricsCandidate, LyricsDocument?>> =
-        resolver.candidates(track.query(), http)
+        withContext(Dispatchers.Default) { resolver.candidates(track.query(), http) }
 
     suspend fun choose(trackId: String, candidate: LyricsCandidate) = resolver.choose(trackId, candidate)
     suspend fun adjustOffset(trackId: String, deltaMs: Long) = resolver.adjustOffset(trackId, deltaMs)

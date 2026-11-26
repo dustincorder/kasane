@@ -81,6 +81,52 @@
   старт воспроизведения теперь делает claim (`yield` активному исполнителю), а не просто pause.
   Проверка: `C:DesktopPlayerAdapterTest` (loopback remote-команд: playTrack/pause/seek/volume/
   queue/takeover-handoff/unsupported), `--connect-smoke` зелёный (transfer B с позиции, A затих).
+- ~~**KI-37. Тексты песен с YTM не доходили никогда.**~~ Живой прогон `next`-ответа показал
+  корень: `tabRenderer.pageType` у вкладок `null`, маркер `MUSIC_PAGE_TYPE_TRACK_LYRICS` живёт
+  внутри `endpoint.browseEndpoint…musicConfig.pageType` — `YtmLyricsParser.lyricsBrowseId`
+  смотрел не туда, `MPLY…`-browseId не находился ни разу. Плюс `durationSeconds=0` →
+  `durationMs=0` → `durationClose` отбраковывал всех кандидатов, а strictGet получал гарантиро-
+  ванный 404 (`&duration=0`). Исправлено: browseId ищется по конфигу эндпоинта + префиксу
+  `MPLY`, `durationClose`/strictGet трактуют ≤0 как «длительность неизвестна». Проверено живьём
+  на латинице и кириллице: next → `MPLYt_…` → browse → реальный текст; регресс-тест на реальной
+  фикстуре `next`.
+- ~~**KI-38. Liked songs синхронизировался частично (~1499 из ~3220).**~~ Серверная пагинация
+  цела — доказано реплеем живой сессии (30 страниц × ~100 строк, ~3070 уникальных id, токены
+  до конца); `CatalogJsonParser` выдаёт все треки и continuation на каждой странице (пробный
+  прогон по сохранённым страницам). Кап был клиентским: `LikedSongs.refresh()` грузил только
+  страницу 0 (`loadMore`/`hasMore` — мёртвый код без потребителей), вид плейлиста листал по
+  клику «Load more». Теперь `refresh` дозагружает все страницы до конца continuation
+  (предохранитель `MAX_SYNC_PAGES=50` ≈ 5000 строк), `loadMore` остался постраничным.
+  Проверка: `C:LikedSongsTest` (drain до конца, дедуп повторов, стоп по капу).
+- ~~**KI-39. Пауза на удалённом исполнителе снимала его с роли.**~~ Арбитр сбрасывал claim на
+  любом non-playing репорте: пауза на источнике → `activeDeviceId=null` → группа теряла
+  исполнителя до явного переключения. По требованию remote-persistence: claim держится через
+  `paused` (playing/buffering/paused — «источник жив»), снимается на `idle`/`ended`/`error`
+  (источник сам остановился), при оффлайне и при takeover/yield. Спека обновлена:
+  `docs/connect/protocol.md` §Active device правила 1 и 3. Проверка: `S:PlaybackArbiterTest`
+  (paused держит, idle/ended/error отпускают, локальный play-intent yield'ит приостановленный
+  источник), `--connect-smoke` — «B paused: A still accepts B as performer».
+- ~~**KI-40. При неудачном выборе трека mpv доигрывал предыдущий.**~~ `DesktopPlayer.loadCurrent`
+  обновляет состояние до `streams.resolve`, но в ветке `catch (IOException)` движку никто не
+  говорил остановиться: UI уже показывал новый трек, а mpv продолжал стримить старый до EOF.
+  Под repeat-one пришедший затем `end-file` перезагружал уже *новый* трек — репорт «старый трек
+  доигрывает до конца, выбранный стартует только после него». Теперь `catch` делает
+  `engine.stop()`: ошибка видна, аудио честно замолкает, повтор — явным действием (`toggle` с
+  idle-движка перезагружает текущий). Проверка: `C:DesktopPlayerTest`
+  (`aFailedSwitchStopsTheOldTrackInsteadOfPlayingItToTheEnd`,
+  `selectingAnotherTrackUnderRepeatOneLoadsItRightAway`).
+  ~~Android: `playNext`/`canSkipNext`/ENDED-ветка `togglePlayPause` под `REPEAT_MODE_ONE`
+  отдельно сломаны (`seekToNextMediaItem`/`hasNextMediaItem` возвращают текущий индекс)~~ —
+  утверждение опровергнуто для media3 1.5.1: `RepeatSwitchReproTest` (Robolectric + реальный
+  ExoPlayer) показывает `hasNextMediaItem`=true/nextIdx=1, `seekToNextMediaItem`→1,
+  `setMediaItems`/`seekToDefaultPosition` переключают мгновенно под repeat-one, на последнем
+  элементе `C.INDEX_UNSET`. Пути `:app` чисты. Реальный Android-дефект того же симптома —
+  несогласованный гейт remote-роутинга в `KasaneApp`: `routePlayTrack` маршрутил по
+  `remoteActive` (target И показанный фрейм), а `TrackActions` CompositionLocal — по
+  `target != null` только. Со stale-target без фрейма тап играл локально, а действия меню
+  уходили на удалёнку fire-and-forget (`RemoteController.send` глотал ошибки) — репорт
+  «выбранный трек не играет» + тот же KI-40-симптом при remote-control desktop-исполнителя
+  до фикса. Гейт выровнен через `remoteShows()`. Проверка: `A:RepeatSwitchReproTest` (4).
 - ~~**KI-21. Нет тестов на `StreamProxy`, `MpvEngine`.**~~ Закрыто: `StreamProxyTest`
   (HTTP-обмен против локального сервера: range-проксирование, отказ CDN, tee-кэш),
   `StreamSelectorTest` (цепочка `resolve`/`resolveForSave` без гостевого фолбэка на сохранение),

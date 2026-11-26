@@ -96,9 +96,9 @@ A Connect group has **at most one performer** — the device whose speakers play
 
 - **Roles:** `performer` (the accepted playback source), `listener` (controls the performer), `solo` (no group performer). A device reports its role and the `activeId` it accepts in every `state` frame.
 - **Resolution** — deterministic, no cross-device clocks:
-  1. An explicit claim wins while the claimed device is playing: a local play intent, a processed `takeover`, or an adopted peer claim (`state.activeId` naming a device that reports playing).
+  1. An explicit claim wins while the claimed device holds the source: a local play intent, a processed `takeover`, or an adopted peer claim (`state.activeId` naming a device that reports `playing`/`paused`).
   2. Otherwise every device reporting `playing`/`buffering` is a candidate and the **lexicographically smallest device id** keeps playing; the rest must yield. Both sides compute the same loser from the same inputs.
-  3. A claim pending its first `playing` state (takeover in flight) is honoured briefly (≈30 s), then dropped; a claimed device that reports a non-playing state loses the claim immediately.
+  3. **Source persistence:** once claimed, the device stays the accepted performer through `paused` and through track/queue edits — the role ends only on an explicit switch (`takeover`/`yield` accepted by another device), on the device going offline, or when it reports `idle`/`ended`/`error` (the source stopped itself). A claim pending its first `playing` state (takeover in flight) is honoured briefly (≈30 s), then dropped.
 - **Push ("play on Desktop"):** the controller sends `takeover` to the target with a snapshot (same payload shape as `handoff`). The target starts playback first and acks; only then does the source pause and demote itself to listener.
 - **Pull ("play here"):** the controller sends `yield` to the current performer naming itself in `activeId`; the performer pauses, demotes to listener and acks; the new device then plays and claims performer.
 - **Local play while remote performs:** the device must `yield` the remote performer BEFORE starting local playback.

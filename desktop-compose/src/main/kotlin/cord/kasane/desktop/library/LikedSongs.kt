@@ -52,18 +52,19 @@ class LikedSongs(
         }
     }
 
-    /** Loads the first page. Safe to call again after sign-in/out. */
+    /** Syncs the whole playlist: pages are fetched until the continuation ends so rating hints
+     *  and the Home shelf reflect the full liked list, not just the newest screenful. */
     fun refresh() {
         if (!enabled()) { clear(); return }
         loadJob?.cancel()
         loaded = true
-        fetch(null)
+        fetch(null, drain = true)
     }
 
     fun loadMore() {
         val cont = continuation ?: return
         if (!enabled() || _loading.value) return
-        fetch(cont)
+        fetch(cont, drain = false)
     }
 
     fun clear() {
@@ -75,21 +76,29 @@ class LikedSongs(
         loaded = false
     }
 
-    private fun fetch(cont: String?) {
+    private fun fetch(cont: String?, drain: Boolean) {
         loadJob = scope.launch {
             _loading.value = true
             _error.value = null
             try {
-                val page = loadPage(cont)
-                val fresh = page.shelves.flatMap { it.items }.mapNotNull { it.track() }
-                likes.seedLiked(fresh)
-                _tracks.update { old -> ((if (cont == null) emptyList() else old) + fresh).distinctBy { it.id } }
-                continuation = page.continuation?.takeUnless { it == cont }
-                _hasMore.value = continuation != null
+                var next = cont
+                var pages = 0
+                do {
+                    val page = loadPage(next)
+                    val fresh = page.shelves.flatMap { it.items }.mapNotNull { it.track() }
+                    likes.seedLiked(fresh)
+                    _tracks.update { old -> ((if (next == null) emptyList() else old) + fresh).distinctBy { it.id } }
+                    next = page.continuation?.takeUnless { it == next }
+                    _hasMore.value = next != null
+                } while (drain && next != null && enabled() && ++pages < MAX_SYNC_PAGES)
             } catch (e: CancellationException) { throw e
             } catch (_: Exception) {
                 _error.value = "Couldn't load your liked songs. Check your connection and try again."
             } finally { _loading.value = false }
         }
     }
+
+    /** Hard bound on one sync run (~5 000 rows): beyond it the list is either anomalous or
+     *  YouTube is looping continuation tokens — a repeated token already ends the drain early. */
+    private companion object { const val MAX_SYNC_PAGES = 50 }
 }

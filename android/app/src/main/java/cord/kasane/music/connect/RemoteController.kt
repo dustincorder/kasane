@@ -5,10 +5,12 @@ import cord.kasane.music.model.Track
 import cord.kasane.music.playback.PlaybackManager
 import cord.kasane.music.playback.PlaybackUiState
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -36,32 +38,83 @@ class RemoteController(
     private val playback: LocalPlayback,
     private val scope: CoroutineScope,
 ) {
-    /** The accepted remote performer, or null when this device performs (or nothing plays). */
+    /**
+     * The remote device the player UI renders and commands — sticky by contract:
+     * once a remote performs, it stays the shown source while it keeps reporting
+     * (paused included), until an explicit source switch or the device going offline.
+     * The arbiter's activeDevice only knows the performer while it *plays*, so the
+     * target is NOT cleared when it reports null or this device.
+     */
     private val _target = MutableStateFlow<String?>(null)
     val target: StateFlow<String?> = _target.asStateFlow()
 
+    /** Local-clock time of the last remote-target assignment (explicit or adopted). */
+    private val targetSwitchMs = java.util.concurrent.atomic.AtomicLong(0)
+
+    private fun adoptTarget(deviceId: String) {
+        targetSwitchMs.set(System.currentTimeMillis())
+        _target.value = deviceId
+    }
+
     /** Local-clock time at which each device's last state frame arrived. */
-    private val receivedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val receivedAt = ConcurrentHashMap<String, Long>()
+
+    /** Last state frame seen per device; fills remote gaps (session flap, stopped track). */
+    private val lastFrames = ConcurrentHashMap<String, Frame.State>()
+
+    /**
+     * What the player UI projects: live frames plus the last known frame for every
+     * device that is still online — the remote player keeps its track/queue displayed
+     * even when the local player is empty or a frame is momentarily missing.
+     */
+    private val _displayFrames = MutableStateFlow<Map<String, Frame.State>>(emptyMap())
+    val displayFrames: StateFlow<Map<String, Frame.State>> = _displayFrames.asStateFlow()
+
+    private val volumeOut = ThrottledSender<Float>(scope, VOLUME_INTERVAL_MS) { v ->
+        manager.sendCommand(_target.value ?: return@ThrottledSender,
+            "setVolume", buildJsonObject { put("volume", v) })
+    }
 
     init {
         scope.launch {
             playback.uiState.map { it.isPlaying }.distinctUntilChanged().collect { playing ->
-                // Local play intent: the arbiter yields the accepted remote performer first,
-                // so local and remote never overlap.
-                if (playing) runCatching { manager.claimPerformer() }
+                // Explicit local switch: playing here makes this device the source. The
+                // arbiter yields the accepted remote performer first, so no overlap.
+                // A stale "playing" emission queued before a remote-target switch must
+                // not undo it — suppress edges in the window right after the switch.
+                // (No live-state re-check: the arbiter's own yield may already have
+                // paused us, and skipping the claim here deadlocks the switch.)
+                if (playing &&
+                    System.currentTimeMillis() - targetSwitchMs.get() > PLAY_EDGE_SUPPRESS_MS) {
+                    _target.value = null
+                    runCatching { manager.claimPerformer() }
+                }
             }
         }
         scope.launch {
             manager.remoteStates.collect { states ->
                 val now = System.currentTimeMillis()
-                states.keys.forEach { receivedAt[it] = now }
+                states.forEach { (id, frame) -> receivedAt[id] = now; lastFrames[id] = frame }
                 (receivedAt.keys - states.keys).forEach { receivedAt.remove(it) }
             }
         }
         scope.launch {
             manager.activeDevice.collect { active ->
-                _target.value = active?.takeIf { it != manager.localDeviceId }
+                if (active != null && active != manager.localDeviceId) adoptTarget(active)
             }
+        }
+        scope.launch {
+            // Sticky-target bookkeeping: clear only when the device is gone or went offline.
+            combine(manager.devices, manager.remoteStates) { devices, states -> devices to states }
+                .collect { (devices, states) ->
+                    val online = devices.filter { it.state != DeviceState.OFFLINE }.mapNotNull { it.id }.toSet()
+                    lastFrames.keys.retainAll(online + states.keys)
+                    _displayFrames.value = states.toMutableMap().apply {
+                        for (id in online) if (id !in this) lastFrames[id]?.let { this[id] = it }
+                    }
+                    val current = _target.value
+                    if (current != null && current !in online) _target.value = null
+                }
         }
     }
 
@@ -85,6 +138,7 @@ class RemoteController(
                 val frame = remoteFrame(from) ?: return@launch onDone(false)
                 if (deviceId == null) pullTo(from, frame) else pushRemote(from, frame, deviceId)
             }
+            if (ok) deviceId?.let(::adoptTarget) ?: run { _target.value = null }
             onDone(ok)
         }
     }
@@ -141,12 +195,15 @@ class RemoteController(
         return ok
     }
 
+    /** Slider-rate input: submissions are coalesced — at most one command per interval, latest wins. */
     fun setVolume(volume: Float) {
-        send("setVolume", buildJsonObject { put("volume", volume.coerceIn(0f, 1f)) })
+        if (_target.value == null) return
+        volumeOut.submit(volume.coerceIn(0f, 1f))
     }
 
     /** Close the session to [deviceId] until it is announced again. */
     fun disconnect(deviceId: String) {
+        if (_target.value == deviceId) _target.value = null
         scope.launch { runCatching { manager.disconnect(deviceId) } }
     }
 
@@ -155,13 +212,15 @@ class RemoteController(
     }
 
     fun unpair(deviceId: String) {
+        if (_target.value == deviceId) _target.value = null
         scope.launch { runCatching { manager.unpair(deviceId) } }
     }
 
     fun confirm(promptId: String, accepted: Boolean) = manager.confirmPairing(promptId, accepted)
 
+    /** Live frame when the session is up, else the device's last reported state. */
     fun remoteFrame(deviceId: String): Frame.State? =
-        manager.remoteStates.value[deviceId]
+        manager.remoteStates.value[deviceId] ?: lastFrames[deviceId]
 
     /** Project a remote state frame into the shape the player UI renders. */
     fun project(frame: Frame.State): PlaybackUiState = PlaybackUiState(
@@ -268,11 +327,14 @@ class RemoteController(
                     repeat = "off",
                 ))
             }.isSuccess
+            if (ok) adoptTarget(deviceId)
             onDone(ok)
         }
     }
 
     private companion object {
+        const val VOLUME_INTERVAL_MS = 80L
+        const val PLAY_EDGE_SUPPRESS_MS = 750L
         fun repeatName(mode: Int) = when (mode) {
             Player.REPEAT_MODE_ALL -> "all"
             Player.REPEAT_MODE_ONE -> "one"

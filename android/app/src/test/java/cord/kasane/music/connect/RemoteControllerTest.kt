@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -92,12 +94,14 @@ private class FakePlayback : LocalPlayback, ConnectPlayerAdapter {
 
 private class RecordingAdapter : ConnectPlayerAdapter {
     val handoffs = java.util.concurrent.CopyOnWriteArrayList<Frame.Handoff>()
+    val commands = java.util.concurrent.CopyOnWriteArrayList<Pair<String, JsonObject>>()
     var state = PlayerSnapshot(playback = "idle")
     private val counter = java.util.concurrent.atomic.AtomicLong(0)
     private val _changed = MutableStateFlow(0L)
     override val changed: StateFlow<Long> = _changed
     override suspend fun snapshot() = state
     override suspend fun execute(action: String, args: JsonObject) {
+        commands += action to args
         state = when (action) {
             "play" -> state.copy(playback = "playing")
             "pause" -> state.copy(playback = "paused")
@@ -134,16 +138,29 @@ class RemoteControllerTest {
             requireNotNull(javaClass.getResource("/connect/$name")).readBytes(),
             "kasane".toCharArray(), UUID.randomUUID().toString(), name)
 
-    private fun manager(identity: ConnectIdentity, adapter: ConnectPlayerAdapter, dir: java.io.File) =
+    private fun manager(identity: ConnectIdentity, adapter: ConnectPlayerAdapter, dir: java.io.File,
+                        isLocalAddress: (String) -> Boolean = { true }) =
         ConnectManager(ConnectConfig(identity, adapter, java.io.File(dir, "trusted.json"),
-            appVersion = "test", platform = "android", scope = scope, listenPort = 0))
+            appVersion = "test", platform = "android", scope = scope, listenPort = 0,
+            isLocalAddress = isLocalAddress))
 
     @Before fun setUp() {
         serverAdapter = RecordingAdapter(); playback = FakePlayback()
         serverDir = java.nio.file.Files.createTempDirectory("rc-server").toFile()
         clientDir = java.nio.file.Files.createTempDirectory("rc-client").toFile()
-        server = manager(fixture("test-identity.p12"), serverAdapter, serverDir)
-        client = manager(fixture("test-identity-2.p12"), playback, clientDir)
+        val serverIdentity = fixture("test-identity.p12")
+        val clientIdentity = fixture("test-identity-2.p12")
+        // Mutual trust is pre-seeded so sessions authenticate at connect time: the
+        // interactive SAS exchange's pair-event flow can drop a fast PairNonce reply.
+        val now = System.currentTimeMillis() / 1000
+        TrustStore(java.io.File(serverDir, "trusted.json")).put(
+            TrustedDevice(clientIdentity.deviceId, clientIdentity.deviceName, "android",
+                clientIdentity.fingerprintHex, now))
+        TrustStore(java.io.File(clientDir, "trusted.json")).put(
+            TrustedDevice(serverIdentity.deviceId, serverIdentity.deviceName, "android",
+                serverIdentity.fingerprintHex, now))
+        server = manager(serverIdentity, serverAdapter, serverDir)
+        client = manager(clientIdentity, playback, clientDir) { false }
         server.start(); client.start()
         remote = RemoteController(client, playback, scope)
     }
@@ -159,13 +176,17 @@ class RemoteControllerTest {
             if (check()) return
             delay(25)
         }
-        error("condition not met within ${timeoutMs}ms")
+        error("condition not met within ${timeoutMs}ms " +
+            "[target=${remote.target.value} active=${client.activeDevice.value} " +
+            "states=${client.remoteStates.value.mapValues { it.value.playback }} " +
+            "serverPb=${serverAdapter.state.playback} localPb=${playback.uiState.value.isPlaying} " +
+            "devices=${client.devices.value.map { it.id to it.state }} " +
+            "frames=${remote.displayFrames.value.mapValues { it.value.playback }}]")
     }
 
     private suspend fun pairedDeviceId(): String {
+        // Trust was seeded in setUp: pair() connects and is authed immediately (null).
         client.pair("127.0.0.1:${server.port}")
-        awaitTrue { server.prompts.value.isNotEmpty() }
-        server.confirmPairing(server.prompts.value.first().promptId, true)
         awaitTrue { client.devices.value.any { it.connection == "paired" } }
         return client.devices.value.first { it.connection == "paired" }.id!!
     }
@@ -251,5 +272,98 @@ class RemoteControllerTest {
         serverAdapter.execute("play", JsonObject(emptyMap()))
         awaitTrue { client.remoteStates.value[deviceId]?.role == "performer" }
         assertEquals(deviceId, client.remoteStates.value[deviceId]?.activeId)
+    }
+
+    @Test
+    fun targetPersistsWhenRemotePauses() = runBlocking {
+        val deviceId = pairedDeviceId()
+        playback.setPlaying(queue(), 0, 5_000)
+        assertTrue(transfer(deviceId))
+        awaitTrue { remote.target.value == deviceId }
+        awaitTrue { serverAdapter.state.playback == "playing" }
+
+        // The performer pauses: a pause is not a source switch — the arbiter keeps the
+        // claim through "paused", and the UI target must keep the remote source.
+        serverAdapter.execute("pause", JsonObject(emptyMap()))
+        awaitTrue { client.remoteStates.value[deviceId]?.playback == "paused" }
+        delay(500)
+        assertEquals(deviceId, client.activeDevice.value)
+        assertEquals(deviceId, remote.target.value)
+        assertNotNull(remote.displayFrames.value[deviceId])
+    }
+
+    @Test
+    fun targetClearsWhenDeviceGoesOffline() = runBlocking {
+        val deviceId = pairedDeviceId()
+        playback.setPlaying(queue(), 0, 5_000)
+        assertTrue(transfer(deviceId))
+        awaitTrue { remote.target.value == deviceId }
+
+        // Service unannounced and the session dead: the device is offline — the target
+        // releases and its cached frame is dropped, so the UI falls back to the local player.
+        client.onServiceLost(deviceId, "127.0.0.1", server.port)
+        server.stop()
+        awaitTrue { remote.target.value == null }
+        awaitTrue { remote.displayFrames.value[deviceId] == null }
+    }
+
+    @Test
+    fun localPlayIntentSwitchesTargetBackToLocal() = runBlocking {
+        val deviceId = pairedDeviceId()
+        playback.setPlaying(queue(), 0, 5_000)
+        assertTrue(transfer(deviceId))
+        awaitTrue { remote.target.value == deviceId }
+
+        // The user plays here (a moment after the switch, past the stale-edge window):
+        // an explicit source switch — the remote target releases and the arbiter
+        // yields the remote performer before local audio starts.
+        // Past RemoteController's stale-edge suppression window (750ms).
+        delay(850)
+        playback.setPlaying(queue(), 1, 1_000)
+        awaitTrue { remote.target.value == null }
+        awaitTrue { serverAdapter.state.playback == "paused" }
+    }
+
+    @Test
+    fun lastFrameIsShownWhileSessionIsDownButDeviceOnline() = runBlocking {
+        val deviceId = pairedDeviceId()
+        // Announced on the network, so a dead session reads PAIRED — not OFFLINE.
+        client.onServiceDiscovered(deviceId, "Desktop", "desktop", "127.0.0.1", server.port)
+        playback.setPlaying(queue(), 0, 5_000)
+        assertTrue(transfer(deviceId))
+        awaitTrue { remote.target.value == deviceId }
+        awaitTrue { client.remoteStates.value[deviceId] != null }
+        val last = client.remoteStates.value.getValue(deviceId)
+
+        // Session drops (peer app restart / network blip) while the service stays announced:
+        // the player UI must keep the remote context — device, track, state — not an empty chin.
+        server.stop()
+        awaitTrue { client.remoteStates.value[deviceId] == null }
+        awaitTrue { remote.displayFrames.value[deviceId] != null }
+        assertEquals(deviceId, remote.target.value)
+        assertEquals(last, remote.displayFrames.value[deviceId])
+    }
+
+    @Test
+    fun volumeCommandsAreCoalesced() = runBlocking {
+        val deviceId = pairedDeviceId()
+        playback.setPlaying(queue(), 0, 5_000)
+        assertTrue(transfer(deviceId))
+        awaitTrue { remote.target.value == deviceId }
+        serverAdapter.commands.clear()
+
+        // A dragged slider submits every tick; the wire sees a bounded, latest-wins stream
+        // whose trailing delivery is always the final submitted value.
+        val submissions = (1..30).map { it / 100f }
+        submissions.forEach { remote.setVolume(it) }
+        awaitTrue(timeoutMs = 5_000) {
+            val last = serverAdapter.commands.filter { it.first == "setVolume" }
+                .lastOrNull()?.second?.get("volume")?.jsonPrimitive?.doubleOrNull
+            last != null && kotlin.math.abs(last - 0.30) < 0.001
+        }
+        val delivered = serverAdapter.commands.count { it.first == "setVolume" }
+        assertTrue(
+            "expected coalescing, got $delivered deliveries for ${submissions.size} submissions",
+            delivered < submissions.size)
     }
 }
