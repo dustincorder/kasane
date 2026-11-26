@@ -168,12 +168,7 @@ fun SettingsScreen(
                 dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Keep") } })
         }
         SettingsDestination.ABOUT -> SettingsSubScreen("About", { destination = null }) {
-            SettingsSection("Kasane") {
-                ListItem(
-                    headlineContent = { Text("Version", style = MaterialTheme.typography.titleSmall) },
-                    supportingContent = { Text("${cord.kasane.music.BuildConfig.VERSION_NAME} · Android", style = MaterialTheme.typography.bodySmallMuted) },
-                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent))
-            }
+            SettingsSection("Kasane") { UpdateSection(app.updates) }
         }
         null -> SettingsRoot(
             account = (state as? AccountState.SignedIn)?.identity,

@@ -15,7 +15,10 @@ import java.io.IOException
  * reachable; when it is not, the caller keeps the session in memory only and the UI says so.
  * Cookie and tokens are never written to a plain file or logged.
  */
-class SecretServiceStore(private val item: String = ITEM) : SessionStore {
+class SecretServiceStore(
+    schemaName: String = SCHEMA_NAME,
+    private val item: String = ITEM,
+) : SessionStore {
     enum class Availability { READY, EMPTY, UNAVAILABLE }
 
     private val lib = NativeLibrary.getInstance("secret-1")
@@ -23,7 +26,7 @@ class SecretServiceStore(private val item: String = ITEM) : SessionStore {
     private fun f(name: String): Function = lib.getFunction(name)
 
     private val schema: Pointer = f("secret_schema_new").invokePointer(
-        arrayOf(SCHEMA_NAME, 0, "service", 0, null)) // SECRET_SCHEMA_NONE, one STRING attribute
+        arrayOf(schemaName, 0, "service", 0, null)) // SECRET_SCHEMA_NONE, one STRING attribute
         ?: throw IOException("libsecret rejected the session schema")
 
     @Synchronized

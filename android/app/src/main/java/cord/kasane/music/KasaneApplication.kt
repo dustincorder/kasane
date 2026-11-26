@@ -60,6 +60,9 @@ class KasaneApplication : Application() {
     lateinit var metadata: cord.kasane.music.metadata.MetadataRepository
         private set
 
+    lateinit var updates: cord.kasane.music.update.AndroidUpdates
+        private set
+
     override fun onCreate() {
         super.onCreate()
         settings = cord.kasane.music.settings.AppSettings(this)
@@ -128,6 +131,13 @@ class KasaneApplication : Application() {
             canRecordHistory = { settings.historyRecordingEnabled(accountRepository.session() != null) },
             historyOwner = { if (accountRepository.session() != null) "account" else "guest" },
         )
+
+        updates = cord.kasane.music.update.AndroidUpdates.create(
+            this, httpClient, applicationScope,
+            readLastCheckMs = settings::readUpdateCheckMs,
+            writeLastCheckMs = settings::writeUpdateCheckMs)
+        // Offline Only blocks every outgoing request — never burn the OTA check behind it.
+        if (!settings.offlineOnly.value) updates.checkOnStart()
 
         applicationScope.launch {
             settings.connectEnabled.collect { enabled ->

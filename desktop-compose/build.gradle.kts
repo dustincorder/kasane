@@ -31,6 +31,30 @@ dependencies {
 val packagingJdk = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }
     .get().metadata.installationPath.asFile
 
+// Build variant: `-PkasaneChannel=nightly` produces the parallel-install nightly build
+// (own package name, XDG dirs and OTA channel — see `BuildInfo` and DEVELOPMENT.md).
+val kasaneChannel = (project.findProperty("kasaneChannel") as? String)?.lowercase() ?: "stable"
+val isNightly = kasaneChannel == "nightly"
+val kasaneVersion = "0.2.1-alpha"
+val kasanePackage = if (isNightly) "kasane-nightly" else "kasane-compose"
+
+/** Bakes channel/version into `kasane-build.properties` on the runtime classpath. */
+val generateBuildInfo = tasks.register("generateBuildInfo") {
+    inputs.property("channel", kasaneChannel)
+    inputs.property("version", kasaneVersion)
+    inputs.property("package", kasanePackage)
+    val outDir = layout.buildDirectory.dir("generated/buildInfo/resources")
+    outputs.dir(outDir)
+    doLast {
+        File(outDir.get().asFile, "kasane-build.properties").writeText(
+            "channel=$kasaneChannel\nversion=$kasaneVersion\npackage=$kasanePackage\n"
+        )
+    }
+}
+sourceSets.main { resources.srcDir(layout.buildDirectory.dir("generated/buildInfo/resources")) }
+tasks.named("processResources") { dependsOn(generateBuildInfo) }
+tasks.named("processTestResources") { dependsOn(generateBuildInfo) }
+
 compose.desktop {
     application {
         mainClass = "cord.kasane.desktop.MainKt"
@@ -38,8 +62,15 @@ compose.desktop {
         javaHome = packagingJdk.absolutePath
         nativeDistributions {
             targetFormats(TargetFormat.AppImage)
-            packageName = "kasane-compose"
-            packageVersion = "0.2.0-alpha"
+            packageName = kasanePackage
+            packageVersion = kasaneVersion
+            linux {
+                // Nightly icon slot: `assets/logo-nightly.png` (from @designer); the stable
+                // spiral is used until that file exists.
+                val nightlyIcon = rootDir.resolve("../assets/logo-nightly.png")
+                iconFile.set(if (isNightly && nightlyIcon.exists()) nightlyIcon
+                    else rootDir.resolve("../assets/logo.png"))
+            }
         }
     }
 }
@@ -50,13 +81,13 @@ compose.desktop {
 // helpers and launch scripts can run the JVM directly and skip the buggy launcher entirely.
 tasks.matching { it.name == "createDistributable" }.configureEach {
     doLast {
-        val appDir = layout.buildDirectory.dir("compose/binaries/main/app/kasane-compose").get().asFile
+        val appDir = layout.buildDirectory.dir("compose/binaries/main/app/$kasanePackage").get().asFile
         val javaBin = File(appDir, "lib/runtime/bin/java")
         javaBin.parentFile.mkdirs()
         File(packagingJdk, "bin/java").copyTo(javaBin, overwrite = true)
         javaBin.setExecutable(true)
         // Desktop entry points use this script instead of the crashing ELF launcher.
-        val script = File(appDir, "bin/kasane-compose-java")
+        val script = File(appDir, "bin/$kasanePackage-java")
         script.writeText(
             """
             |#!/bin/sh

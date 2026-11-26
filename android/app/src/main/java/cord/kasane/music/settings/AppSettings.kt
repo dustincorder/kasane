@@ -85,6 +85,10 @@ class AppSettings(context: Context) : cord.kasane.music.auth.SessionModeStore {
     fun setEnrichMetadata(value: Boolean) { prefs.edit().putBoolean(ENRICH_METADATA, value).apply(); enrichMeta.value = value }
     fun setAutoplay(value: Boolean) { prefs.edit().putBoolean(AUTOPLAY, value).apply(); autoplay.value = value }
 
+    /** Timestamp of the last OTA check — backs the shared checker's rate limit. */
+    fun readUpdateCheckMs(): Long = prefs.getLong(LAST_UPDATE_CHECK_MS, 0)
+    fun writeUpdateCheckMs(ms: Long) { prefs.edit().putLong(LAST_UPDATE_CHECK_MS, ms).apply() }
+
     /** [SessionModeStore]: guest stays guest across restarts (shared SessionPolicy). */
     override fun read(): cord.kasane.music.auth.SessionMode =
         runCatching { cord.kasane.music.auth.SessionMode.valueOf(prefs.getString(SESSION_MODE, null).orEmpty()) }
@@ -115,5 +119,6 @@ class AppSettings(context: Context) : cord.kasane.music.auth.SessionModeStore {
         private const val ENRICH_METADATA = "enrichMetadata"
         private const val AUTOPLAY = "autoplay"
         private const val SESSION_MODE = "sessionMode"
+        private const val LAST_UPDATE_CHECK_MS = "lastUpdateCheckMs"
     }
 }

@@ -97,17 +97,30 @@ android {
         }
     }
 
+    // Nightly is a build TYPE (not a flavor) so `assembleRelease` keeps producing
+    // the stable APK while `assembleNightlyRelease` produces a co-installable
+    // cord.kasane.music.nightly build signed with the same release key.
     buildTypes {
         getByName("debug") {
             applicationIdSuffix = ".dev"
             isDebuggable = true
             isMinifyEnabled = false
+            buildConfigField("String", "UPDATE_CHANNEL", "\"nightly\"")
         }
         getByName("release") {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
+            buildConfigField("String", "UPDATE_CHANNEL", "\"stable\"")
+        }
+        create("nightlyRelease") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".nightly"
+            matchingFallbacks += "release"
+            buildConfigField("String", "UPDATE_CHANNEL", "\"nightly\"")
         }
     }
+
+    sourceSets.getByName("nightlyRelease").res.srcDir("src/nightly/res")
 }
 
 // Gradle's connected-test runner installs its target and test APKs and may

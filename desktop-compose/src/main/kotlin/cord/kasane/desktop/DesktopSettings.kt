@@ -29,6 +29,8 @@ data class Preferences(
     val onboardingDone: Boolean = false,
     /** Signed-in / guest / undecided — persisted so "Continue as a guest" stays guest across restarts. */
     val sessionMode: cord.kasane.music.auth.SessionMode = cord.kasane.music.auth.SessionMode.UNDECIDED,
+    /** Last update check (auto or manual); the daily auto-check waits until this ages out. */
+    val lastUpdateCheckMs: Long = 0,
 )
 
 class DesktopSettings(private val file: File) {
